@@ -8,6 +8,8 @@ Program Windows untuk memangkas dan mencetak foto (10×15 cm dan format lain), d
 
 ## Screenshots
 
+<p align="center"><img src="docs/promo.gif" alt="PhotoCrop animated overview" width="760"></p>
+
 ![PhotoCrop main window: crop frame on a demo photo](docs/screenshots/main-window.png)
 
 ![Colour adjustments page](docs/screenshots/color-adjustments.png)

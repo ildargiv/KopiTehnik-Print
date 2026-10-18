@@ -8,6 +8,8 @@ Programa para Windows para recortar e imprimir fotos (10×15 cm y otros formatos
 
 ## Screenshots
 
+<p align="center"><img src="docs/promo.gif" alt="PhotoCrop animated overview" width="760"></p>
+
 ![PhotoCrop main window: crop frame on a demo photo](docs/screenshots/main-window.png)
 
 ![Colour adjustments page](docs/screenshots/color-adjustments.png)

@@ -8,6 +8,8 @@ Chương trình Windows để cắt và in ảnh (10×15 cm và các khổ khác
 
 ## Screenshots
 
+<p align="center"><img src="docs/promo.gif" alt="PhotoCrop animated overview" width="760"></p>
+
 ![PhotoCrop main window: crop frame on a demo photo](docs/screenshots/main-window.png)
 
 ![Colour adjustments page](docs/screenshots/color-adjustments.png)
