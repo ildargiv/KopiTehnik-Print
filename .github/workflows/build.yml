@@ -1,0 +1,49 @@
+name: build
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Build PhotoCropQt.exe and PhotoCropAgent.exe
+        run: |
+          pyinstaller --noconfirm PhotoCropQt.spec
+          pyinstaller --noconfirm PhotoCropAgent.spec
+
+      - name: Check build output
+        run: dir dist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: PhotoCrop-windows
+          path: |
+            dist/PhotoCropQt.exe
+            dist/PhotoCropAgent.exe
+
+      - name: Publish GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/PhotoCropQt.exe
+            dist/PhotoCropAgent.exe
+          body_path: RELEASE_NOTES.md

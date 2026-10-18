@@ -1,0 +1,7 @@
+Pillow
+pillow-heif
+numpy
+opencv-python
+onnxruntime
+PySide6
+pyinstaller
