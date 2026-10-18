@@ -6,6 +6,17 @@
 
 **License: not selected (ยังไม่ได้เลือกใบอนุญาต)**
 
+## Screenshots
+
+![PhotoCrop main window: crop frame on a demo photo](docs/screenshots/main-window.png)
+
+![Colour adjustments page](docs/screenshots/color-adjustments.png)
+
+![Print sheet with 4 photos per sheet](docs/screenshots/print-sheet.png)
+
+| Arabic (right-to-left) | Japanese |
+|---|---|
+| ![Arabic interface](docs/screenshots/main-window-arabic-rtl.png) | ![Japanese interface](docs/screenshots/main-window-japanese.png) |
 ## คุณสมบัติ
 
 - ขนาดพิมพ์: 10×15, 9×13, 13×18, 15×21, 20×30, 30×40 ซม., A5, A4, A3, A3+, A2 (ครอปให้เต็มแผ่นหรือใส่รูปทั้งภาพ)

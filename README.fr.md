@@ -6,6 +6,17 @@ Programme Windows pour recadrer et imprimer des photos (10×15 cm et autres form
 
 **License: not selected (aucune licence choisie).**
 
+## Screenshots
+
+![PhotoCrop main window: crop frame on a demo photo](docs/screenshots/main-window.png)
+
+![Colour adjustments page](docs/screenshots/color-adjustments.png)
+
+![Print sheet with 4 photos per sheet](docs/screenshots/print-sheet.png)
+
+| Arabic (right-to-left) | Japanese |
+|---|---|
+| ![Arabic interface](docs/screenshots/main-window-arabic-rtl.png) | ![Japanese interface](docs/screenshots/main-window-japanese.png) |
 ## Fonctionnalités
 
 - Formats d'impression : 10×15, 9×13, 13×18, 15×21, 20×30, 30×40 cm, A5, A4, A3, A3+, A2 (recadrer pour remplir la feuille ou ajuster la photo entière).

@@ -6,6 +6,17 @@
 
 **License: not selected (लाइसेंस चुना नहीं गया)।**
 
+## Screenshots
+
+![PhotoCrop main window: crop frame on a demo photo](docs/screenshots/main-window.png)
+
+![Colour adjustments page](docs/screenshots/color-adjustments.png)
+
+![Print sheet with 4 photos per sheet](docs/screenshots/print-sheet.png)
+
+| Arabic (right-to-left) | Japanese |
+|---|---|
+| ![Arabic interface](docs/screenshots/main-window-arabic-rtl.png) | ![Japanese interface](docs/screenshots/main-window-japanese.png) |
 ## विशेषताएँ
 
 - प्रिंट आकार: 10×15, 9×13, 13×18, 15×21, 20×30, 30×40 सेमी, A5, A4, A3, A3+, A2 (शीट भरने के लिए क्रॉप या पूरी फ़ोटो फ़िट)।

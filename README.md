@@ -6,6 +6,17 @@ A Windows program for cropping and printing photos (10×15 cm and other formats)
 
 **License: not selected.**
 
+## Screenshots
+
+![PhotoCrop main window: crop frame on a demo photo](docs/screenshots/main-window.png)
+
+![Colour adjustments page](docs/screenshots/color-adjustments.png)
+
+![Print sheet with 4 photos per sheet](docs/screenshots/print-sheet.png)
+
+| Arabic (right-to-left) | Japanese |
+|---|---|
+| ![Arabic interface](docs/screenshots/main-window-arabic-rtl.png) | ![Japanese interface](docs/screenshots/main-window-japanese.png) |
 ## Features
 
 - Print formats: 10×15, 9×13, 13×18, 15×21, 20×30, 30×40 cm, A5, A4, A3, A3+, A2 (crop to fill the sheet or fit the whole photo).
@@ -19,6 +30,7 @@ A Windows program for cropping and printing photos (10×15 cm and other formats)
 
 ## Installation
 
+- Easiest: download `PhotoCropQt.exe` (GUI) or `PhotoCropAgent.exe` (AI-agent / MCP) from the [Releases page](https://github.com/ildargiv/KopiTehnik-Print/releases/latest) and run it. No Python needed.
 - Windows with Python 3.9+ ("Add python.exe to PATH"), or run `install.bat`: it installs Python (if missing), the packages and creates shortcuts. Internet is required.
 - Manual install: `pip install -r requirements.txt`.
 

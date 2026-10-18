@@ -6,6 +6,17 @@ Program dla Windows do kadrowania i drukowania zdjęć (10×15 cm i inne formaty
 
 **License: not selected (nie wybrano licencji).**
 
+## Screenshots
+
+![PhotoCrop main window: crop frame on a demo photo](docs/screenshots/main-window.png)
+
+![Colour adjustments page](docs/screenshots/color-adjustments.png)
+
+![Print sheet with 4 photos per sheet](docs/screenshots/print-sheet.png)
+
+| Arabic (right-to-left) | Japanese |
+|---|---|
+| ![Arabic interface](docs/screenshots/main-window-arabic-rtl.png) | ![Japanese interface](docs/screenshots/main-window-japanese.png) |
 ## Funkcje
 
 - Formaty wydruku: 10×15, 9×13, 13×18, 15×21, 20×30, 30×40 cm, A5, A4, A3, A3+, A2 (kadrowanie z wypełnieniem arkusza lub dopasowanie całego zdjęcia).

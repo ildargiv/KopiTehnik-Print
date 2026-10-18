@@ -6,6 +6,17 @@
 
 **License: not selected（未选择许可证）。**
 
+## Screenshots
+
+![PhotoCrop main window: crop frame on a demo photo](docs/screenshots/main-window.png)
+
+![Colour adjustments page](docs/screenshots/color-adjustments.png)
+
+![Print sheet with 4 photos per sheet](docs/screenshots/print-sheet.png)
+
+| Arabic (right-to-left) | Japanese |
+|---|---|
+| ![Arabic interface](docs/screenshots/main-window-arabic-rtl.png) | ![Japanese interface](docs/screenshots/main-window-japanese.png) |
 ## 功能
 
 - 打印规格：10×15、9×13、13×18、15×21、20×30、30×40 厘米，A5、A4、A3、A3+、A2（裁剪铺满纸张或完整适应）。
