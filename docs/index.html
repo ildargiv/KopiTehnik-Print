@@ -5,267 +5,304 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>KopiTehnik Print</title>
 <meta name="description" content="KopiTehnik Print: crop, colour-correct and print photos on Windows, with a smart frame, 15 interface languages and an AI agent mode.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
 <style>
-/* Layout concept: a print-shop proof sheet. Crop marks, registration dots and a live crop frame carry the motion. */
+/* One design language with the app: its own theme tokens (brand, dark, light, mono, tatar, mari), Segoe UI first, 13px-grade controls scaled up. */
 :root{
-  /* PhotoCrop "Brand" theme: graphite, orange = main action, cyan = selection, yellow = crop frame */
-  --bg:#1b1c1f; --surface:#232529; --raised:#2d3035; --ink:#eceef1; --muted:#9aa0aa; --line:#3a3e45;
-  --mag:#ff7a1a; --cyan:#2ec4e6; --yel:#ffd21f; --on-mag:#1a1205; --canvas:#111214; --code-bg:#111214;
-  --f-display:"Segoe UI Variable Text","Segoe UI",Inter,"Noto Sans",system-ui,sans-serif;
-  --f-body:"Segoe UI Variable Text","Segoe UI",Inter,"Noto Sans",system-ui,sans-serif;
-  --f-mono:"Cascadia Mono",Consolas,ui-monospace,monospace;
-  --shadow:0 18px 50px -24px rgba(0,0,0,.8);
+  --bg:#1b1c1f; --surface:#232529; --raised:#2d3035; --hover:#383c42; --border:#3a3e45;
+  --text:#eceef1; --muted:#9aa0aa; --accent:#ff7a1a; --accent-text:#1a1205; --select:#2ec4e6;
+  --canvas:#111214; --frame:#ffd21f; --ok:#3ccf7a;
+  --c1:#00b7eb; --c2:#ff7a1a; --c3:#ffd400;
+  --font:"Segoe UI Variable Text","Segoe UI","Inter","Noto Sans",system-ui,sans-serif;
+  --mono:ui-monospace,"Cascadia Mono",Consolas,monospace;
   color-scheme:dark;
 }
-@media (prefers-color-scheme:light){:root:not([data-theme="dark"]){
-  --bg:#eef0f3; --surface:#ffffff; --raised:#f1f3f6; --ink:#1c1f24; --muted:#667085; --line:#d9dde3;
-  --mag:#ff7a1a; --cyan:#0b8fb0; --yel:#e0a800; --on-mag:#1a1205; --canvas:#c9ced6; --code-bg:#1b1c1f;
-  --shadow:0 18px 50px -24px rgba(28,31,36,.35); color-scheme:light;}}
-:root[data-theme="light"]{
-  --bg:#eef0f3; --surface:#ffffff; --raised:#f1f3f6; --ink:#1c1f24; --muted:#667085; --line:#d9dde3;
-  --mag:#ff7a1a; --cyan:#0b8fb0; --yel:#e0a800; --on-mag:#1a1205; --canvas:#c9ced6; --code-bg:#1b1c1f;
-  --shadow:0 18px 50px -24px rgba(28,31,36,.35); color-scheme:light;}
+:root[data-theme="dark"]{--bg:#1e1f22;--surface:#26282c;--raised:#303338;--hover:#3a3e44;--border:#3b3f46;--text:#e8eaed;--muted:#989ea8;--accent:#4f8cff;--accent-text:#ffffff;--select:#4f8cff;--canvas:#131416;--frame:#ffd21f}
+:root[data-theme="light"]{--bg:#eef0f3;--surface:#ffffff;--raised:#f1f3f6;--hover:#e6e9ee;--border:#d9dde3;--text:#1c1f24;--muted:#667085;--accent:#2f6bff;--accent-text:#ffffff;--select:#2f6bff;--canvas:#c9ced6;--frame:#ffc400;--ok:#1f9d57;color-scheme:light}
+:root[data-theme="mono"]{--bg:#202020;--surface:#2a2a2a;--raised:#353535;--hover:#424242;--border:#454545;--text:#f2f2f2;--muted:#9d9d9d;--accent:#f2f2f2;--accent-text:#111111;--select:#ffffff;--canvas:#6e6e6e;--frame:#ffffff;--c1:#bbb;--c2:#eee;--c3:#888}
+:root[data-theme="tatar"]{--bg:#10201b;--surface:#162a24;--raised:#1d352d;--hover:#264439;--border:#2c4a3f;--text:#eef4ef;--muted:#8fb0a2;--accent:#1fae73;--accent-text:#04170e;--select:#3ccfd0;--canvas:#0b1411;--frame:#ffcf4a;--ok:#4fd98a;--c1:#2fbfc2;--c2:#d9453a;--c3:#f2c14e}
+:root[data-theme="mari"]{--bg:#f3ecdf;--surface:#fffbf3;--raised:#f7f0e3;--hover:#ecdfca;--border:#dccfb8;--text:#2a1f1c;--muted:#7a6a60;--accent:#c4262e;--accent-text:#ffffff;--select:#8c1d24;--canvas:#c9c1b3;--frame:#e5242b;--ok:#2e8b57;--c1:#c4262e;--c2:#2a1f1c;--c3:#c4262e;color-scheme:light}
 
 *{box-sizing:border-box}
 html{scroll-behavior:smooth}
-body{background:var(--bg);color:var(--ink);font-family:var(--f-body);font-size:17px;line-height:1.55;
-  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:0;overflow-x:hidden}
-.wrap{max-width:1120px;margin:0 auto}
+body{background:var(--bg);color:var(--text);font-family:var(--font);font-size:16px;line-height:1.55;margin:0;
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:0;overflow-x:hidden;transition:background .35s,color .35s}
+.wrap{max-width:1180px;margin:0 auto}
 a{color:inherit}
-h1,h2,h3{font-family:var(--f-display);line-height:1.02;margin:0;text-wrap:balance;letter-spacing:-.02em}
+h1,h2,h3{margin:0;line-height:1.08;text-wrap:balance;letter-spacing:-.022em;font-weight:700}
 p{margin:0;text-wrap:pretty}
-.mono{font-family:var(--f-mono);font-size:.78rem;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
-:focus-visible{outline:2px solid var(--mag);outline-offset:3px;border-radius:4px}
+.muted{color:var(--muted)}
+.label{font-size:12px;font-weight:600;color:var(--muted);letter-spacing:.02em}
+:focus-visible{outline:2px solid var(--select);outline-offset:3px;border-radius:6px}
 
-/* nav */
-nav{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:20px 0}
-.brand{display:flex;align-items:center;gap:10px;font-weight:700;font-size:1.05rem;text-decoration:none;letter-spacing:-.01em}
-.dots{display:grid;grid-template-columns:repeat(2,9px);gap:3px}
-.dots i{width:9px;height:9px;border-radius:50%}
-.dots i:nth-child(1){background:var(--cyan)}.dots i:nth-child(2){background:var(--mag)}
-.dots i:nth-child(3){background:var(--yel)}.dots i:nth-child(4){background:var(--ink)}
-nav .links{display:flex;gap:22px;font-size:.95rem}
-nav .links a{text-decoration:none;color:var(--muted)}
-nav .links a:hover{color:var(--ink)}
+/* top bar */
+.topbar{display:flex;align-items:center;gap:18px;padding:14px 0;border-bottom:1px solid var(--border);flex-wrap:wrap}
+.brand{display:flex;align-items:center;gap:10px;font-weight:600;font-size:15px;text-decoration:none}
+.logo{position:relative;width:26px;height:26px;flex:none}
+.logo i{position:absolute;width:14px;height:14px;border-radius:50%;opacity:.85}
+.logo i:nth-child(1){left:1px;top:1px;background:var(--c1)}
+.logo i:nth-child(2){left:11px;top:1px;background:var(--c2)}
+.logo i:nth-child(3){left:6px;top:10px;background:var(--c3)}
+.topbar nav{display:flex;gap:4px;margin-left:8px}
+.topbar nav a{text-decoration:none;color:var(--muted);padding:6px 12px;border-radius:9px;font-size:14px}
+.topbar nav a:hover{background:var(--hover);color:var(--text)}
+.themes{margin-left:auto;display:flex;gap:4px;padding:3px;border:1px solid var(--border);background:var(--raised);border-radius:11px;flex-wrap:wrap}
+.themes button{font:inherit;font-size:12.5px;cursor:pointer;border:1px solid transparent;background:transparent;color:var(--muted);padding:5px 10px;border-radius:8px;display:flex;align-items:center;gap:6px}
+.themes button:hover{color:var(--text)}
+.themes button[aria-pressed="true"]{background:var(--surface);border-color:var(--border);color:var(--text)}
+.themes .sw{width:10px;height:10px;border-radius:50%;border:1px solid var(--border)}
+
+/* buttons, as in the app */
+.btn{font:inherit;display:inline-flex;align-items:center;gap:8px;padding:10px 18px;border-radius:9px;border:1px solid var(--border);background:var(--raised);color:var(--text);font-weight:500;text-decoration:none;cursor:pointer;transition:background .2s,transform .2s}
+.btn:hover{background:var(--hover)}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-text);font-weight:600}
+.btn.primary:hover{filter:brightness(1.1)}
+.btn.big{padding:13px 22px;border-radius:11px;font-size:15px}
+.seg{display:inline-flex;padding:3px;gap:2px;background:var(--raised);border:1px solid var(--border);border-radius:9px}
+.seg span{padding:4px 11px;border-radius:7px;color:var(--muted);font-size:12.5px;border:1px solid transparent;transition:all .25s}
+.seg span.on{background:var(--surface);border-color:var(--border);color:var(--text)}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:13px}
 
 /* hero */
-.hero{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.08fr);gap:48px;align-items:center;padding:36px 0 72px}
-.hero h1{font-size:clamp(2.5rem,5.6vw,4.6rem);font-weight:700}
-.hero h1 em{font-style:normal;color:var(--mag)}
-.hero p.lead{margin-top:22px;font-size:1.15rem;color:var(--muted);max-width:34ch}
-.cta{display:flex;flex-wrap:wrap;gap:12px;margin-top:30px}
-.btn{display:inline-flex;align-items:center;gap:10px;padding:14px 22px;border-radius:999px;font-weight:700;text-decoration:none;
-  border:2px solid var(--ink);transition:transform .2s,background .2s,color .2s}
-.btn.primary{background:var(--mag);border-color:var(--mag);color:var(--on-mag)}
-.btn:hover{transform:translateY(-2px)}
-.btn.ghost:hover{background:var(--ink);color:var(--bg)}
-.fine{margin-top:16px;font-size:.88rem;color:var(--muted)}
+.hero{display:grid;grid-template-columns:minmax(0,.8fr) minmax(0,1.6fr);gap:36px;align-items:center;padding:56px 0 76px}
+.hero h1{font-size:clamp(2.3rem,4.2vw,3.6rem)}
+.hero h1 em{font-style:normal;color:var(--accent)}
+.hero .lead{margin-top:20px;font-size:1.1rem;color:var(--muted);max-width:36ch}
+.cta{display:flex;flex-wrap:wrap;gap:10px;margin-top:28px}
+.fine{margin-top:14px;font-size:13px;color:var(--muted);max-width:44ch}
 
-.stage{position:relative;border-radius:10px;background:var(--surface);box-shadow:var(--shadow);padding:clamp(14px,2.4vw,26px)}
-.stage .marks{position:absolute;inset:0;pointer-events:none}
-.stage .marks i{position:absolute;width:18px;height:18px;border-color:var(--ink);border-style:solid;border-width:0;opacity:.7}
-.stage .marks i:nth-child(1){left:6px;top:6px;border-left-width:1.5px;border-top-width:1.5px}
-.stage .marks i:nth-child(2){right:6px;top:6px;border-right-width:1.5px;border-top-width:1.5px}
-.stage .marks i:nth-child(3){left:6px;bottom:6px;border-left-width:1.5px;border-bottom-width:1.5px}
-.stage .marks i:nth-child(4){right:6px;bottom:6px;border-right-width:1.5px;border-bottom-width:1.5px}
-.stage svg{display:block;width:100%;height:auto;border-radius:2px}
-.stage-bar{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-top:14px;flex-wrap:wrap}
-.chip-fmt{font-family:var(--f-mono);font-weight:500;font-size:.95rem;background:var(--mag);color:var(--on-mag);padding:5px 12px;border-radius:999px;min-width:8.2ch;text-align:center}
+/* the app window mock */
+.app{border:1px solid var(--border);border-radius:13px;background:var(--bg);overflow:hidden;box-shadow:0 30px 80px -30px rgba(0,0,0,.6);font-size:12px}
+.app .tb{display:flex;align-items:center;gap:10px;padding:9px 12px;border-bottom:1px solid var(--border);flex-wrap:wrap}
+.app .tb .brand{font-size:13px}
+.app .tb .open{background:var(--accent);color:var(--accent-text);padding:5px 12px;border-radius:8px;font-weight:600}
+.app .tb .pap{background:var(--raised);border:1px solid var(--border);border-radius:8px;padding:4px 10px;min-width:92px;display:flex;justify-content:space-between;gap:10px}
+.app .tb .grow{margin-left:auto}
+.app .body{display:grid;grid-template-columns:118px minmax(0,1fr) 206px;gap:10px;padding:10px;min-height:330px}
+.thumbs{display:grid;grid-template-columns:1fr 1fr;gap:6px;align-content:start}
+.thumb{position:relative;aspect-ratio:1;border-radius:7px;overflow:hidden;background:var(--surface);border:2px solid transparent}
+.thumb.sel{border-color:var(--select)}
+.thumb svg{display:block;width:100%;height:100%}
+.thumb b{position:absolute;left:5px;top:5px;width:15px;height:15px;border-radius:50%;background:var(--accent);display:grid;place-items:center}
+.thumb b::after{content:"";width:6px;height:3px;border-left:1.6px solid var(--accent-text);border-bottom:1.6px solid var(--accent-text);transform:translateY(-1px) rotate(-45deg)}
+.canvas{background:var(--canvas);border-radius:9px;display:grid;place-items:center;min-width:0;padding:10px;position:relative}
+.canvas svg{display:block;width:100%;height:auto;max-height:100%}
+.printpill{position:absolute;right:8px;top:8px;background:var(--surface);border:1px solid var(--border);padding:4px 10px;border-radius:9px;font-size:11.5px}
+.side{display:grid;gap:8px;align-content:start;min-width:0}
+.side .card{padding:9px 10px;display:grid;gap:6px;border-radius:10px}
+.side .seg span{padding:4px 8px}
+.side .row{display:flex;justify-content:space-between;align-items:center;gap:8px}
+.tog{width:26px;height:15px;border-radius:8px;background:var(--hover);position:relative;flex:none;transition:background .3s}
+.tog::after{content:"";position:absolute;left:2px;top:2px;width:11px;height:11px;border-radius:50%;background:#fff;transition:transform .3s}
+.tog.on{background:var(--accent)}.tog.on::after{transform:translateX(11px)}
+.printbtn{background:var(--accent);color:var(--accent-text);border-radius:9px;padding:9px;text-align:center;font-weight:600;font-size:13px;animation:press 5s ease-in-out infinite}
+@keyframes press{0%,86%,100%{transform:none;filter:none}92%{transform:scale(.97);filter:brightness(1.15)}}
+.status{display:flex;gap:16px;padding:0 12px 9px;color:var(--muted);font-size:11px;flex-wrap:wrap}
+.status i{display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--ok);margin-right:6px}
 
-/* marquee */
-.ticker{border-block:1.5px solid var(--ink);overflow:hidden;white-space:nowrap;padding:12px 0;margin:0 calc(-1 * max(16px,env(safe-area-inset-left,0px)))}
-.ticker .track{display:inline-flex;gap:34px;padding-left:34px;animation:slide 38s linear infinite;will-change:transform}
-.ticker span{font-weight:700;font-size:1.25rem;letter-spacing:-.01em}
-.ticker span::after{content:"";display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--mag);margin-left:34px;vertical-align:middle}
-@keyframes slide{to{transform:translateX(-50%)}}
-
-section{padding:88px 0 0}
+/* sections */
+section{padding:84px 0 0}
 .sec-head{max-width:680px}
-.sec-head h2{font-size:clamp(2rem,4.4vw,3.2rem);font-weight:700}
-.sec-head p{margin-top:14px;color:var(--muted)}
+.sec-head h2{font-size:clamp(1.8rem,3.6vw,2.6rem);margin-top:10px}
+.sec-head p{margin-top:12px;color:var(--muted)}
 
 /* steps */
-.steps{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:20px;margin-top:40px}
-.step{background:var(--surface);border:1.5px solid var(--line);border-radius:10px;padding:20px;display:flex;flex-direction:column;gap:16px;min-width:0}
-.step .vis{aspect-ratio:3/2;border-radius:3px;background:var(--bg);overflow:hidden;position:relative}
-.step h3{font-size:1.5rem;font-weight:700}
-.step p{color:var(--muted);font-size:.98rem}
+.steps{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px;margin-top:36px}
+.step{padding:16px;display:flex;flex-direction:column;gap:14px;min-width:0}
+.step .vis{aspect-ratio:3/2;border-radius:9px;background:var(--canvas);overflow:hidden;position:relative}
+.step h3{font-size:1.3rem}
+.step p{color:var(--muted);font-size:.95rem}
 .step .tag{display:flex;justify-content:space-between}
-
-/* adjust visual */
 .adj{display:grid;grid-template-rows:1fr auto;height:100%}
 .adj .img{position:relative;overflow:hidden}
 .adj .img svg{position:absolute;inset:0;width:100%;height:100%;animation:grade 6s ease-in-out infinite}
 @keyframes grade{0%,100%{filter:brightness(.82) contrast(.9) saturate(.7)}50%{filter:brightness(1.08) contrast(1.12) saturate(1.35)}}
-.sliders{display:grid;gap:7px;padding:10px 12px;background:var(--surface);border-top:1.5px solid var(--line)}
-.sl{display:grid;grid-template-columns:78px 1fr;gap:10px;align-items:center;font-family:var(--f-mono);font-size:.68rem;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}
-.sl b{position:relative;display:block;height:3px;background:var(--line);border-radius:2px}
-.sl b::after{content:"";position:absolute;top:50%;left:0;width:12px;height:12px;margin-top:-6px;border-radius:50%;background:var(--mag);
-  animation:knob 6s ease-in-out infinite}
-.sl:nth-child(2) b::after{animation-delay:-.8s}.sl:nth-child(3) b::after{animation-delay:-1.6s}
+.sliders{display:grid;gap:8px;padding:10px 12px;background:var(--surface);border-top:1px solid var(--border)}
+.sl{display:grid;grid-template-columns:70px 1fr;gap:10px;align-items:center;font-size:11.5px;color:var(--muted)}
+.sl b{position:relative;display:block;height:4px;background:var(--hover);border-radius:2px}
+.sl b::before{content:"";position:absolute;left:0;top:0;bottom:0;border-radius:2px;background:var(--select);animation:fill 6s ease-in-out infinite}
+.sl b::after{content:"";position:absolute;top:50%;left:0;width:14px;height:14px;margin-top:-7px;border-radius:50%;background:#fff;border:1px solid rgba(0,0,0,.28);animation:knob 6s ease-in-out infinite}
+.sl:nth-child(2) b::before,.sl:nth-child(2) b::after{animation-delay:-.8s}.sl:nth-child(3) b::before,.sl:nth-child(3) b::after{animation-delay:-1.6s}
 @keyframes knob{0%,100%{left:12%}50%{left:86%}}
-
-/* sheet visual */
-.sheet{position:absolute;inset:8% 22%;background:#fff;box-shadow:0 6px 22px -8px rgba(0,0,0,.45);border-radius:2px}
-.sheet .slot{position:absolute;width:43%;height:43%;background:linear-gradient(#9fd3ee,#e8f4f9 55%,#2c5b6a 56%);border-radius:1px;transform-origin:center;
-  animation:land 6s cubic-bezier(.2,.8,.2,1) infinite}
-.sheet .slot:nth-child(1){left:5%;top:5%}.sheet .slot:nth-child(2){right:5%;top:5%;animation-delay:.25s}
-.sheet .slot:nth-child(3){left:5%;bottom:5%;animation-delay:.5s}.sheet .slot:nth-child(4){right:5%;bottom:5%;animation-delay:.75s}
-@keyframes land{0%{transform:scale(1.5) translateY(-30%);opacity:0}12%{opacity:1}22%,86%{transform:none;opacity:1}100%{opacity:0}}
-.ok{position:absolute;right:8%;bottom:7%;display:flex;gap:6px;align-items:center;font-family:var(--f-mono);font-size:.68rem;text-transform:uppercase;
-  letter-spacing:.06em;background:var(--ink);color:var(--bg);padding:4px 9px;border-radius:999px;animation:pop 6s ease-in-out infinite}
+@keyframes fill{0%,100%{width:12%}50%{width:86%}}
+.sheet{position:absolute;inset:7% 24%;background:#fff;box-shadow:0 6px 22px -8px rgba(0,0,0,.6);border-radius:2px}
+.sheet .slot{position:absolute;width:50%;height:50%;background:linear-gradient(#4f86c8,#c9b8a2 55%,#1d3d44 56%);animation:land 6s cubic-bezier(.2,.8,.2,1) infinite}
+.sheet .slot:nth-child(1){left:0;top:0}.sheet .slot:nth-child(2){right:0;top:0;animation-delay:.25s}
+.sheet .slot:nth-child(3){left:0;bottom:0;animation-delay:.5s}.sheet .slot:nth-child(4){right:0;bottom:0;animation-delay:.75s}
+@keyframes land{0%{transform:scale(1.4) translateY(-30%);opacity:0}12%{opacity:1}22%,86%{transform:none;opacity:1}100%{opacity:0}}
+.ok{position:absolute;right:8px;bottom:8px;display:flex;gap:6px;align-items:center;font-size:11.5px;font-weight:600;background:var(--accent);color:var(--accent-text);padding:4px 10px;border-radius:9px;animation:pop 6s ease-in-out infinite}
 @keyframes pop{0%,30%{opacity:0;transform:translateY(6px)}40%,86%{opacity:1;transform:none}100%{opacity:0}}
 
 /* agent */
-.agent{display:grid;grid-template-columns:minmax(0,.9fr) minmax(0,1.1fr);gap:40px;align-items:start;margin-top:40px}
-.pipe{display:grid;gap:8px;counter-reset:p}
-.pipe div{font-family:var(--f-mono);font-size:.95rem;padding:11px 14px;border:1.5px solid var(--line);border-radius:10px;background:var(--surface);
-  display:flex;justify-content:space-between;gap:12px;animation:lit 8s linear infinite;min-width:0}
-.pipe div span:last-child{color:var(--muted);font-size:.8rem;text-align:right}
+.agent{display:grid;grid-template-columns:minmax(0,.9fr) minmax(0,1.1fr);gap:28px;align-items:start;margin-top:36px}
+.pipe{display:grid;gap:8px}
+.pipe div{font-family:var(--mono);font-size:14px;padding:10px 14px;border:1px solid var(--border);border-radius:9px;background:var(--surface);display:flex;justify-content:space-between;gap:12px;animation:lit 8s linear infinite;min-width:0}
+.pipe div span:last-child{color:var(--muted);font-family:var(--font);font-size:12.5px;text-align:right}
 .pipe div:nth-child(1){animation-delay:0s}.pipe div:nth-child(2){animation-delay:1s}.pipe div:nth-child(3){animation-delay:2s}
-.pipe div:nth-child(4){animation-delay:3s}.pipe div:nth-child(5){animation-delay:4s}.pipe div:nth-child(6){animation-delay:5s}
-.pipe div:nth-child(7){animation-delay:6s}
-@keyframes lit{0%{border-color:var(--mag);background:color-mix(in srgb,var(--mag) 14%,var(--surface))}12.5%,100%{border-color:var(--line);background:var(--surface)}}
-.code{background:var(--code-bg);color:#d9e4e8;border-radius:10px;padding:18px 20px;font-family:var(--f-mono);font-size:.85rem;line-height:1.7;overflow-x:auto;box-shadow:var(--shadow)}
-.code .c{color:#6e8791}.code .k{color:#ff9a4d}.code .s{color:#7fd6f2}
-.caret{display:inline-block;width:.55em;height:1.05em;background:#ff9a4d;vertical-align:text-bottom;animation:blink 1s steps(1) infinite}
+.pipe div:nth-child(4){animation-delay:3s}.pipe div:nth-child(5){animation-delay:4s}.pipe div:nth-child(6){animation-delay:5s}.pipe div:nth-child(7){animation-delay:6s}
+@keyframes lit{0%{border-color:var(--accent);background:color-mix(in srgb,var(--accent) 16%,var(--surface))}12.5%,100%{border-color:var(--border);background:var(--surface)}}
+.code{margin:0;background:var(--canvas);border:1px solid var(--border);color:var(--text);border-radius:13px;padding:16px 18px;font-family:var(--mono);font-size:13px;line-height:1.7;overflow-x:auto}
+.code .c{color:var(--muted)}.code .k{color:var(--accent)}.code .s{color:var(--select)}
+.caret{display:inline-block;width:.55em;height:1.05em;background:var(--accent);vertical-align:text-bottom;animation:blink 1s steps(1) infinite}
 @keyframes blink{50%{opacity:0}}
-.agent-side{display:grid;gap:18px;min-width:0}
+.agent-side{display:grid;gap:16px;min-width:0}
 .agent-side p{color:var(--muted)}
 
 /* languages */
-.langs{display:flex;flex-wrap:wrap;gap:10px;margin-top:36px}
-.langs span{padding:9px 18px;border:1.5px solid var(--ink);border-radius:999px;font-weight:500;font-size:1.05rem;animation:bob 5s ease-in-out infinite}
+.langs{display:flex;flex-wrap:wrap;gap:8px;margin-top:32px}
+.langs span{padding:7px 16px;border:1px solid var(--border);background:var(--raised);border-radius:999px;font-size:15px;animation:bob 5s ease-in-out infinite}
+.langs span:nth-child(1),.langs span:nth-child(2){border-color:var(--select)}
 .langs span:nth-child(3n){animation-delay:-1.2s}.langs span:nth-child(3n+1){animation-delay:-2.4s}.langs span:nth-child(5n){animation-delay:-3.6s}
-@keyframes bob{50%{transform:translateY(-5px)}}
-.note{margin-top:20px;color:var(--muted);font-size:.9rem;max-width:62ch}
+@keyframes bob{50%{transform:translateY(-4px)}}
+.note{margin-top:18px;color:var(--muted);font-size:13.5px;max-width:62ch}
 
-/* shots */
-.shots{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:20px;margin-top:40px}
-.shots figure{margin:0;background:var(--surface);border:1.5px solid var(--line);border-radius:10px;padding:10px;min-width:0}
-.shots img{display:block;width:100%;height:auto;border-radius:3px}
-.shots figcaption{padding:10px 4px 2px;font-size:.88rem;color:var(--muted)}
-.shots figure.wide{grid-column:1/-1}
+/* screenshots */
+.shots{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;margin-top:36px}
+.shots figure{margin:0;padding:8px;min-width:0}
+.shots img{display:block;width:100%;height:auto;border-radius:9px}
+.shots figcaption{padding:10px 4px 4px;font-size:13px;color:var(--muted)}
 
 /* download */
-.dl{margin-top:96px;background:var(--surface);border:1.5px solid var(--line);color:var(--ink);border-radius:12px;padding:clamp(28px,6vw,64px);display:grid;grid-template-columns:minmax(0,1fr) auto;gap:28px;align-items:center;position:relative;overflow:hidden}
-.dl h2{font-size:clamp(2rem,4.6vw,3.4rem);font-weight:700}
-.dl p{margin-top:12px;opacity:.78;max-width:46ch}
-.dl .btn{border-color:var(--ink)}
-.dl .btn.primary{background:var(--mag);border-color:var(--mag);color:var(--on-mag)}
-.dl .btn.ghost{color:var(--ink)}
-.dl .btn.ghost:hover{background:var(--ink);color:var(--bg)}
-.dl .btns{display:flex;flex-wrap:wrap;gap:12px}
-footer{padding:36px 0 48px;display:flex;flex-wrap:wrap;gap:12px 28px;justify-content:space-between;color:var(--muted);font-size:.9rem}
+.dl{margin-top:88px;padding:clamp(24px,5vw,56px);display:grid;grid-template-columns:minmax(0,1fr) auto;gap:24px;align-items:center}
+.dl h2{font-size:clamp(1.8rem,3.8vw,2.8rem)}
+.dl p{margin-top:12px;color:var(--muted);max-width:50ch}
+.dl .btns{display:flex;flex-wrap:wrap;gap:10px}
+footer{padding:32px 0 44px;display:flex;flex-wrap:wrap;gap:10px 26px;justify-content:space-between;color:var(--muted);font-size:13.5px}
 
+@media (max-width:980px){
+  .hero{grid-template-columns:minmax(0,1fr);gap:32px;padding-top:36px}
+  .app .body{grid-template-columns:minmax(0,1fr)}
+  .app .thumbs,.app .side .card{display:none}
+  .app .body{min-height:0}
+}
 @media (max-width:860px){
-  .hero{grid-template-columns:minmax(0,1fr);gap:32px;padding-bottom:56px}
-  .steps{grid-template-columns:minmax(0,1fr)}
-  .agent{grid-template-columns:minmax(0,1fr)}
-  .dl{grid-template-columns:minmax(0,1fr)}
-  nav .links{display:none}
-  .shots{grid-template-columns:minmax(0,1fr)}
-  section{padding-top:64px}
+  .steps,.agent,.dl,.shots{grid-template-columns:minmax(0,1fr)}
+  .topbar nav{display:none}
+  section{padding-top:60px}
 }
-@media (prefers-reduced-motion:reduce){
-  *,*::before,*::after{animation:none!important;transition:none!important}
-}
+@media (prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important}}
 </style>
 </head>
 <body>
 <div class="wrap">
-  <nav>
-    <a class="brand" href="#top"><span class="dots" aria-hidden="true"><i></i><i></i><i></i><i></i></span>KopiTehnik Print</a>
-    <div class="links"><a href="#how">How it works</a><a href="#agent">AI agent</a><a href="#languages">Languages</a><a href="#download">Download</a></div>
-  </nav>
+  <div class="topbar">
+    <a class="brand" href="#top"><span class="logo" aria-hidden="true"><i></i><i></i><i></i></span>KopiTehnik Print</a>
+    <nav><a href="#how">How it works</a><a href="#agent">AI agent</a><a href="#languages">Languages</a><a href="#download">Download</a></nav>
+    <div class="themes" id="themes" role="group" aria-label="Colour theme, same themes as the app"></div>
+  </div>
 
   <header class="hero" id="top">
     <div>
-      <p class="mono" style="margin-bottom:18px">Photo cropping and printing for Windows</p>
+      <p class="label" style="margin-bottom:14px">PHOTO CROPPING AND PRINTING FOR WINDOWS</p>
       <h1>Crop it. Check it. <em>Print it.</em></h1>
-      <p class="lead">Frame every photo to the exact print size, tune the colour, and lay the sheet out in one window. Let the smart frame find the subject, or hand the whole job to an AI agent.</p>
+      <p class="lead">Frame every photo to the exact print size, tune the colour and lay out the sheet in one window. Let the smart frame find the subject, or hand the whole job to an AI agent.</p>
       <div class="cta">
-        <a class="btn primary" href="https://github.com/ildargiv/KopiTehnik-Print/releases/latest">Download for Windows</a>
-        <a class="btn ghost" href="https://github.com/ildargiv/KopiTehnik-Print">View on GitHub</a>
+        <a class="btn primary big" href="https://github.com/ildargiv/KopiTehnik-Print/releases/latest">Download for Windows</a>
+        <a class="btn big" href="https://github.com/ildargiv/KopiTehnik-Print">View on GitHub</a>
       </div>
-      <p class="fine">Free download from GitHub Releases. The exe is not code-signed, so Windows SmartScreen may ask you to confirm.</p>
+      <p class="fine">Free download from GitHub Releases. The exe is not code-signed, so Windows SmartScreen may ask you to confirm. Try the theme buttons above: they are the app's own themes.</p>
     </div>
-    <div>
-      <div class="stage" aria-label="Animated demonstration of a crop frame changing print format">
-        <div class="marks" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
-        <svg id="scene" viewBox="0 0 600 400" role="img" aria-label="Landscape photo with an animated crop frame">
-          <defs>
-            <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#3b6fb3"/><stop offset=".62" stop-color="#f4b27a"/><stop offset="1" stop-color="#f7d8a8"/></linearGradient>
-            <linearGradient id="lake" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#f0b98a"/><stop offset="1" stop-color="#2b4b63"/></linearGradient>
-            <mask id="hole"><rect width="600" height="400" fill="#fff"/><rect id="holeR" fill="#000"/></mask>
-          </defs>
-          <rect width="600" height="400" fill="url(#sky)"/>
-          <circle cx="430" cy="150" r="46" fill="#fff4d6" opacity=".95"/>
-          <circle cx="430" cy="150" r="74" fill="#fff4d6" opacity=".18"/>
-          <path d="M0 262 L90 176 L150 226 L238 132 L330 238 L402 190 L490 250 L600 188 L600 280 L0 280Z" fill="#5a4a78"/>
-          <path d="M0 290 L70 236 L140 276 L226 214 L310 282 L396 238 L480 290 L600 244 L600 310 L0 310Z" fill="#2f3b63"/>
-          <rect y="296" width="600" height="104" fill="url(#lake)"/>
-          <ellipse cx="430" cy="318" rx="34" ry="5" fill="#fff4d6" opacity=".55"/>
-          <ellipse cx="430" cy="332" rx="20" ry="3" fill="#fff4d6" opacity=".35"/>
-          <rect width="600" height="400" fill="#000" opacity=".58" mask="url(#hole)"/>
-          <g id="thirds" stroke="#fff" stroke-opacity=".5" stroke-width="1"><line id="v1"/><line id="v2"/><line id="h1"/><line id="h2"/></g>
-          <rect id="frame" fill="none" stroke="#ffd21f" stroke-width="2"/>
-          <g id="handles" fill="#ffd21f"><rect id="k1" width="10" height="10"/><rect id="k2" width="10" height="10"/><rect id="k3" width="10" height="10"/><rect id="k4" width="10" height="10"/></g>
-          <circle id="ring" cx="430" cy="150" r="58" fill="none" stroke="#2ec4e6" stroke-width="2" stroke-dasharray="5 6">
-            <animateTransform attributeName="transform" type="rotate" from="0 430 150" to="360 430 150" dur="14s" repeatCount="indefinite"/>
-          </circle>
-        </svg>
-        <div class="stage-bar">
-          <span class="mono">Smart frame locks on the subject</span>
-          <span class="chip-fmt" id="fmt">10 × 15 cm</span>
+
+    <div class="app" aria-label="Animated mock-up of the PhotoCrop window">
+      <div class="tb">
+        <span class="brand"><span class="logo" aria-hidden="true" style="transform:scale(.85)"><i></i><i></i><i></i></span>PhotoCrop</span>
+        <span class="open">Open</span>
+        <span class="muted">Paper</span>
+        <span class="pap"><span id="paper">10×15 cm</span><span class="muted">▾</span></span>
+        <span class="muted">Photos per sheet</span>
+        <span class="seg" id="per"><span class="on">1</span><span>2</span><span>3</span><span>4</span><span>6</span><span>8</span><span>9</span></span>
+        <span class="seg grow"><span class="on">Crop</span><span>Sheet</span></span>
+      </div>
+      <div class="body">
+        <div class="thumbs" aria-hidden="true">
+          <div class="thumb sel"><svg viewBox="0 0 100 100" preserveAspectRatio="xMidYMid slice"><use href="#mini"/></svg><b></b></div>
+          <div class="thumb"><svg viewBox="0 0 100 100" preserveAspectRatio="xMidYMid slice" style="filter:hue-rotate(-40deg) saturate(1.1)"><use href="#mini"/></svg><b></b></div>
+          <div class="thumb"><svg viewBox="0 0 100 100" preserveAspectRatio="xMidYMid slice" style="filter:hue-rotate(25deg)"><use href="#mini"/></svg><b></b></div>
+          <div class="thumb"><svg viewBox="0 0 100 100" preserveAspectRatio="xMidYMid slice" style="filter:brightness(.9) saturate(1.2)"><use href="#mini"/></svg><b></b></div>
+        </div>
+        <div class="canvas">
+          <span class="printpill">Print photo</span>
+          <svg id="scene" viewBox="0 0 600 400" role="img" aria-label="Landscape photo with an animated crop frame">
+            <defs>
+              <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#3b6fb3"/><stop offset=".62" stop-color="#b7a79a"/><stop offset="1" stop-color="#e7cba6"/></linearGradient>
+              <linearGradient id="lake" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#3d5663"/><stop offset="1" stop-color="#17313a"/></linearGradient>
+              <g id="art">
+                <rect width="600" height="400" fill="url(#sky)"/>
+                <circle cx="430" cy="150" r="52" fill="#fff0c8"/>
+                <path d="M0 262 L90 188 L150 232 L238 150 L330 240 L402 196 L490 250 L600 196 L600 290 L0 290Z" fill="#46566e"/>
+                <path d="M0 300 L70 250 L140 286 L226 232 L310 292 L396 250 L480 296 L600 256 L600 320 L0 320Z" fill="#2b4650"/>
+                <rect y="306" width="600" height="94" fill="url(#lake)"/>
+              </g>
+              <g id="mini"><rect width="100" height="100" fill="url(#sky)"/><circle cx="72" cy="30" r="12" fill="#fff0c8"/><path d="M0 62 L22 42 L40 56 L62 36 L84 58 L100 46 L100 100 L0 100Z" fill="#46566e"/><path d="M0 76 L30 60 L55 74 L80 58 L100 70 L100 100 L0 100Z" fill="#2b4650"/></g>
+              <clipPath id="clip"><rect id="clipR"/></clipPath>
+            </defs>
+            <g opacity=".14"><use href="#art"/></g>
+            <g clip-path="url(#clip)"><use href="#art"/></g>
+            <g id="thirds" stroke="#fff" stroke-opacity=".5" stroke-width="1" stroke-dasharray="4 4"><line id="v1"/><line id="v2"/><line id="h1"/><line id="h2"/></g>
+            <rect id="frame" fill="none" stroke="var(--frame)" stroke-width="2.5"/>
+            <line id="stem" stroke="var(--frame)" stroke-width="2"/>
+            <circle id="rot" r="7" fill="var(--frame)"/>
+            <g id="handles" fill="#fff"><rect id="k1" width="10" height="10" rx="2"/><rect id="k2" width="10" height="10" rx="2"/><rect id="k3" width="10" height="10" rx="2"/><rect id="k4" width="10" height="10" rx="2"/></g>
+          </svg>
+        </div>
+        <div class="side">
+          <div class="card"><span class="label">Crop</span><span class="muted">Frame orientation</span>
+            <span class="seg"><span class="on">Auto</span><span>Portrait</span><span>Landscape</span></span></div>
+          <div class="card"><span class="label">Sheet</span><div class="row"><span>Whole sheet</span><span class="tog" id="tog1"></span></div><div class="row"><span>Borders</span><span class="tog on" id="tog2"></span></div></div>
+          <div class="card"><span class="label">Colour</span><div class="row"><span>Printer profile</span><span class="tog" id="tog3"></span></div></div>
+          <div class="printbtn">Print</div>
         </div>
       </div>
+      <div class="status"><span><i></i>print ≈ 398 dpi</span><span>demo_1.jpg</span><span>2400×1600 px</span></div>
     </div>
   </header>
 </div>
 
-<div class="ticker" aria-hidden="true"><div class="track" id="track"></div></div>
-
 <div class="wrap">
   <section id="how">
-    <div class="sec-head"><p class="mono" style="margin-bottom:12px">The workflow</p><h2>From camera roll to cut sheet</h2></div>
+    <div class="sec-head"><p class="label">THE WORKFLOW</p><h2>From camera roll to cut sheet</h2></div>
     <div class="steps">
-      <article class="step">
+      <article class="step card">
         <div class="vis">
           <svg viewBox="0 0 300 200" style="width:100%;height:100%;display:block"><rect width="300" height="200" fill="url(#sky)"/>
-            <path d="M0 130 L45 88 L75 113 L119 66 L165 119 L201 95 L245 125 L300 94 L300 140 L0 140Z" fill="#5a4a78"/>
-            <path d="M0 145 L35 118 L70 138 L113 107 L155 141 L198 119 L240 145 L300 122 L300 155 L0 155Z" fill="#2f3b63"/>
-            <rect y="148" width="300" height="52" fill="url(#lake)"/><circle cx="215" cy="75" r="23" fill="#fff4d6"/>
-            <rect x="82" y="30" width="172" height="115" fill="none" stroke="#fff" stroke-width="2" stroke-dasharray="7 5"><animate attributeName="stroke-dashoffset" from="0" to="-48" dur="2.4s" repeatCount="indefinite"/></rect>
+            <circle cx="215" cy="75" r="24" fill="#fff0c8"/>
+            <path d="M0 130 L45 96 L75 116 L119 76 L165 120 L201 98 L245 126 L300 98 L300 150 L0 150Z" fill="#46566e"/>
+            <path d="M0 150 L35 124 L70 142 L113 114 L155 146 L198 124 L240 148 L300 128 L300 160 L0 160Z" fill="#2b4650"/>
+            <rect y="153" width="300" height="47" fill="url(#lake)"/>
+            <rect x="80" y="26" width="176" height="118" fill="none" stroke="var(--frame)" stroke-width="2.5"/>
+            <circle cx="168" cy="14" r="5" fill="var(--frame)"/><line x1="168" y1="19" x2="168" y2="26" stroke="var(--frame)" stroke-width="2"/>
+            <g fill="#fff"><rect x="75" y="21" width="9" height="9" rx="2"/><rect x="252" y="21" width="9" height="9" rx="2"/><rect x="75" y="140" width="9" height="9" rx="2"/><rect x="252" y="140" width="9" height="9" rx="2"/></g>
           </svg>
         </div>
-        <div class="tag"><span class="mono">Step 1</span><span class="mono">Frame</span></div>
+        <div class="tag"><span class="label">STEP 1</span><span class="label">FRAME</span></div>
         <h3>Crop to the print size</h3>
         <p>Pick the format, then drag the frame or let the smart frame place it around the subject.</p>
       </article>
-      <article class="step">
+      <article class="step card">
         <div class="vis">
           <div class="adj">
-            <div class="img"><svg viewBox="0 0 300 140" preserveAspectRatio="xMidYMid slice"><rect width="300" height="140" fill="url(#sky)"/>
-              <path d="M0 96 L45 62 L75 82 L119 46 L165 86 L201 68 L245 90 L300 66 L300 100 L0 100Z" fill="#5a4a78"/>
-              <rect y="102" width="300" height="40" fill="url(#lake)"/><circle cx="215" cy="52" r="18" fill="#fff4d6"/></svg></div>
+            <div class="img"><svg viewBox="0 0 300 140" preserveAspectRatio="xMidYMid slice"><rect width="300" height="140" fill="url(#sky)"/><circle cx="215" cy="46" r="18" fill="#fff0c8"/>
+              <path d="M0 96 L45 66 L75 84 L119 52 L165 88 L201 70 L245 90 L300 70 L300 104 L0 104Z" fill="#46566e"/>
+              <rect y="104" width="300" height="40" fill="url(#lake)"/></svg></div>
             <div class="sliders">
-              <div class="sl"><span>Bright</span><b></b></div>
+              <div class="sl"><span>Brightness</span><b></b></div>
               <div class="sl"><span>Contrast</span><b></b></div>
               <div class="sl"><span>Vibrance</span><b></b></div>
             </div>
           </div>
         </div>
-        <div class="tag"><span class="mono">Step 2</span><span class="mono">Colour</span></div>
+        <div class="tag"><span class="label">STEP 2</span><span class="label">COLOUR</span></div>
         <h3>Tune the colour</h3>
         <p>Brightness, contrast, vibrance and the rest of the sliders, with colour profiles for a consistent result.</p>
       </article>
-      <article class="step">
+      <article class="step card">
         <div class="vis">
           <div class="sheet"><div class="slot"></div><div class="slot"></div><div class="slot"></div><div class="slot"></div></div>
           <div class="ok"><svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M2 6.5l2.6 2.6L10 3.4" fill="none" stroke="currentColor" stroke-width="1.8"/></svg>Preflight OK</div>
         </div>
-        <div class="tag"><span class="mono">Step 3</span><span class="mono">Print</span></div>
+        <div class="tag"><span class="label">STEP 3</span><span class="label">PRINT</span></div>
         <h3>Lay out and print</h3>
         <p>Pick the printer and paper, plan the sheet, run the preflight check and send it to the queue.</p>
       </article>
@@ -273,7 +310,7 @@ footer{padding:36px 0 48px;display:flex;flex-wrap:wrap;gap:12px 28px;justify-con
   </section>
 
   <section id="agent">
-    <div class="sec-head"><p class="mono" style="margin-bottom:12px">Agent mode</p><h2>Let an AI run the job</h2></div>
+    <div class="sec-head"><p class="label">AGENT MODE</p><h2>Let an AI run the job</h2></div>
     <div class="agent">
       <div class="pipe" aria-label="Agent commands">
         <div><span>open_folder</span><span>load the photos</span></div>
@@ -285,7 +322,7 @@ footer{padding:36px 0 48px;display:flex;flex-wrap:wrap;gap:12px 28px;justify-con
         <div><span>print</span><span>send to printer</span></div>
       </div>
       <div class="agent-side">
-        <p>The agent speaks JSON commands through a command line, and an MCP server lets Claude Desktop drive the whole program. Add it to your Claude Desktop config and ask for the prints in plain words.</p>
+        <p>The agent takes JSON commands through a command line, and an MCP server lets Claude Desktop drive the whole program. Add it to your Claude Desktop config and ask for the prints in plain words.</p>
 <pre class="code" tabindex="0"><span class="c">// claude_desktop_config.json</span>
 {
   <span class="k">"mcpServers"</span>: {
@@ -300,29 +337,29 @@ footer{padding:36px 0 48px;display:flex;flex-wrap:wrap;gap:12px 28px;justify-con
   </section>
 
   <section id="languages">
-    <div class="sec-head"><p class="mono" style="margin-bottom:12px">Languages</p><h2>Speaks your shop's language</h2></div>
+    <div class="sec-head"><p class="label">LANGUAGES</p><h2>Speaks your shop's language</h2></div>
     <div class="langs" id="langs"></div>
     <p class="note">The interface is machine translated and still partly in English or Russian in long messages. Native-speaker corrections are welcome as GitHub issues.</p>
   </section>
 
   <section id="screens">
-    <div class="sec-head"><p class="mono" style="margin-bottom:12px">Screenshots</p><h2>The real window</h2></div>
+    <div class="sec-head"><p class="label">SCREENSHOTS</p><h2>The real window</h2></div>
     <div class="shots">
-      <figure><img src="screenshots/main-window.png" alt="Main window with the crop frame" onerror="this.closest('figure').hidden=true"><figcaption>Main window with the crop frame</figcaption></figure>
-      <figure><img src="screenshots/color-adjustments.png" alt="Colour adjustments" onerror="this.closest('figure').hidden=true"><figcaption>Colour adjustments</figcaption></figure>
-      <figure><img src="screenshots/print-sheet.png" alt="Print sheet with four photos" onerror="this.closest('figure').hidden=true"><figcaption>Print sheet with four photos</figcaption></figure>
-      <figure><img src="screenshots/main-window-arabic-rtl.png" alt="Arabic interface, right to left" onerror="this.closest('figure').hidden=true"><figcaption>Arabic interface, right to left</figcaption></figure>
+      <figure class="card"><img src="screenshots/main-window.png" alt="Main window with the crop frame" onerror="this.closest('figure').hidden=true"><figcaption>Main window with the crop frame</figcaption></figure>
+      <figure class="card"><img src="screenshots/print-sheet.png" alt="Print sheet with four photos" onerror="this.closest('figure').hidden=true"><figcaption>Print sheet with four photos</figcaption></figure>
+      <figure class="card"><img src="screenshots/color-adjustments.png" alt="Colour adjustments" onerror="this.closest('figure').hidden=true"><figcaption>Colour adjustments</figcaption></figure>
+      <figure class="card"><img src="screenshots/main-window-arabic-rtl.png" alt="Arabic interface, right to left" onerror="this.closest('figure').hidden=true"><figcaption>Arabic interface, right to left</figcaption></figure>
     </div>
   </section>
 
-  <section class="dl" id="download">
+  <section class="dl card" id="download">
     <div>
       <h2>Get KopiTehnik Print</h2>
       <p>Download PhotoCropQt.exe for the full window, or PhotoCropAgent.exe for agent mode. No Python needed. Source and build workflow are on GitHub. License: not selected yet.</p>
     </div>
     <div class="btns">
-      <a class="btn primary" href="https://github.com/ildargiv/KopiTehnik-Print/releases/latest">Download</a>
-      <a class="btn ghost" href="https://github.com/ildargiv/KopiTehnik-Print">GitHub</a>
+      <a class="btn primary big" href="https://github.com/ildargiv/KopiTehnik-Print/releases/latest">Download</a>
+      <a class="btn big" href="https://github.com/ildargiv/KopiTehnik-Print">GitHub</a>
     </div>
   </section>
 
@@ -334,49 +371,59 @@ footer{padding:36px 0 48px;display:flex;flex-wrap:wrap;gap:12px 28px;justify-con
 
 <script>
 (function(){
+  var $=function(i){return document.getElementById(i)};
   var reduce = window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
-  // ticker + language chips
-  var fm=['10 × 15','13 × 18','9 × 13','15 × 21','Smart frame','Colour profiles','Print queue','Preflight','AI agent','MCP'];
-  var t=document.getElementById('track');
-  if(t){var h='';for(var r=0;r<2;r++)fm.forEach(function(x){h+='<span>'+x+'</span>'});t.innerHTML=h;}
-  var L=['Русский','English','日本語','한국어','Türkçe','Bahasa Indonesia','العربية','हिन्दी','Italiano','Polski','Українська','Tiếng Việt','ไทย','繁體中文','Татарча'];
-  var lg=document.getElementById('langs');
-  if(lg){lg.innerHTML=L.map(function(x){return '<span>'+x+'</span>'}).join('');}
 
-  // crop frame animation
+  // themes: the app's own palettes
+  var TH=[['brand','Brand','#ff7a1a'],['dark','Dark','#4f8cff'],['light','Light','#2f6bff'],['mono','Mono','#f2f2f2'],['tatar','Tatar','#1fae73'],['mari','Mari','#c4262e']];
+  var root=document.documentElement, box=$('themes');
+  function setTheme(n,save){
+    if(n==='brand')root.removeAttribute('data-theme');else root.setAttribute('data-theme',n);
+    [].forEach.call(box.children,function(b){b.setAttribute('aria-pressed',String(b.dataset.t===n))});
+    if(save){try{localStorage.setItem('kt-theme',n)}catch(e){}}
+  }
+  TH.forEach(function(t){var b=document.createElement('button');b.type='button';b.dataset.t=t[0];
+    b.innerHTML='<span class="sw" style="background:'+t[2]+'"></span>'+t[1];
+    b.onclick=function(){setTheme(t[0],true)};box.appendChild(b)});
+  var saved='brand';try{saved=localStorage.getItem('kt-theme')||'brand'}catch(e){}
+  setTheme(TH.some(function(t){return t[0]===saved})?saved:'brand',false);
+
+  var L=['Русский','English','日本語','한국어','Türkçe','Bahasa Indonesia','العربية','हिन्दी','Italiano','Polski','Українська','Tiếng Việt','ไทย','繁體中文','Татарча'];
+  $('langs').innerHTML=L.map(function(x){return '<span>'+x+'</span>'}).join('');
+
+  // crop frame
   var W=600,H=400;
   var targets=[
-    {label:'10 × 15 cm',r:15/10,h:290,cx:360,cy:196},
-    {label:'13 × 18 cm',r:18/13,h:320,cx:330,cy:190},
-    {label:'9 × 13 cm', r:13/9, h:300,cx:350,cy:196},
-    {label:'Square',    r:1,     h:300,cx:380,cy:176}
+    {label:'10×15 cm',r:15/10,h:290,cx:360,cy:196,per:0},
+    {label:'13×18 cm',r:18/13,h:320,cx:330,cy:190,per:2},
+    {label:'9×13 cm', r:13/9, h:300,cx:350,cy:196,per:3},
+    {label:'Square',  r:1,    h:300,cx:380,cy:176,per:1}
   ];
-  var $=function(i){return document.getElementById(i)};
-  var hole=$('holeR'),frame=$('frame'),fmt=$('fmt');
-  if(!hole||!frame)return;
-  function box(t){var h=t.h,w=Math.min(h*t.r,W-24);h=w/t.r;
-    var x=Math.max(12,Math.min(W-w-12,t.cx-w/2)),y=Math.max(12,Math.min(H-h-12,t.cy-h/2));return {x:x,y:y,w:w,h:h};}
-  var cur=box(targets[0]);
+  function box4(t){var h=t.h,w=Math.min(h*t.r,W-24);h=w/t.r;
+    var x=Math.max(12,Math.min(W-w-12,t.cx-w/2)),y=Math.max(18,Math.min(H-h-12,t.cy-h/2));return {x:x,y:y,w:w,h:h};}
+  var cur=box4(targets[0]);
+  function set(id,o){var e=$(id);for(var k in o)e.setAttribute(k,o[k])}
   function draw(b){
-    [hole,frame].forEach(function(e){e.setAttribute('x',b.x);e.setAttribute('y',b.y);e.setAttribute('width',b.w);e.setAttribute('height',b.h)});
-    var v1=$('v1'),v2=$('v2'),h1=$('h1'),h2=$('h2');
-    v1.setAttribute('x1',b.x+b.w/3);v1.setAttribute('x2',b.x+b.w/3);v1.setAttribute('y1',b.y);v1.setAttribute('y2',b.y+b.h);
-    v2.setAttribute('x1',b.x+2*b.w/3);v2.setAttribute('x2',b.x+2*b.w/3);v2.setAttribute('y1',b.y);v2.setAttribute('y2',b.y+b.h);
-    h1.setAttribute('y1',b.y+b.h/3);h1.setAttribute('y2',b.y+b.h/3);h1.setAttribute('x1',b.x);h1.setAttribute('x2',b.x+b.w);
-    h2.setAttribute('y1',b.y+2*b.h/3);h2.setAttribute('y2',b.y+2*b.h/3);h2.setAttribute('x1',b.x);h2.setAttribute('x2',b.x+b.w);
-    var k=[[b.x,b.y],[b.x+b.w,b.y],[b.x,b.y+b.h],[b.x+b.w,b.y+b.h]];
-    k.forEach(function(p,i){var e=$('k'+(i+1));e.setAttribute('x',p[0]-5);e.setAttribute('y',p[1]-5)});
+    ['clipR','frame'].forEach(function(i){set(i,{x:b.x,y:b.y,width:b.w,height:b.h})});
+    set('v1',{x1:b.x+b.w/3,x2:b.x+b.w/3,y1:b.y,y2:b.y+b.h});set('v2',{x1:b.x+2*b.w/3,x2:b.x+2*b.w/3,y1:b.y,y2:b.y+b.h});
+    set('h1',{y1:b.y+b.h/3,y2:b.y+b.h/3,x1:b.x,x2:b.x+b.w});set('h2',{y1:b.y+2*b.h/3,y2:b.y+2*b.h/3,x1:b.x,x2:b.x+b.w});
+    [[b.x,b.y],[b.x+b.w,b.y],[b.x,b.y+b.h],[b.x+b.w,b.y+b.h]].forEach(function(p,i){set('k'+(i+1),{x:p[0]-5,y:p[1]-5})});
+    set('stem',{x1:b.x+b.w/2,x2:b.x+b.w/2,y1:b.y,y2:b.y-14});set('rot',{cx:b.x+b.w/2,cy:b.y-14});
   }
   draw(cur);
+  var per=$('per').children, tg=[$('tog1'),$('tog2'),$('tog3')];
+  function show(i){$('paper').textContent=targets[i].label;
+    [].forEach.call(per,function(s,k){s.className=k===targets[i].per?'on':''});
+    tg[0].className='tog'+(i%2?' on':'');tg[2].className='tog'+(i===2?' on':'')}
   if(reduce)return;
-  var idx=0,from=cur,to=cur,t0=0,hold=1700,dur=1100,phase='hold',tl=performance.now();
+  var idx=0,from=cur,to=cur,hold=1900,dur=1100,phase='hold',tl=performance.now();
   function ease(p){return p<.5?4*p*p*p:1-Math.pow(-2*p+2,3)/2}
   function tick(now){
     var el=now-tl;
-    if(phase==='hold'&&el>hold){idx=(idx+1)%targets.length;from=cur;to=box(targets[idx]);fmt.textContent=targets[idx].label;phase='move';tl=now;}
+    if(phase==='hold'&&el>hold){idx=(idx+1)%targets.length;from=cur;to=box4(targets[idx]);show(idx);phase='move';tl=now}
     else if(phase==='move'){var p=Math.min(1,el/dur),e=ease(p);
       cur={x:from.x+(to.x-from.x)*e,y:from.y+(to.y-from.y)*e,w:from.w+(to.w-from.w)*e,h:from.h+(to.h-from.h)*e};
-      draw(cur);if(p>=1){phase='hold';tl=now;}}
+      draw(cur);if(p>=1){phase='hold';tl=now}}
     requestAnimationFrame(tick);
   }
   requestAnimationFrame(tick);
