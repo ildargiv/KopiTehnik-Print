@@ -136,8 +136,9 @@ def _last_mac():
         return ""
 
 
-def record(printer, photos=0, paper="", mode="", source="app", sheets=1):
-    """Adds one printed sheet to the journal. Never raises: a broken counter must not stop printing."""
+def record(printer, photos=0, paper="", mode="", source="app", sheets=1, files=None):
+    """Adds one successfully printed sheet (x copies) to the journal. Failed or cancelled sheets are never recorded.
+    Never raises: a broken counter must not stop printing."""
     try:
         with _lock:
             d = _load_admin()
@@ -145,7 +146,8 @@ def record(printer, photos=0, paper="", mode="", source="app", sheets=1):
                 _save_admin(d)
             now = time.time()
             rec = {"ts": round(now, 1), "t": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(now)), "printer": str(printer or ""),
-                   "photos": int(photos), "paper": str(paper or ""), "mode": str(mode or ""), "source": str(source or "app"), "sheets": int(sheets)}
+                   "photos": int(photos), "paper": str(paper or ""), "mode": str(mode or ""), "source": str(source or "app"), "sheets": int(sheets),
+                   "files": [str(x) for x in (files or [])][:60]}
             body = json.dumps(rec, ensure_ascii=False, sort_keys=True)
             rec["h"] = _mac(d["key"], _last_mac(), body)
             _dir().mkdir(parents=True, exist_ok=True)
@@ -191,7 +193,7 @@ def totals(records=None, since=0.0):
     for r in (records if records is not None else read_all()):
         if r.get("ts", 0) >= since:
             sheets += int(r.get("sheets", 1))
-            photos += int(r.get("photos", 0))
+            photos += int(r.get("photos", 0)) * int(r.get("sheets", 1))     # файлов напечатано = фото на листе x копии
     return {"sheets": sheets, "photos": photos}
 
 
@@ -222,9 +224,9 @@ def export_csv(path):
     recs = [r for r in read_all() if not r.get("bad")]
     with open(path, "w", newline="", encoding="utf-8-sig") as f:
         w = csv.writer(f, delimiter=";")
-        w.writerow(["time", "printer", "paper_mm", "photos_on_sheet", "mode", "source", "sheets"])
+        w.writerow(["time", "printer", "paper_mm", "photos_on_sheet", "mode", "source", "sheets", "files"])
         for r in recs:
-            w.writerow([r.get("t"), r.get("printer"), r.get("paper"), r.get("photos"), r.get("mode"), r.get("source"), r.get("sheets", 1)])
+            w.writerow([r.get("t"), r.get("printer"), r.get("paper"), r.get("photos"), r.get("mode"), r.get("source"), r.get("sheets", 1), " | ".join(r.get("files") or [])])
     return len(recs)
 
 

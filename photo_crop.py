@@ -2141,8 +2141,9 @@ def run_sheets_job(c, progress, cancel):
             import print_stats
             geom = c["plan"].get("geom") or {}
             pw, ph = geom.get("paper", (0, 0))
-            print_stats.record(c["printer"], len(c["plan"]["sheets"][k]), "%gx%g" % (round(pw, 1), round(ph, 1)), c.get("mode", ""),
-                               c.get("source", "app"), copies)
+            names = [Path(c["photos"][pl["photo"]]["path"]).name for pl in c["plan"]["sheets"][k]]
+            print_stats.record(c["printer"], len(names), "%gx%g" % (round(pw, 1), round(ph, 1)), c.get("mode", ""),
+                               c.get("source", "app"), copies, names)
         except Exception:
             pass
 

@@ -5669,8 +5669,8 @@ class AdminStatsDialog(QDialog):
         sc.setWidgetResizable(True)
         sc.setFrameShape(QFrame.NoFrame)
         sc.setWidget(self.l_sum)
-        self.table = QTableWidget(0, 7)
-        self.table.setHorizontalHeaderLabels([tr(x) for x in ("Время", "Принтер", "Бумага, мм", "Фото на листе", "Режим", "Источник", "Листов")])
+        self.table = QTableWidget(0, 8)
+        self.table.setHorizontalHeaderLabels([tr(x) for x in ("Время", "Принтер", "Бумага, мм", "Файлов на листе", "Режим", "Источник", "Листов", "Файлы")])
         self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.table.horizontalHeader().setStretchLastSection(True)
@@ -5702,7 +5702,7 @@ class AdminStatsDialog(QDialog):
         s = ps.summary(self.recs)
         td = lambda x, al="left": '<td style="padding:2px 14px 2px 0" align="%s">%s</td>' % (al, x)
         h = ["<h3>%s</h3><table>" % tr("Всего напечатано")]
-        h.append("<tr>%s%s%s</tr>" % (td("<b>%s</b>" % tr("Период")), td("<b>%s</b>" % tr("Листов"), "right"), td("<b>%s</b>" % tr("Фото"), "right")))
+        h.append("<tr>%s%s%s</tr>" % (td("<b>%s</b>" % tr("Период")), td("<b>%s</b>" % tr("Листов"), "right"), td("<b>%s</b>" % tr("Напечатано файлов"), "right")))
         for k, name in (("today", "Сегодня"), ("week", "7 дней"), ("month", "30 дней"), ("all", "Всё время")):
             p = s["periods"][k]
             h.append("<tr>%s%s%s</tr>" % (td(tr(name)), td(p["sheets"], "right"), td(p["photos"], "right")))
@@ -5722,8 +5722,9 @@ class AdminStatsDialog(QDialog):
         rows = list(reversed(self.recs[-500:]))
         self.table.setRowCount(len(rows))
         for i, r in enumerate(rows):
-            for j, key in enumerate(("t", "printer", "paper", "photos", "mode", "source", "sheets")):
-                self.table.setItem(i, j, QTableWidgetItem(str(r.get(key, ""))))
+            for j, key in enumerate(("t", "printer", "paper", "photos", "mode", "source", "sheets", "files")):
+                v = r.get(key, "")
+                self.table.setItem(i, j, QTableWidgetItem(", ".join(v) if isinstance(v, list) else str(v)))
         self.table.resizeColumnsToContents()
 
     def _export(self):
@@ -5862,7 +5863,7 @@ class SettingsDialog(QDialog):
 
     def _refresh_today(self):
         t = ps.today()
-        self.l_today.setText(trf("Напечатано сегодня: {s} листов, {p} фото", s=t["sheets"], p=t["photos"]))
+        self.l_today.setText(trf("Напечатано сегодня: {s} листов, {p} файлов", s=t["sheets"], p=t["photos"]))
 
     def _admin(self):
         if admin_login(self):
@@ -6229,7 +6230,7 @@ pc.EN.update({
     "Экспорт в CSV…": "Export to CSV…", "Очистить журнал": "Clear the journal", "Выйти": "Log out",
     "Очистить журнал? Старый журнал сохранится в файл-копию рядом с ним.": "Clear the journal? The old journal is kept in a backup file next to it.",
     "Копия журнала": "Journal backup", "Сводка": "Summary", "Журнал": "Journal",
-    "Время": "Time", "Бумага, мм": "Paper, mm", "Фото на листе": "Photos on the sheet", "Режим": "Mode", "Источник": "Source", "Листов": "Sheets",
+    "Время": "Time", "Бумага, мм": "Paper, mm", "Файлов на листе": "Files on the sheet", "Файлы": "Files", "Напечатано файлов": "Files printed", "Режим": "Mode", "Источник": "Source", "Листов": "Sheets",
     "Всего напечатано": "Total printed", "Период": "Period", "Фото": "Photos", "Сегодня": "Today", "7 дней": "7 days", "30 дней": "30 days",
     "Всё время": "All time", "По принтерам": "By printer", "По формату бумаги": "By paper size",
     "По источнику (app — окно программы, agent — ИИ-агент)": "By source (app — program window, agent — AI agent)",
@@ -6242,7 +6243,7 @@ pc.EN_FMT.update({
     "Слишком много неверных попыток. Подождите {m} мин {s} с.": "Too many wrong attempts. Wait {m} min {s} s.",
     "⚠ Журнал изменён или повреждён (строка {n}). Данные ниже могут быть неточными.": "⚠ The journal was changed or damaged (line {n}). The figures below may be inaccurate.",
     "Сохранено строк: {n}": "Rows saved: {n}",
-    "Напечатано сегодня: {s} листов, {p} фото": "Printed today: {s} sheets, {p} photos",
+    "Напечатано сегодня: {s} листов, {p} файлов": "Printed today: {s} sheets, {p} files",
 })
 
 
