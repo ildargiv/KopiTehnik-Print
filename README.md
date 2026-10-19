@@ -27,6 +27,7 @@ A Windows program for cropping and printing photos (10×15 cm and other formats)
 - Colour management: printer ICC profile and a Windows ICM switch.
 - Print planning: several photos per sheet, per-side bleed, one job per sheet with a pause between jobs, pre-print checks (dpi, fit).
 - Export to JPEG, TIFF, PNG and PDF.
+- Print counter (Settings): sheets and photos printed today for everyone; a detailed journal (by printer, paper, source, last 14 days, CSV export) behind an administrator password with a recovery key. The journal is tamper-evident. It counts sheets sent to the printer from the program and by the AI agent.
 - AI-agent mode: every step is a command returning JSON (command line or MCP server for Claude Desktop). See [AGENT.md](AGENT.md) (in Russian).
 - Interface languages in the Qt version: Русский, English, 日本語, 한국어, Türkçe, Bahasa Indonesia, العربية, हिन्दी, Italiano, Polski, Українська, Tiếng Việt, ไทย, 繁體中文, Татарча (chosen in Settings; by default the system language, Russian for ru, otherwise English; Arabic is right-to-left). The translations cover the main screens and are machine-made, not yet reviewed by native speakers; untranslated strings appear in English.
 

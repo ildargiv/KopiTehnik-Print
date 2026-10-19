@@ -22,6 +22,7 @@ import traceback
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import print_stats as ps                                  # noqa: E402  (счётчик печати)
 import photo_crop as pc                                    # noqa: E402  (движок программы)
 import i18n                                                # noqa: E402  (переводы интерфейса)
 
@@ -38,7 +39,7 @@ try:
                                    QVBoxLayout, QGridLayout, QComboBox, QLineEdit, QSlider, QRadioButton, QButtonGroup,
                                    QListView, QStyledItemDelegate, QStyle, QScrollArea, QStackedWidget, QDialog, QFileDialog,
                                    QMessageBox, QProgressBar, QAbstractItemView, QGraphicsDropShadowEffect, QListWidget,
-                                   QListWidgetItem, QMenu, QSizePolicy, QAbstractButton)
+                                   QListWidgetItem, QMenu, QSizePolicy, QAbstractButton, QTableWidget, QTableWidgetItem, QTabWidget)
     from PySide6.QtSvg import QSvgRenderer
 except ImportError:
     sys.stderr.write("PhotoCrop: не установлена библиотека PySide6.\nВыполните в командной строке:  pip install PySide6\n")
@@ -5539,6 +5540,222 @@ class ThemeSwatch(QAbstractButton):
         p.end()
 
 
+# ---------------------------------------------------------------- счётчик печати: окно администратора
+
+class SecretDialog(QDialog):
+    """Окно с одним-тремя полями для пароля. extra — подпись кнопки «Забыли пароль?» (результат: self.extra_clicked)."""
+
+    def __init__(self, parent, title, prompts, hint="", extra=None):
+        super().__init__(parent)
+        self.setWindowTitle(tr(title))
+        self.setMinimumWidth(380)
+        self.extra_clicked = False
+        self.edits = []
+        v = vbox(spacing=10, margins=(16, 16, 16, 14))
+        if hint:
+            v.addWidget(lbl(hint, "muted", wrap=True))
+        for p in prompts:
+            v.addWidget(lbl(p))
+            e = QLineEdit()
+            e.setEchoMode(QLineEdit.Password)
+            e.returnPressed.connect(self.accept)
+            self.edits.append(e)
+            v.addWidget(e)
+        row_ = hbox(spacing=8)
+        if extra:
+            row_.addWidget(btn(extra, self._extra))
+        row_.addStretch(1)
+        row_.addWidget(btn("Отмена", self.reject))
+        row_.addWidget(btn("OK", self.accept, "primary"))
+        v.addLayout(row_)
+        self.setLayout(v)
+        self.edits[0].setFocus()
+
+    def _extra(self):
+        self.extra_clicked = True
+        self.accept()
+
+    def values(self):
+        return [e.text() for e in self.edits]
+
+
+def _new_password(parent):
+    """Два поля «пароль / повтор» -> пароль или None."""
+    hint = trf("Придумайте пароль администратора (не короче {n} символов). Он защищает подробный счётчик печати.", n=ps.MIN_PASSWORD)
+    while True:
+        dlg = SecretDialog(parent, "Пароль администратора", ["Новый пароль", "Повторите пароль"], hint)
+        if dlg.exec() != QDialog.Accepted:
+            return None
+        a, b = dlg.values()
+        if len(a) < ps.MIN_PASSWORD:
+            warn(parent, trf("Пароль короче {n} символов.", n=ps.MIN_PASSWORD))
+        elif a != b:
+            warn(parent, "Пароли не совпадают.")
+        else:
+            return a
+
+
+def _show_recovery(parent, key):
+    QMessageBox.information(parent, "PhotoCrop", tr("Ключ восстановления (покажется один раз). Запишите его и храните отдельно от компьютера. "
+                                                    "С ним можно задать новый пароль, если старый забыт.") + "\n\n" + key)
+
+
+def admin_login(parent):
+    """Вход администратора; в первый раз задаёт пароль. -> True, если вошли."""
+    if not ps.has_password():
+        pw = _new_password(parent)
+        if pw is None:
+            return False
+        _show_recovery(parent, ps.set_password(pw))
+        return True
+    while True:
+        left = ps.lock_remaining()
+        if left > 0:
+            warn(parent, trf("Слишком много неверных попыток. Подождите {m} мин {s} с.", m=left // 60, s=left % 60))
+            return False
+        dlg = SecretDialog(parent, "Вход администратора", ["Пароль"], extra="Забыли пароль?")
+        if dlg.exec() != QDialog.Accepted:
+            return False
+        if dlg.extra_clicked:
+            rk = SecretDialog(parent, "Восстановление", ["Ключ восстановления"], tr("Введите ключ, который показала программа при создании пароля."))
+            if rk.exec() != QDialog.Accepted:
+                continue
+            pw = _new_password(parent)
+            if pw is None:
+                continue
+            key = ps.reset_with_recovery(rk.values()[0], pw)
+            if key is None:
+                warn(parent, "Ключ восстановления не подошёл.")
+                continue
+            _show_recovery(parent, key)
+            return True
+        ok, wait = ps.check_password(dlg.values()[0])
+        if ok:
+            return True
+        if wait:
+            warn(parent, trf("Слишком много неверных попыток. Подождите {m} мин {s} с.", m=wait // 60, s=wait % 60))
+            return False
+        warn(parent, "Неверный пароль.")
+
+
+class AdminStatsDialog(QDialog):
+    """Подробный счётчик печати: сводка, журнал, экспорт, смена пароля. Сам закрывается после 5 минут без действий."""
+    IDLE_MS = 5 * 60 * 1000
+
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.setWindowTitle(tr("Счётчик печати — администратор"))
+        self.setMinimumSize(760, 560)
+        self.setStyleSheet(
+            "QTabWidget::pane{border:1px solid %(border)s;background:%(surface)s;}"
+            "QTabBar::tab{background:%(raised)s;color:%(muted)s;padding:7px 18px;border:1px solid %(border)s;border-bottom:0;}"
+            "QTabBar::tab:selected{background:%(surface)s;color:%(text)s;}"
+            "QScrollArea,QScrollArea > QWidget > QWidget{background:%(surface)s;}"
+            "QScrollArea QLabel{background:transparent;color:%(text)s;padding:6px;}"
+            "QTableWidget{background:%(surface)s;color:%(text)s;gridline-color:%(border)s;border:0;}"
+            "QHeaderView::section{background:%(raised)s;color:%(muted)s;border:0;padding:6px;}" % T)
+        self.recs =[r for r in ps.read_all() if not r.get("bad")]
+        ok, bad = ps.verify()
+        v = vbox(spacing=10, margins=(14, 14, 14, 12))
+        if not ok:
+            w = lbl(trf("⚠ Журнал изменён или повреждён (строка {n}). Данные ниже могут быть неточными.", n=bad), "muted", wrap=True)
+            w.setStyleSheet("color:%s" % T["warn"])
+            v.addWidget(w)
+        self.l_sum = QLabel()
+        self.l_sum.setTextFormat(Qt.RichText)
+        self.l_sum.setWordWrap(True)
+        self.l_sum.setAlignment(Qt.AlignTop | Qt.AlignLeft)
+        sc = QScrollArea()
+        sc.setWidgetResizable(True)
+        sc.setFrameShape(QFrame.NoFrame)
+        sc.setWidget(self.l_sum)
+        self.table = QTableWidget(0, 7)
+        self.table.setHorizontalHeaderLabels([tr(x) for x in ("Время", "Принтер", "Бумага, мм", "Фото на листе", "Режим", "Источник", "Листов")])
+        self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.table.horizontalHeader().setStretchLastSection(True)
+        self.table.verticalHeader().setVisible(False)
+        tabs = QTabWidget()
+        tabs.addTab(sc, tr("Сводка"))
+        tabs.addTab(self.table, tr("Журнал"))
+        v.addWidget(tabs, 1)
+        v.addLayout(hbox(btn("Экспорт в CSV…", self._export), btn("Сменить пароль", self._change), btn("Очистить журнал", self._clear),
+                         None, btn("Выйти", self.accept, "primary"), spacing=8))
+        self.setLayout(v)
+        self.fill()
+        self.idle = QTimer(self)
+        self.idle.setSingleShot(True)
+        self.idle.timeout.connect(self.accept)
+        self.idle.start(self.IDLE_MS)
+        QApplication.instance().installEventFilter(self)
+
+    def done(self, r):
+        QApplication.instance().removeEventFilter(self)
+        super().done(r)
+
+    def eventFilter(self, o, e):
+        if e.type() in (QEvent.MouseButtonPress, QEvent.KeyPress, QEvent.MouseMove, QEvent.Wheel):
+            self.idle.start(self.IDLE_MS)
+        return False
+
+    def fill(self):
+        s = ps.summary(self.recs)
+        td = lambda x, al="left": '<td style="padding:2px 14px 2px 0" align="%s">%s</td>' % (al, x)
+        h = ["<h3>%s</h3><table>" % tr("Всего напечатано")]
+        h.append("<tr>%s%s%s</tr>" % (td("<b>%s</b>" % tr("Период")), td("<b>%s</b>" % tr("Листов"), "right"), td("<b>%s</b>" % tr("Фото"), "right")))
+        for k, name in (("today", "Сегодня"), ("week", "7 дней"), ("month", "30 дней"), ("all", "Всё время")):
+            p = s["periods"][k]
+            h.append("<tr>%s%s%s</tr>" % (td(tr(name)), td(p["sheets"], "right"), td(p["photos"], "right")))
+        h.append("</table>")
+        for field, title in (("printer", "По принтерам"), ("paper", "По формату бумаги"), ("source", "По источнику (app — окно программы, agent — ИИ-агент)")):
+            h.append("<h3>%s</h3><table>" % tr(title))
+            for k, n in s[field][:12]:
+                h.append("<tr>%s%s</tr>" % (td(k), td(n, "right")))
+            h.append("</table>")
+        if s["days"]:
+            mx = max(n for _, n in s["days"]) or 1
+            h.append("<h3>%s</h3><table>" % tr("Последние 14 дней"))
+            for d, n in s["days"]:
+                h.append("<tr>%s%s%s</tr>" % (td(d), td(n, "right"), td('<span style="color:%s">%s</span>' % (T["accent"], "█" * max(1, round(24 * n / mx))))))
+            h.append("</table>")
+        self.l_sum.setText("".join(h))
+        rows = list(reversed(self.recs[-500:]))
+        self.table.setRowCount(len(rows))
+        for i, r in enumerate(rows):
+            for j, key in enumerate(("t", "printer", "paper", "photos", "mode", "source", "sheets")):
+                self.table.setItem(i, j, QTableWidgetItem(str(r.get(key, ""))))
+        self.table.resizeColumnsToContents()
+
+    def _export(self):
+        p, _ = QFileDialog.getSaveFileName(self, tr("Экспорт в CSV…"), "print_log.csv", "CSV (*.csv)")
+        if p:
+            try:
+                info(self, trf("Сохранено строк: {n}", n=ps.export_csv(p)))
+            except OSError as ex:
+                warn(self, str(ex))
+
+    def _change(self):
+        dlg = SecretDialog(self, "Сменить пароль", ["Текущий пароль"])
+        if dlg.exec() != QDialog.Accepted:
+            return
+        ok, wait = ps.check_password(dlg.values()[0])
+        if not ok:
+            warn(self, "Неверный пароль.")
+            return
+        pw = _new_password(self)
+        if pw:
+            _show_recovery(self, ps.set_password(pw))
+
+    def _clear(self):
+        if not ask(self, "Очистить журнал? Старый журнал сохранится в файл-копию рядом с ним."):
+            return
+        bak = ps.clear_log()
+        self.recs = []
+        self.fill()
+        if bak:
+            info(self, tr("Копия журнала") + ":\n" + str(bak))
+
+
 class SettingsDialog(QDialog):
     def __init__(self, app):
         super().__init__(app)
@@ -5592,7 +5809,7 @@ class SettingsDialog(QDialog):
         borderless = card("Печать без полей", lbl("Сколько принтер срезает с каждого края листа, мм"), trim,
                           lbl("На листе это пунктирная рамка: всё, что внутри неё, точно останется на отпечатке. "
                               "Важные детали держите внутри рамки.", "muted", wrap=True))
-        right = vbox(self._save_card(), borderless, None, spacing=12)
+        right = vbox(self._save_card(), borderless, self._counter_card(), None, spacing=12)
         self.setLayout(vbox(hbox(left, right, spacing=12), about, hbox(None, btn("Готово", self.accept, "primary")),
                             spacing=12, margins=(14, 14, 14, 14)))
 
@@ -5634,6 +5851,23 @@ class SettingsDialog(QDialog):
         self._out_enable()
         self._q_enable()
         return c
+
+    def _counter_card(self):
+        """Общий счётчик за день (виден всем) и вход в подробный счётчик для администратора."""
+        self.l_today = lbl("")
+        self._refresh_today()
+        return card("Счётчик печати", self.l_today,
+                    hbox(btn("Подробный счётчик (администратор)…", self._admin), None),
+                    lbl("Подробный журнал, экспорт и сброс доступны по паролю администратора.", "muted", wrap=True))
+
+    def _refresh_today(self):
+        t = ps.today()
+        self.l_today.setText(trf("Напечатано сегодня: {s} листов, {p} фото", s=t["sheets"], p=t["photos"]))
+
+    def _admin(self):
+        if admin_login(self):
+            AdminStatsDialog(self).exec()
+        self._refresh_today()
 
     def _out_enable(self):
         custom = self.app.s["out_mode"] == "custom"
@@ -5978,6 +6212,38 @@ def selftest(app):
     print(text)
     print("Файлы самопроверки:", out)
     return 1 if any(r.startswith("FAIL") for r in report) else 0
+
+
+pc.EN.update({
+    "Счётчик печати": "Print counter", "Счётчик печати — администратор": "Print counter — administrator",
+    "Подробный счётчик (администратор)…": "Detailed counter (administrator)…",
+    "Подробный журнал, экспорт и сброс доступны по паролю администратора.": "The detailed journal, export and reset need the administrator password.",
+    "Пароль администратора": "Administrator password", "Новый пароль": "New password", "Повторите пароль": "Repeat the password",
+    "Пароли не совпадают.": "The passwords do not match.", "Вход администратора": "Administrator login", "Пароль": "Password",
+    "Забыли пароль?": "Forgot the password?", "Восстановление": "Recovery", "Ключ восстановления": "Recovery key",
+    "Введите ключ, который показала программа при создании пароля.": "Enter the key the program showed when the password was created.",
+    "Ключ восстановления не подошёл.": "The recovery key does not match.", "Неверный пароль.": "Wrong password.",
+    "Ключ восстановления (покажется один раз). Запишите его и храните отдельно от компьютера. С ним можно задать новый пароль, если старый забыт.":
+        "Recovery key (shown only once). Write it down and keep it away from this computer. It lets you set a new password if the old one is forgotten.",
+    "Сменить пароль": "Change password", "Текущий пароль": "Current password", "Отмена": "Cancel",
+    "Экспорт в CSV…": "Export to CSV…", "Очистить журнал": "Clear the journal", "Выйти": "Log out",
+    "Очистить журнал? Старый журнал сохранится в файл-копию рядом с ним.": "Clear the journal? The old journal is kept in a backup file next to it.",
+    "Копия журнала": "Journal backup", "Сводка": "Summary", "Журнал": "Journal",
+    "Время": "Time", "Бумага, мм": "Paper, mm", "Фото на листе": "Photos on the sheet", "Режим": "Mode", "Источник": "Source", "Листов": "Sheets",
+    "Всего напечатано": "Total printed", "Период": "Period", "Фото": "Photos", "Сегодня": "Today", "7 дней": "7 days", "30 дней": "30 days",
+    "Всё время": "All time", "По принтерам": "By printer", "По формату бумаги": "By paper size",
+    "По источнику (app — окно программы, agent — ИИ-агент)": "By source (app — program window, agent — AI agent)",
+    "Последние 14 дней": "Last 14 days",
+})
+pc.EN_FMT.update({
+    "Придумайте пароль администратора (не короче {n} символов). Он защищает подробный счётчик печати.":
+        "Choose an administrator password (at least {n} characters). It protects the detailed print counter.",
+    "Пароль короче {n} символов.": "The password is shorter than {n} characters.",
+    "Слишком много неверных попыток. Подождите {m} мин {s} с.": "Too many wrong attempts. Wait {m} min {s} s.",
+    "⚠ Журнал изменён или повреждён (строка {n}). Данные ниже могут быть неточными.": "⚠ The journal was changed or damaged (line {n}). The figures below may be inaccurate.",
+    "Сохранено строк: {n}": "Rows saved: {n}",
+    "Напечатано сегодня: {s} листов, {p} фото": "Printed today: {s} sheets, {p} photos",
+})
 
 
 def main():

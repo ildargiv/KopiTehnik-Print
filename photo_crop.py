@@ -2135,6 +2135,17 @@ def run_sheets_job(c, progress, cancel):
         img = shrink_sheet(img, o.get("shrink_pct"))
         return apply_printer_profile(img, None, c["cm"]) if c["cm"] else img
 
+    def counted(k, copies=1):
+        """Журнал печати (print_stats): лист k ушёл на принтер."""
+        try:
+            import print_stats
+            geom = c["plan"].get("geom") or {}
+            pw, ph = geom.get("paper", (0, 0))
+            print_stats.record(c["printer"], len(c["plan"]["sheets"][k]), "%gx%g" % (round(pw, 1), round(ph, 1)), c.get("mode", ""),
+                               c.get("source", "app"), copies)
+        except Exception:
+            pass
+
     if c["kind"] == "print":
         title = c.get("title") or "PhotoCrop"
         total = n * o["sheet_copies"]
@@ -2153,6 +2164,7 @@ def run_sheets_job(c, progress, cancel):
                     with PrinterJob(c["printer"], c["blob"], f"{title} — {done + 1} из {total}") as job:
                         job.page(img)
                         job.finish()
+                    counted(k)
                     done += 1
                     if done < total and o.get("job_pause", 0) > 0:
                         t_end = time.time() + o["job_pause"]
@@ -2177,6 +2189,8 @@ def run_sheets_job(c, progress, cancel):
                     job.page(img)
                 del img
             job.finish()
+        for k in idxs:
+            counted(k, o["sheet_copies"])
         return ("done", n * o["sheet_copies"], None, [])
     fmt = o["export_fmt"]
     ext = EXPORT_EXT[fmt]
@@ -3131,6 +3145,7 @@ class AgentSession:
     @staticmethod
     def _sheets_work(c):
         def work(progress, cancel):
+            c["source"] = "agent"
             r = run_sheets_job(c, progress, cancel)
             if r[0] == "cancelled":
                 return r
