@@ -32,8 +32,9 @@ if len(sys.argv) > 1 and sys.argv[1] in ("agent", "mcp", "mcp-config", "--print-
 
 try:
     from PySide6.QtCore import (Qt, QSize, QRect, QRectF, QPointF, QTimer, Signal, QObject, QThreadPool, QRunnable,
-                                QAbstractListModel, QModelIndex, QEvent, QPropertyAnimation, QEasingCurve, Property, QByteArray)
-    from PySide6.QtGui import (QPainter, QColor, QPen, QBrush, QPixmap, QImage, QIcon, QPolygonF, QPainterPath, QFont, QIntValidator,
+                                QAbstractListModel, QModelIndex, QEvent, QPropertyAnimation, QEasingCurve, Property, QByteArray,
+                                QVariantAnimation)
+    from PySide6.QtGui import (QPainter, QColor, QPen, QBrush, QPixmap, QImage, QIcon, QPolygonF, QPainterPath, QFont, QIntValidator, QLinearGradient, QRadialGradient, QFontMetricsF,
                                QKeySequence, QShortcut, QFontMetrics, QTransform)
     from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QFrame, QLabel, QPushButton, QToolButton, QHBoxLayout,
                                    QVBoxLayout, QGridLayout, QComboBox, QLineEdit, QSlider, QRadioButton, QButtonGroup,
@@ -107,6 +108,7 @@ ICONS = {
     "trash": '<path d="M4.5 7h15M9.5 7V4.8h5V7M6.5 7l.9 12.2h9.2L17.5 7M10 10.5v5.5M14 10.5v5.5"/>',
     "print": '<path d="M7 8V3.8h10V8"/><rect x="3.5" y="8" width="17" height="8.5" rx="2"/><path d="M7 13.5h10v6.7H7z"/>',
     "save": '<path d="M5 3.8h11l3.2 3.2V19a1.2 1.2 0 0 1-1.2 1.2H5A1.2 1.2 0 0 1 3.8 19V5A1.2 1.2 0 0 1 5 3.8z"/><path d="M8 3.8v5h7v-5M7.5 20v-6.5h9V20"/>',
+    "doc": '<path d="M6 3.8h8l4 4v12.4H6z"/><path d="M14 3.8V8h4M9 12h6M9 15.5h6"/>',
     "plus": '<path d="M12 5.5v13M5.5 12h13"/>',
     "minus": '<path d="M5.5 12h13"/>',
     "check": '<path d="M5.5 12.5l4.2 4.2 8.8-9.2"/>',
@@ -325,72 +327,341 @@ class WrapLabel(QLabel):
         return QSize(48, self.fontMetrics().height() + 2)
 
 
+BRAND_FONT = "Bahnschrift SemiBold"            # на Windows; иначе подставится ближайший шрифт
+
+
 class LogoMark(QWidget):
-    """Знак программы с движением: три капли краски разлетаются и сходятся при запуске, а при наведении вращаются."""
-    COLORS = ("#00b7eb", "#ff7a1a", "#ffd400")
-    HOME = ((1, 1), (10, 1), (5.5, 9.5))
+    """Знак компании, как в конвертере: плитка с текучим градиентом, мягкое свечение, пробегающий блик
+    и «прыжок» при наведении курсора."""
+    SIZE = 44
+
+    def __init__(self, letter="К"):
+        super().__init__()
+        self.letter = letter
+        self.setFixedSize(self.SIZE, self.SIZE)
+        self._flow, self._shine, self._pop = 0.0, -1.0, 0.0
+        self.setCursor(Qt.PointingHandCursor)
+        self._flow_anim = QVariantAnimation(self, duration=7000, startValue=0.0, endValue=1.0, loopCount=-1)
+        self._flow_anim.valueChanged.connect(self._on_flow)
+        self._shine_anim = QVariantAnimation(self, duration=1100, startValue=-0.5, endValue=1.5)
+        self._shine_anim.setEasingCurve(QEasingCurve.InOutQuad)
+        self._shine_anim.valueChanged.connect(self._on_shine)
+        self._shine_anim.finished.connect(lambda: self._on_shine(-1.0))
+        self._shine_timer = QTimer(self)
+        self._shine_timer.setInterval(5200)
+        self._shine_timer.timeout.connect(self._shine_anim.start)
+        self._pop_anim = QVariantAnimation(self, duration=420)
+        self._pop_anim.valueChanged.connect(self._on_pop)
+
+    def _on_flow(self, v):
+        self._flow = float(v)
+        self.update()
+
+    def _on_shine(self, v):
+        self._shine = float(v)
+        self.update()
+
+    def _on_pop(self, v):
+        self._pop = float(v)
+        self.update()
+
+    def showEvent(self, e):
+        super().showEvent(e)
+        self._flow_anim.start()
+        self._shine_timer.start()
+        QTimer.singleShot(700, self._shine_anim.start)
+
+    def hideEvent(self, e):
+        super().hideEvent(e)
+        self._flow_anim.stop()
+        self._shine_timer.stop()
+
+    def _pop_to(self, end, curve):
+        self._pop_anim.stop()
+        self._pop_anim.setStartValue(self._pop)
+        self._pop_anim.setEndValue(end)
+        self._pop_anim.setEasingCurve(curve)
+        self._pop_anim.start()
+
+    def enterEvent(self, e):
+        super().enterEvent(e)
+        self._pop_to(1.0, QEasingCurve.OutBack)
+        if self._shine_anim.state() != QVariantAnimation.Running:
+            self._shine_anim.start()
+
+    def leaveEvent(self, e):
+        super().leaveEvent(e)
+        self._pop_to(0.0, QEasingCurve.OutCubic)
+
+    def paintEvent(self, _):
+        import math
+        s = self.SIZE
+        a1, a2 = QColor(T["accent"]), QColor(mix(T["accent"], "#ffd21f", 0.75))
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+        p.setRenderHint(QPainter.TextAntialiasing)
+        c = QPointF(s / 2, s / 2)
+        breathe = 0.5 + 0.5 * math.sin(self._flow * 2 * math.pi)
+        halo = QRadialGradient(c, s * 0.62)
+        halo.setColorAt(0.55, QColor(a1.red(), a1.green(), a1.blue(), max(0, min(255, int(60 + 50 * breathe + 60 * self._pop)))))
+        halo.setColorAt(1, QColor(a1.red(), a1.green(), a1.blue(), 0))
+        p.fillRect(self.rect(), halo)
+        p.translate(c)
+        k = 1.0 + 0.12 * self._pop
+        p.scale(k, k)
+        p.rotate(-7 * self._pop)
+        p.translate(-c)
+        tile = QRectF(6, 6, s - 12, s - 12)
+        ang = self._flow * 2 * math.pi
+        dx, dy = math.cos(ang) * tile.width() * 0.75, math.sin(ang) * tile.height() * 0.75
+        g = QLinearGradient(c.x() - dx, c.y() - dy, c.x() + dx, c.y() + dy)
+        g.setColorAt(0, a1)
+        g.setColorAt(0.5, a2)
+        g.setColorAt(1, a1)
+        path = QPainterPath()
+        path.addRoundedRect(tile, 11, 11)
+        p.fillPath(path, QBrush(g))
+        p.save()
+        p.setClipPath(path)
+        gloss = QLinearGradient(0, tile.top(), 0, tile.bottom())
+        gloss.setColorAt(0, QColor(255, 255, 255, 70))
+        gloss.setColorAt(0.5, QColor(255, 255, 255, 0))
+        p.fillRect(tile, QBrush(gloss))
+        if self._shine > -0.9:
+            x = tile.left() + self._shine * tile.width()
+            band = QLinearGradient(x - 9, tile.top(), x + 9, tile.bottom())
+            band.setColorAt(0, QColor(255, 255, 255, 0))
+            band.setColorAt(0.5, QColor(255, 255, 255, 120))
+            band.setColorAt(1, QColor(255, 255, 255, 0))
+            p.fillRect(tile, QBrush(band))
+        p.restore()
+        font = QFont(BRAND_FONT)
+        font.setPixelSize(26)
+        font.setBold(True)
+        text = QPainterPath()
+        text.addText(0, 0, font, self.letter)
+        br = text.boundingRect()
+        text.translate(tile.center().x() - br.center().x(), tile.center().y() - br.center().y())
+        p.fillPath(text.translated(0, 1.5), QColor(0, 0, 0, 60))
+        p.fillPath(text, QColor(255, 255, 255))
+        p.end()
+
+
+class BrandTitle(QWidget):
+    """Название компании, как в конвертере: буквы один раз «падают» при открытии окна, потом по ним плывёт цвет.
+    Часть после первого слова показана тихо рядом."""
 
     def __init__(self):
         super().__init__()
-        self.setFixedSize(30, 30)
-        self._t, self._spin = 0.0, 0.0
+        self.brand = self.tail = ""
+        self._flow, self._intro, self._intro_done = 0.0, 0.0, False
+        self._flow_anim = QVariantAnimation(self, duration=5200, startValue=0.0, endValue=1.0, loopCount=-1)
+        self._flow_anim.valueChanged.connect(self._on_flow)
+        self._intro_anim = QVariantAnimation(self, duration=1100, startValue=0.0, endValue=1.0)
+        self._intro_anim.setEasingCurve(QEasingCurve.OutCubic)
+        self._intro_anim.valueChanged.connect(self._on_intro)
+        self._intro_anim.finished.connect(self._intro_finished)
+        self.setSizePolicy(QSizePolicy.Minimum, QSizePolicy.Fixed)
+
+    def _intro_finished(self):
+        self._intro_done, self._intro = True, 1.0
+        self.update()
+
+    def setText(self, text):
+        self.brand, _, self.tail = text.partition(" ")
+        self.updateGeometry()
+        self.update()
+
+    @staticmethod
+    def _fonts():
+        f1 = QFont(BRAND_FONT)
+        f1.setPixelSize(21)
+        f1.setBold(True)
+        f1.setLetterSpacing(QFont.AbsoluteSpacing, 0.6)
+        f2 = QFont("Bahnschrift Light")
+        f2.setPixelSize(14)
+        return f1, f2
+
+    def sizeHint(self):
+        f1, f2 = self._fonts()
+        w = QFontMetricsF(f1).horizontalAdvance(self.brand)
+        if self.tail:
+            w += 10 + QFontMetricsF(f2).horizontalAdvance(self.tail)
+        return QSize(int(w) + 8, 34)
+
+    def minimumSizeHint(self):
+        return self.sizeHint()
+
+    def _on_flow(self, v):
+        self._flow = float(v)
+        self.update()
+
+    def _on_intro(self, v):
+        self._intro = float(v)
+        self.update()
+
+    def showEvent(self, e):
+        super().showEvent(e)
+        self._flow_anim.start()
+        if not self._intro_done and self._intro_anim.state() != QVariantAnimation.Running:
+            self._intro_anim.start()
+
+    def hideEvent(self, e):
+        super().hideEvent(e)
+        self._flow_anim.stop()
+
+    def paintEvent(self, _):
+        f1, f2 = self._fonts()
+        fm1 = QFontMetricsF(f1)
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+        p.setRenderHint(QPainter.TextAntialiasing)
+        base = self.height() / 2 + (fm1.ascent() - fm1.descent()) / 2
+        width = max(1.0, fm1.horizontalAdvance(self.brand))
+        shift = self._flow * width * 2
+        g = QLinearGradient(-shift, 0, width - shift, 0)
+        for pos, col in ((0, T["accent"]), (0.35, "#ffd21f"), (0.7, T["text"]), (1, T["accent"])):
+            g.setColorAt(pos, QColor(col))
+        g.setSpread(QLinearGradient.RepeatSpread)
+        p.setFont(f1)
+        p.setPen(QPen(QBrush(g), 1))
+        n = max(1, len(self.brand))
+        x = 3.0
+        for i, ch in enumerate(self.brand):
+            k = min(1.0, max(0.0, (self._intro * (n + 5) - i) / 5))
+            p.setOpacity(k)
+            p.drawText(QPointF(x, base + (1 - k) * 12), ch)
+            x += fm1.horizontalAdvance(ch)
+        if self.tail:
+            p.setOpacity(min(1.0, max(0.0, (self._intro - 0.6) / 0.4)))
+            p.setFont(f2)
+            p.setPen(QColor(T["muted"]))
+            p.drawText(QPointF(x + 10, base - 1), self.tail)
+        p.end()
+
+
+class ModeSwitch(QWidget):
+    """Переключатель режимов ФОТО / ДОКУМЕНТ: бегунок плавно переезжает с лёгким «пружинным» отскоком, значок подсвечивается."""
+    changed = Signal(str)
+    ITEMS = (("photo", "ФОТО", "image"), ("doc", "ДОКУМЕНТ", "doc"))
+
+    def __init__(self, value="photo"):
+        super().__init__()
+        self.value, self._x, self._hover = value, (0.0 if value == "photo" else 1.0), -1
+        self.setFixedSize(236, 40)
+        self.setMouseTracking(True)
         self.setCursor(Qt.PointingHandCursor)
-        self._ain = QPropertyAnimation(self, b"gather", self)
-        self._ain.setDuration(1100)
-        self._ain.setEasingCurve(QEasingCurve.OutBack)
-        self._ain.setStartValue(0.0)
-        self._ain.setEndValue(1.0)
-        self._asp = QPropertyAnimation(self, b"spin", self)
-        self._asp.setDuration(900)
-        self._asp.setEasingCurve(QEasingCurve.InOutCubic)
-        QTimer.singleShot(150, self._ain.start)
+        self._anim = QPropertyAnimation(self, b"knobx", self)
+        self._anim.setDuration(380)
+        self._anim.setEasingCurve(QEasingCurve.OutBack)
 
-    def getGather(self):
-        return self._t
+    def getKx(self):
+        return self._x
 
-    def setGather(self, v):
-        self._t = float(v)
+    def setKx(self, v):
+        self._x = float(v)
         self.update()
 
-    def getSpin(self):
-        return self._spin
+    knobx = Property(float, getKx, setKx)       # не «x»: так уже называется положение виджета
 
-    def setSpin(self, v):
-        self._spin = float(v)
+    def set(self, value, animate=True):
+        if value == self.value:
+            return
+        self.value = value
+        end = 0.0 if value == "photo" else 1.0
+        if animate:
+            self._anim.stop()
+            self._anim.setStartValue(self._x)
+            self._anim.setEndValue(end)
+            self._anim.start()
+        else:
+            self._x = end
+            self.update()
+
+    def _idx(self, pos):
+        return 0 if pos.x() < self.width() / 2 else 1
+
+    def mouseMoveEvent(self, e):
+        self._hover = self._idx(e.position())
         self.update()
 
-    gather = Property(float, getGather, setGather)
-    spin = Property(float, getSpin, setSpin)
-
-    def enterEvent(self, e):
-        if self._asp.state() != QPropertyAnimation.Running:
-            self._asp.setStartValue(0.0)
-            self._asp.setEndValue(360.0)
-            self._asp.start()
-        super().enterEvent(e)
+    def leaveEvent(self, e):
+        self._hover = -1
+        self.update()
 
     def mousePressEvent(self, e):
-        self._ain.stop()
-        self._ain.start()
+        if e.button() == Qt.LeftButton:
+            v = self.ITEMS[self._idx(e.position())][0]
+            if v != self.value:
+                self.set(v)
+                self.changed.emit(v)
 
     def paintEvent(self, e):
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
-        k = self.width() / 24.0
-        p.scale(k, k)
-        p.translate(12, 12)
-        p.rotate(self._spin)
-        p.translate(-12, -12)
-        p.setPen(Qt.NoPen)
-        for (x, y), col in zip(self.HOME, self.COLORS):
-            far = 1.0 - self._t                              # 0 — капли в знаке, 1 — разлетелись
-            cx, cy = x + 6.5, y + 6.5
-            dx, dy = (cx - 12) * far * 1.6, (cy - 12) * far * 1.6
-            c = QColor(col)
-            c.setAlpha(int(215 * min(1.0, 0.25 + self._t)))
-            p.setBrush(c)
-            r = 6.5 * (0.55 + 0.45 * min(1.0, self._t))
-            p.drawEllipse(QPointF(cx + dx, cy + dy), r, r)
+        W, H, pad = self.width(), self.height(), 3
+        track = QRectF(0.5, 0.5, W - 1, H - 1)
+        p.setPen(QPen(QColor(T["border"]), 1))
+        p.setBrush(QColor(T["raised"]))
+        p.drawRoundedRect(track, H / 2, H / 2)
+        cw = (W - 2 * pad) / 2
+        x = pad + cw * self._x
+        thumb = QRectF(x, pad, cw, H - 2 * pad)
+        glow = QColor(T["accent"])                                   # мягкое свечение под бегунком
+        for i, a in enumerate((16, 30, 46)):
+            glow.setAlpha(a)
+            p.setPen(Qt.NoPen)
+            p.setBrush(glow)
+            p.drawRoundedRect(thumb.adjusted(-(3 - i), -(3 - i) / 2, 3 - i, (3 - i) / 2), (H - 2 * pad) / 2 + 2, (H - 2 * pad) / 2 + 2)
+        grad = QLinearGradient(thumb.topLeft(), thumb.bottomLeft())
+        grad.setColorAt(0, QColor(mix(T["accent"], "#ffffff", 0.18)))
+        grad.setColorAt(1, QColor(T["accent"]))
+        p.setBrush(QBrush(grad))
+        p.drawRoundedRect(thumb, (H - 2 * pad) / 2, (H - 2 * pad) / 2)
+        f = QFont(p.font())
+        f.setPixelSize(12)
+        f.setBold(True)
+        f.setLetterSpacing(QFont.AbsoluteSpacing, 0.8)
+        p.setFont(f)
+        for i, (key, text, ico) in enumerate(self.ITEMS):
+            cell = QRectF(pad + cw * i, pad, cw, H - 2 * pad)
+            near = max(0.0, 1.0 - abs(self._x - i))                  # 1 — бегунок под этим пунктом
+            col = QColor(mix(T["muted"] if self._hover != i else T["text"], T["accent_text"], near))
+            pm = pix(ico, col.name(), 18)
+            fm = QFontMetrics(f)
+            tw = fm.horizontalAdvance(text)
+            total = 18 + 7 + tw
+            lift = -1.0 * near
+            x0 = cell.center().x() - total / 2
+            p.drawPixmap(QPointF(x0, cell.center().y() - 9 + lift), pm)
+            p.setPen(col)
+            p.drawText(QRectF(x0 + 25, cell.top() + lift, tw + 4, cell.height()), Qt.AlignVCenter | Qt.AlignLeft, text)
+        p.end()
+
+
+class DocPlaceholder(QWidget):
+    """Экран режима ДОКУМЕНТ, пока он собирается."""
+
+    def paintEvent(self, e):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+        bg = QPainterPath()
+        bg.addRoundedRect(QRectF(self.rect()), 14, 14)
+        p.fillPath(bg, QColor(T["canvas"]))
+        pm = pix("doc", T["accent"], 64)
+        p.drawPixmap(QPointF(self.width() / 2 - 32, self.height() / 2 - 90), pm)
+        f = QFont(p.font())
+        f.setPixelSize(20)
+        f.setBold(True)
+        p.setFont(f)
+        p.setPen(QColor(T["text"]))
+        p.drawText(QRectF(0, self.height() / 2 - 10, self.width(), 34), Qt.AlignCenter, tr("Режим «Документ» скоро"))
+        f.setPixelSize(14)
+        f.setBold(False)
+        p.setFont(f)
+        p.setPen(QColor(T["muted"]))
+        p.drawText(QRectF(0, self.height() / 2 + 28, self.width(), 60), Qt.AlignHCenter | Qt.AlignTop,
+                   tr("Печать Word и PDF с профилем бумаги для документов, редактирование и распознавание текста."))
         p.end()
 
 
@@ -3297,6 +3568,7 @@ class MainWindow(SmartMixin, QMainWindow):
         self.center_stack = QStackedWidget()
         self.center_stack.addWidget(self.canvas)
         self.center_stack.addWidget(self.sheet_view)
+        self.center_stack.addWidget(DocPlaceholder())
         self.overlay = SendOverlay(self.center_stack)
         outer = vbox(self._topbar(), spacing=0)
         if T.get("orn"):
@@ -3374,8 +3646,10 @@ class MainWindow(SmartMixin, QMainWindow):
         bar = QFrame()
         bar.setObjectName("topbar")
         bar.setFixedHeight(58)
-        logo = LogoMark()
-        name = lbl("КопиТехник Принт", "logo")                  # название видно и на узком экране
+        brand = tr("КопиТехник Принт")
+        logo = LogoMark(brand[:1].upper())
+        name = BrandTitle()                                      # название видно и на узком экране
+        name.setText(brand)
         cp = self.compact
 
         def cap(text):                               # подпись у элемента; на узком экране скрыта (смысл — в подсказке)
@@ -3388,6 +3662,8 @@ class MainWindow(SmartMixin, QMainWindow):
         self.cb_format.setCurrentText(self.s["format"])
         self.cb_format.setMinimumWidth(120 if self.compact else 150)
         self.cb_format.currentTextChanged.connect(lambda v: self._layout_set("format", v))
+        self.mode_switch = ModeSwitch(getattr(self, "app_mode", "photo"))
+        self.mode_switch.changed.connect(self.set_app_mode)
         self.seg_nup = NupPicker(self.s["nup"])
         self.seg_nup.setToolTip(tr("Сколько фото печатать на одном листе"))
         self.seg_nup.changed.connect(lambda v: self._layout_set("nup", v))
@@ -3409,7 +3685,7 @@ class MainWindow(SmartMixin, QMainWindow):
         more.setMenu(menu)
         more.setPopupMode(QToolButton.InstantPopup)
         l = hbox(logo, name, 10, btn("Открыть", self.open_any, "primary", ico="open", tip="Открыть фото или папку (Ctrl+O)"), 10,
-                 cap("Бумага"), self.cb_format, 6,
+                 self.mode_switch, 10, cap("Бумага"), self.cb_format, 6,
                  cap("Поля"), self.sw_borders, self.e_border, lbl("мм", "muted"), None,
                  self.seg_view, 6, self.b_grid, more, ibtn("settings", "Настройки", self.open_settings),
                  spacing=8, margins=(16, 0, 12, 0))
@@ -4209,9 +4485,16 @@ class MainWindow(SmartMixin, QMainWindow):
         copies = [max(1, self.states[f].copies) for f in self.checked_files()]
         return sum(copies) if self.s["fill"] else -(-sum(copies) // n)
 
+    def set_app_mode(self, mode):
+        """ФОТО / ДОКУМЕНТ. Документы пока заглушка; настройки и рамки фото не трогаем."""
+        self.app_mode = mode
+        self.center_stack.setCurrentIndex(2 if mode == "doc" else (1 if self.view == "sheet" else 0))
+        if hasattr(self, "mode_switch"):
+            self.mode_switch.set(mode)
+
     def set_view(self, v):
         self.view = "sheet" if v == "sheet" else "crop"
-        self.center_stack.setCurrentIndex(1 if self.view == "sheet" else 0)
+        self.center_stack.setCurrentIndex(2 if getattr(self, "app_mode", "photo") == "doc" else (1 if self.view == "sheet" else 0))
         self.seg_view.set(self.view)
         if self.view == "sheet":
             self.sheet_view.refresh()
@@ -6240,7 +6523,7 @@ pc.EN.update({
 })
 pc.EN.update({
     "КопиТехник Принт": "KopiTehnik Print", "КопиТехник Принт — кадрирование для фотопечати": "KopiTehnik Print — cropping for photo printing",
-    "Своё число": "Custom", "Своё число фото на листе": "Custom number of photos per sheet",
+    "Своё число": "Custom", "Режим «Документ» скоро": "Document mode is coming", "Печать Word и PDF с профилем бумаги для документов, редактирование и распознавание текста.": "Printing Word and PDF with a document paper profile, text editing and recognition.", "Своё число фото на листе": "Custom number of photos per sheet",
     "Обновление": "Updates", "Версия программы": "Program version", "Проверять обновления при запуске": "Check for updates at start",
     "Проверить обновления": "Check for updates", "Доступно обновление": "Update available", "Вышла новая версия:": "A new version is out:",
     "Открыть страницу загрузки": "Open the download page", "Пропустить эту версию": "Skip this version", "Позже": "Later",
