@@ -21,6 +21,21 @@ class Stats(unittest.TestCase):
         self.assertEqual(dict(s["paper_doc"]), {"A4 (210x297 мм)": 5})
         self.assertTrue(ps.verify()[0])
 
+    def test_by_printer(self):
+        import time
+        now = time.time()
+        mk = lambda pr, mode, paper, n, kind: {"ts": now, "t": time.strftime("%Y-%m-%d %H:%M:%S"), "printer": pr, "mode": mode,
+                                               "paper": paper, "sheets": n, "kind": kind}
+        recs = [mk("Canon", "crop", "102x152", 4, "photo"), mk("HP", "document", "210x297", 2, "doc"),
+                mk("Canon", "crop", "102x152", 1, "photo")]
+        self.assertEqual(ps.printer_names(recs), ["Canon", "HP"])
+        d = dict(ps.by_printer(recs, "today"))
+        self.assertEqual((d["Canon"]["photo"], d["Canon"]["doc"]), (5, 0))
+        self.assertEqual(d["HP"]["rows"], [("doc", "A4 (210x297 мм)", 2)])
+        self.assertEqual([n for n, _ in ps.by_printer(recs, "all", "HP")], ["HP"])
+        out = os.path.join(tempfile.mkdtemp(), "p.csv")
+        self.assertEqual(ps.export_printers_csv(out, "all", "HP", recs), 1)
+
     def test_old_record_without_kind(self):
         self.assertEqual(ps.rkind({"mode": "document"}), "doc")
         self.assertEqual(ps.rkind({"mode": "crop"}), "photo")

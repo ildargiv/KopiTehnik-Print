@@ -6542,8 +6542,35 @@ class AdminStatsDialog(QDialog):
         self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.table.horizontalHeader().setStretchLastSection(True)
         self.table.verticalHeader().setVisible(False)
+        self.pr_period = QComboBox()
+        for k, name in (("today", "Сегодня"), ("week", "7 дней"), ("month", "30 дней"), ("all", "Всё время")):
+            self.pr_period.addItem(tr(name), k)
+        self.pr_period.setCurrentIndex(3)
+        self.pr_printer = QComboBox()
+        self.pr_printer.addItem(tr("Все принтеры"), None)
+        for name in ps.printer_names(self.recs):
+            self.pr_printer.addItem(name, name)
+        self.pr_period.currentIndexChanged.connect(lambda *_: self.fill_printers())
+        self.pr_printer.currentIndexChanged.connect(lambda *_: self.fill_printers())
+        self.l_pr = QLabel()
+        self.l_pr.setTextFormat(Qt.RichText)
+        self.l_pr.setAlignment(Qt.AlignTop | Qt.AlignLeft)
+        sc2 = QScrollArea()
+        sc2.setWidgetResizable(True)
+        sc2.setFrameShape(QFrame.NoFrame)
+        sc2.setWidget(self.l_pr)
+        pr_page = QWidget()
+        pv = vbox(spacing=8, margins=(8, 8, 8, 8))
+        lp, lq = QLabel(tr("Период")), QLabel(tr("Принтер"))
+        for w_ in (lp, lq):
+            w_.setStyleSheet("color:%s;background:transparent" % T["text"])
+        pv.addLayout(hbox(lp, self.pr_period, lq, self.pr_printer,
+                          None, btn("Экспорт по принтерам…", self._export_printers), spacing=8))
+        pv.addWidget(sc2, 1)
+        pr_page.setLayout(pv)
         tabs = QTabWidget()
         tabs.addTab(sc, tr("Сводка"))
+        tabs.addTab(pr_page, tr("Принтеры"))
         tabs.addTab(self.table, tr("Журнал"))
         v.addWidget(tabs, 1)
         v.addLayout(hbox(btn("Экспорт в CSV…", self._export), btn("Сменить пароль", self._change), btn("Очистить журнал", self._clear),
@@ -6587,6 +6614,7 @@ class AdminStatsDialog(QDialog):
                 h.append("<tr>%s%s%s</tr>" % (td(d), td(n, "right"), td('<span style="color:%s">%s</span>' % (T["accent"], "█" * max(1, round(24 * n / mx))))))
             h.append("</table>")
         self.l_sum.setText("".join(h))
+        self.fill_printers()
         rows = list(reversed(self.recs[-500:]))
         self.table.setRowCount(len(rows))
         for i, r in enumerate(rows):
@@ -6598,6 +6626,29 @@ class AdminStatsDialog(QDialog):
                     v = ps.paper_label(v)
                 self.table.setItem(i, j, QTableWidgetItem(", ".join(v) if isinstance(v, list) else str(v)))
         self.table.resizeColumnsToContents()
+
+    def fill_printers(self):
+        data = ps.by_printer(self.recs, self.pr_period.currentData(), self.pr_printer.currentData())
+        td = lambda x, al="left": '<td style="padding:2px 14px 2px 0" align="%s">%s</td>' % (al, x)
+        if not data:
+            self.l_pr.setText("<p>%s</p>" % tr("Нет данных за выбранный период."))
+            return
+        h = []
+        for name, d in data:
+            h.append("<h3>%s — %s: %d (%s %d, %s %d)</h3><table>" % (name, tr("листов"), d["sheets"], tr("фото"), d["photo"], tr("документы"), d["doc"]))
+            h.append("<tr>%s%s%s</tr>" % (td("<b>%s</b>" % tr("Тип")), td("<b>%s</b>" % tr("Бумага")), td("<b>%s</b>" % tr("Листов"), "right")))
+            for kind, paper, n in d["rows"]:
+                h.append("<tr>%s%s%s</tr>" % (td(tr("Документ" if kind == "doc" else "Фото")), td(paper), td(n, "right")))
+            h.append("</table>")
+        self.l_pr.setText("".join(h))
+
+    def _export_printers(self):
+        p, _ = QFileDialog.getSaveFileName(self, tr("Экспорт по принтерам…"), "print_by_printer.csv", "CSV (*.csv)")
+        if p:
+            try:
+                info(self, trf("Сохранено строк: {n}", n=ps.export_printers_csv(p, self.pr_period.currentData(), self.pr_printer.currentData(), self.recs)))
+            except OSError as ex:
+                warn(self, str(ex))
 
     def _export(self):
         p, _ = QFileDialog.getSaveFileName(self, tr("Экспорт в CSV…"), "print_log.csv", "CSV (*.csv)")
@@ -7142,7 +7193,8 @@ pc.EN.update({
     "Копия журнала": "Journal backup", "Сводка": "Summary", "Журнал": "Journal",
     "Время": "Time", "Бумага, мм": "Paper, mm", "Файлов на листе": "Files on the sheet", "Файлы": "Files", "Напечатано файлов": "Files printed", "Режим": "Mode", "Источник": "Source", "Листов": "Sheets",
     "Всего напечатано": "Total printed", "Период": "Period", "Фото": "Photos", "Сегодня": "Today", "7 дней": "7 days", "30 дней": "30 days",
-    "Всё время": "All time", "По принтерам": "By printer", "По формату бумаги": "By paper size",
+    "Всё время": "All time", "По принтерам": "By printer", "Принтеры": "Printers", "Все принтеры": "All printers", "Принтер": "Printer",
+    "Экспорт по принтерам…": "Export by printer…", "Нет данных за выбранный период.": "No data for the selected period.", "листов": "sheets", "фото": "photos", "документы": "documents", "Период": "Period", "По формату бумаги": "By paper size",
     "По источнику (app — окно программы, agent — ИИ-агент)": "By source (app — program window, agent — AI agent)",
     "Последние 14 дней": "Last 14 days",
 })

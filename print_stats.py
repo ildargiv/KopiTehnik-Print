@@ -251,6 +251,54 @@ def summary(records=None):
     return out
 
 
+PERIODS = ("today", "week", "month", "all")
+
+
+def period_start(period):
+    return {"today": _midnight(0), "week": _midnight(6), "month": _midnight(29)}.get(period, 0.0)
+
+
+def printer_names(records=None):
+    recs = [r for r in (records if records is not None else read_all()) if not r.get("bad")]
+    return sorted({r.get("printer") or "-" for r in recs})
+
+
+def by_printer(records=None, period="all", printer=None):
+    """Разбивка по принтерам: [(принтер, {"sheets","photo","doc","rows":[(тип, бумага, листов)]})], самые загруженные первыми."""
+    since = period_start(period)
+    out = {}
+    for r in (records if records is not None else read_all()):
+        if r.get("bad") or r.get("ts", 0) < since:
+            continue
+        name = r.get("printer") or "-"
+        if printer and name != printer:
+            continue
+        n = int(r.get("sheets", 1))
+        kind = rkind(r)
+        d = out.setdefault(name, {"sheets": 0, "photo": 0, "doc": 0, "rows": {}})
+        d["sheets"] += n
+        d[kind] += n
+        key = (kind, paper_label(r.get("paper")))
+        d["rows"][key] = d["rows"].get(key, 0) + n
+    res = []
+    for name, d in out.items():
+        d["rows"] = sorted(((k[0], k[1], n) for k, n in d["rows"].items()), key=lambda x: (x[0] != "photo", -x[2]))
+        res.append((name, d))
+    return sorted(res, key=lambda kv: -kv[1]["sheets"])
+
+
+def export_printers_csv(path, period="all", printer=None, records=None):
+    rows = 0
+    with open(path, "w", newline="", encoding="utf-8-sig") as f:
+        w = csv.writer(f, delimiter=";")
+        w.writerow(["printer", "type", "paper", "sheets"])
+        for name, d in by_printer(records, period, printer):
+            for kind, paper, n in d["rows"]:
+                w.writerow([name, kind, paper, n])
+                rows += 1
+    return rows
+
+
 def export_csv(path):
     recs = [r for r in read_all() if not r.get("bad")]
     with open(path, "w", newline="", encoding="utf-8-sig") as f:
