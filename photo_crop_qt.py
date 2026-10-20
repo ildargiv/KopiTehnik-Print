@@ -639,32 +639,6 @@ class ModeSwitch(QWidget):
         p.end()
 
 
-class DocPlaceholder(QWidget):
-    """Экран режима ДОКУМЕНТ, пока он собирается."""
-
-    def paintEvent(self, e):
-        p = QPainter(self)
-        p.setRenderHint(QPainter.Antialiasing)
-        bg = QPainterPath()
-        bg.addRoundedRect(QRectF(self.rect()), 14, 14)
-        p.fillPath(bg, QColor(T["canvas"]))
-        pm = pix("doc", T["accent"], 64)
-        p.drawPixmap(QPointF(self.width() / 2 - 32, self.height() / 2 - 90), pm)
-        f = QFont(p.font())
-        f.setPixelSize(20)
-        f.setBold(True)
-        p.setFont(f)
-        p.setPen(QColor(T["text"]))
-        p.drawText(QRectF(0, self.height() / 2 - 10, self.width(), 34), Qt.AlignCenter, tr("Режим «Документ» скоро"))
-        f.setPixelSize(14)
-        f.setBold(False)
-        p.setFont(f)
-        p.setPen(QColor(T["muted"]))
-        p.drawText(QRectF(0, self.height() / 2 + 28, self.width(), 60), Qt.AlignHCenter | Qt.AlignTop,
-                   tr("Печать Word и PDF с профилем бумаги для документов, редактирование и распознавание текста."))
-        p.end()
-
-
 class MotionButton(QPushButton):
     """Кнопка с живым откликом: плавная подсветка при наведении и волна от места нажатия."""
 
@@ -2376,6 +2350,7 @@ class SaveSignals(QObject):
     done = Signal(int, list, object, list)
     sheets_ready = Signal(list, str)
     printed = Signal(str, int, str)
+    doc_edited = Signal(str)
     queue = Signal(object, str)
     smart_progress = Signal(int, int, str)
     smart_done = Signal(object, str)
@@ -3477,7 +3452,317 @@ def update_available(latest):
     return bool(latest and latest[0] and _ver(latest[0]) > _ver(APP_VERSION))
 
 
-class MainWindow(SmartMixin, QMainWindow):
+# ---------------------------------------------------------------- режим «Документ»: PDF и Word, печать с отдельным профилем
+import doc_tools as dt                                          # noqa: E402
+
+DOC_EXTS = {".pdf", ".doc", ".docx", ".docm", ".dot", ".dotx", ".rtf", ".odt", ".wps", ".xls", ".xlsx", ".xlsm", ".ods",
+            ".ppt", ".pptx", ".pptm", ".pps", ".ppsx", ".odp"}
+
+
+class DocView(QWidget):
+    """Окно просмотра документа: пустой экран с кнопкой или постраничный просмотр PDF."""
+
+    def __init__(self, app):
+        super().__init__()
+        from PySide6.QtPdf import QPdfDocument
+        from PySide6.QtPdfWidgets import QPdfView
+        self.app = app
+        self.doc = QPdfDocument(self)
+        self.view = QPdfView(self)
+        self.view.setDocument(self.doc)
+        self.view.setPageMode(QPdfView.PageMode.MultiPage)
+        self.view.setZoomMode(QPdfView.ZoomMode.FitToWidth)
+        self.view.setPageSpacing(12)
+        self.view.setStyleSheet("background: transparent; border: none;")
+        self.empty = QWidget()
+        self.empty.setAttribute(Qt.WA_TranslucentBackground)
+        self.b_open = btn("Открыть документ…", app.doc_open, "primary", big=True, ico="open")
+        el = vbox(None, hbox(None, lbl("Документ", "h1"), None), hbox(None, lbl("PDF, Word, Excel, PowerPoint и другие офисные файлы", "muted"), None),
+                  hbox(None, self.b_open, None), None, spacing=10)
+        self.empty.setLayout(el)
+        self.stack = QStackedWidget()
+        self.stack.addWidget(self.empty)
+        self.stack.addWidget(self.view)
+        self.setLayout(vbox(self.stack))
+        self.setAcceptDrops(True)
+
+    def load(self, pdf):
+        self.doc.load(str(pdf))
+        self.stack.setCurrentIndex(1 if self.doc.pageCount() > 0 else 0)
+        return self.doc.pageCount()
+
+    def clear(self):
+        self.doc.close()
+        self.stack.setCurrentIndex(0)
+
+    def paintEvent(self, e):
+        p = QPainter(self)
+        bg = QPainterPath()
+        bg.addRoundedRect(QRectF(self.rect()), 14, 14)
+        p.fillPath(bg, QColor(T["canvas"]))
+        p.end()
+
+    def dragEnterEvent(self, e):
+        if e.mimeData().hasUrls():
+            e.acceptProposedAction()
+
+    def dropEvent(self, e):
+        for u in e.mimeData().urls():
+            if u.isLocalFile():
+                self.app.doc_load(Path(u.toLocalFile()))
+                break
+
+
+class DocMixin:
+    """Режим «Документ»: открыть PDF/Word, выбрать страницы и бумагу, напечатать со своим профилем принтера.
+    Правка PDF и распознавание текста запускаются в программе «КопиТехник Конвертор»."""
+
+    def _doc_init(self):
+        st = self.settings
+        self.doc = {"src": None, "pdf": None, "pages": 0}
+        self.d = {"paper": st.get("doc_paper") if st.get("doc_paper") in dt.PAPERS else "A4",
+                  "fit": st.get("doc_fit") if st.get("doc_fit") in ("fit", "shrink", "actual") else "fit",
+                  "margin": str(st.get("doc_margin", "5")), "cm_on": bool(st.get("doc_cm_on", False)), "icc": st.get("doc_icc", ""),
+                  "range": "", "copies": 1}
+
+    def _page_doc(self):
+        d = self.d
+        self.l_doc = lbl("Документ не открыт", wrap=True)
+        self.l_doc2 = lbl("", "muted", wrap=True)
+        self.b_doc_edit = btn("Редактировать PDF", lambda: self.doc_convert(False), ico="move", tip="Откроется в программе «КопиТехник Конвертор»")
+        self.b_doc_ocr = btn("Распознать текст", lambda: self.doc_convert(True), ico="sparkle", tip="Распознавание в «КопиТехник Конвертор»")
+        doc = card("Документ", self.l_doc, self.l_doc2, btn("Открыть документ…", self.doc_open, ico="open"),
+                   self.b_doc_edit, self.b_doc_ocr)
+        cb = QComboBox()
+        cb.addItems(list(dt.PAPERS))
+        cb.setCurrentText(d["paper"])
+        cb.activated.connect(lambda _i: (d.__setitem__("paper", cb.currentText()), self.settings.__setitem__("doc_paper", cb.currentText())))
+        seg = QComboBox()
+        for text, val in (("По листу", "fit"), ("Только уменьшить", "shrink"), ("Как есть", "actual")):
+            seg.addItem(tr(text), val)
+        seg.setCurrentIndex(max(0, seg.findData(d["fit"])))
+        seg.activated.connect(lambda i: (d.__setitem__("fit", seg.itemData(i)), self.settings.__setitem__("doc_fit", seg.itemData(i))))
+        e_mar = QLineEdit(d["margin"])
+        e_mar.setFixedWidth(46)
+        e_mar.textEdited.connect(lambda v: (d.__setitem__("margin", v), self.settings.__setitem__("doc_margin", v)))
+        e_rng = QLineEdit()
+        e_rng.setPlaceholderText(tr("все, или 1-3, 5, 8-"))
+        e_rng.textEdited.connect(lambda v: d.__setitem__("range", v))
+        l_cop = lbl("1")
+        l_cop.setFixedWidth(30)
+        l_cop.setAlignment(Qt.AlignCenter)
+
+        def step(k):
+            d["copies"] = max(1, min(99, d["copies"] + k))
+            l_cop.setText(str(d["copies"]))
+        cop = hbox(ibtn("minus", "Меньше копий", lambda: step(-1), 30, True, isize=15), l_cop,
+                   ibtn("plus", "Больше копий", lambda: step(1), 30, True, isize=15), spacing=4)
+        self.l_doc_printer = lbl("", "muted", wrap=True)
+        prn = card("Печать документа", row("Бумага", cb), row("Как страница ложится на лист", seg),
+                   row("Поля, мм", e_mar), row("Страницы", e_rng), row("Копий", cop), self.l_doc_printer)
+        sw = Switch(d["cm_on"])
+        sw.toggled.connect(lambda on: (d.__setitem__("cm_on", bool(on)), self.settings.__setitem__("doc_cm_on", bool(on))))
+        self.l_doc_icc = lbl(self._doc_icc_text(), "muted", wrap=True)
+        prof = card("Профиль для документов", row("Использовать профиль принтера", sw), self.l_doc_icc,
+                    btn("Выбрать профиль…", self.doc_pick_icc, ico="profile"),
+                    lbl("У документов своя бумага и свой профиль, он не связан с профилем фото.", "muted", wrap=True))
+        return self._scroll(doc, prn, prof)
+
+    def _doc_icc_text(self):
+        p = self.d["icc"].strip()
+        return Path(p).name if p else tr("Профиль не выбран")
+
+    def doc_pick_icc(self):
+        p, _ = QFileDialog.getOpenFileName(self, tr("Цветовой профиль принтера"), self.settings.get("icc_dir") or "",
+                                           "ICC (*.icc *.icm);;* (*.*)")
+        if p:
+            self.d["icc"] = p
+            self.settings["doc_icc"] = p
+            self.l_doc_icc.setText(self._doc_icc_text())
+
+    # ---- открыть
+    def doc_open(self):
+        p, _ = QFileDialog.getOpenFileName(self, tr("Открыть документ"), self.start_dir(),
+                                           "%s (%s);;* (*.*)" % (tr("Документы"), " ".join("*" + x for x in sorted(DOC_EXTS))))
+        if p:
+            self.doc_load(Path(p))
+
+    def doc_load(self, path):
+        import office_convert as oc
+        ext = path.suffix.lower()
+        if ext not in DOC_EXTS:
+            warn(self, "Этот тип файла не поддерживается.")
+            return
+        pdf = path
+        if ext != ".pdf":
+            QApplication.setOverrideCursor(Qt.WaitCursor)
+            try:
+                pdf = oc.cached_pdf(path)
+            except Exception as ex:
+                warn(self, tr("Не удалось перевести документ в PDF") + ":\n%s" % ex)
+                return
+            finally:
+                QApplication.restoreOverrideCursor()
+        n = self.doc_view.load(pdf)
+        if n <= 0:
+            warn(self, "Не удалось открыть PDF.")
+            return
+        self.doc.update(src=path, pdf=pdf, pages=n)
+        self.l_doc.setText(path.name)
+        self.l_doc2.setText(trf("Страниц: {n}", n=n) + ("" if ext == ".pdf" else "  ·  " + tr("переведён в PDF")))
+
+    # ---- конвертер: правка PDF и распознавание
+    def doc_convert(self, ocr):
+        src = self.doc["src"]
+        if not src:
+            info(self, "Сначала откройте документ.")
+            return
+        exe = dt.find_converter(self.settings.get("converter_path", ""))
+        if not exe:
+            box = QMessageBox(self)
+            box.setWindowTitle("PhotoCrop")
+            box.setText(tr("Правка PDF и распознавание делаются в программе «КопиТехник Конвертор». Она не найдена на этом компьютере."))
+            go = box.addButton(tr("Скачать конвертер"), QMessageBox.AcceptRole)
+            hand = box.addButton(tr("Указать Converter.exe…"), QMessageBox.ActionRole)
+            box.addButton(tr("Отмена"), QMessageBox.RejectRole)
+            box.exec()
+            if box.clickedButton() is go:
+                import webbrowser
+                webbrowser.open(dt.CONVERTER_RELEASES)
+            elif box.clickedButton() is hand:
+                p, _ = QFileDialog.getOpenFileName(self, "Converter.exe", "", "Converter.exe (*.exe)")
+                if p:
+                    self.settings["converter_path"] = p
+                    self.doc_convert(ocr)
+            return
+        self.l_doc2.setText(tr("Открыт конвертер: закончите правку и сохраните."))
+        QApplication.setOverrideCursor(Qt.WaitCursor)
+
+        def work():
+            try:
+                self.sig.doc_edited.emit(dt.run_edit(exe, src, ocr) or "")
+            except Exception as ex:
+                self.sig.doc_edited.emit("!" + str(ex))
+        threading.Thread(target=work, daemon=True).start()
+
+    def _doc_edited(self, result):
+        QApplication.restoreOverrideCursor()
+        if result.startswith("!"):
+            warn(self, tr("Не удалось запустить конвертер") + ":\n" + result[1:])
+        elif result:
+            self.doc_load(Path(result))
+            self.l_doc2.setText(self.l_doc2.text() + "  ·  " + tr("изменён в конвертере"))
+        else:
+            self.l_doc2.setText(trf("Страниц: {n}", n=self.doc["pages"]))
+
+    # ---- печать
+    def print_doc(self):
+        if self.saving or self.printing:
+            return
+        pdf = self.doc["pdf"]
+        if not pdf or self.doc["pages"] <= 0:
+            info(self, "Сначала откройте документ.")
+            return
+        pr, d = self.pr, self.d
+        if not pr["printer"] or self.blob is None:
+            self.show_page(2)
+            info(self, "Принтер не выбран или недоступен. Выберите принтер на вкладке «Принтер».")
+            return
+        try:
+            pages = dt.parse_range(d["range"], self.doc["pages"])
+        except ValueError as ex:
+            warn(self, tr("Неверный диапазон страниц") + ": %s" % ex)
+            return
+        cm = None
+        if d["cm_on"]:
+            try:
+                cm = pc.cm_build(d["icc"], self.s["intent"], self.s["bpc"], self.s["embed"])
+            except ValueError as ex:
+                warn(self, str(ex))
+                return
+        try:
+            margin = max(0.0, min(30.0, float(str(d["margin"]).replace(",", ".") or 0)))
+        except ValueError:
+            margin = 0.0
+        pw, ph = dt.PAPERS[d["paper"]]
+        try:
+            blob = self.blob
+            code = self._match_paper(pw, ph)
+            blob = pc.devmode_write(blob, {"paper": code} if code is not None else {"paper_mm": [pw, ph]})
+            blob = pc.prepare_blob(pr["printer"], blob, "portrait", {"paper": pc.PAPER_DRIVER, "icm_off": bool(pr["icm_off"])})
+            geom = pc.printer_geometry(pr["printer"], blob, "portrait")
+            ppi = pc.resolve_ppi({"ppi": pr["ppi"]}, geom)
+        except Exception as ex:
+            warn(self, tr("Не удалось подготовить печать") + ":\n%s" % ex)
+            return
+        total = len(pages) * d["copies"]
+        text = "%s\n%s: %s\n%s: %s, %s: %d\n%s: %d" % (self.doc["src"].name, tr("Принтер"), pr["printer"], tr("Бумага"), d["paper"],
+                                                       tr("копий"), d["copies"], tr("Листов к печати"), total)
+        if cm:
+            text += "\n%s: %s" % (tr("Профиль принтера"), cm["name"])
+        if not ask(self, text + "\n\n" + tr("Начать печать?")):
+            return
+        name, src = self.doc["src"].name, self.doc["src"]
+        self.cancel.clear()
+        self.printing = True
+        self._print_files = []
+        self._busy(total, tr("Подготовка…"), [], "print")
+        self.b_print.set_progress(0.0)
+        self.b_cancel.show()
+        job = dict(printer=pr["printer"], blob=blob, geom=geom, ppi=ppi, pages=pages, copies=d["copies"], fit=d["fit"], margin=margin,
+                   cm=cm, pdf=str(pdf), name=name, paper=d["paper"], total=total)
+
+        def work():
+            try:
+                done, sent = self._doc_print_job(job)
+                self.sig.printed.emit("done" if done else "cancelled", sent, "")
+            except Exception as ex:
+                self.sig.printed.emit("error", 0, "%s: %s" % (ex.__class__.__name__, ex))
+        threading.Thread(target=work, daemon=True).start()
+
+    def _doc_print_job(self, j):
+        """В потоке: страницы рендерятся и одним заданием уходят на принтер. В журнал печати идёт только полностью отправленное задание."""
+        from PySide6.QtCore import QSize
+        from PySide6.QtPdf import QPdfDocument
+        doc = QPdfDocument()
+        if doc.load(j["pdf"]) != QPdfDocument.Error.None_:
+            raise OSError("Не удалось открыть PDF для печати.")
+        paper_w, paper_h = j["geom"]["paper"]
+        W, H = round(paper_w / 25.4 * j["ppi"]), round(paper_h / 25.4 * j["ppi"])
+        sent = 0
+        with pc.PrinterJob(j["printer"], j["blob"], j["name"]) as job:
+            for pi in j["pages"]:
+                sz = doc.pagePointSize(pi)
+                pgw, pgh = sz.width() / 72 * 25.4, sz.height() / 72 * 25.4
+                x, y, w, h, rot = dt.place_page(pgw, pgh, paper_w, paper_h, j["fit"], j["margin"])
+                px, py, pw_, ph_ = (round(v / 25.4 * j["ppi"]) for v in (x, y, w, h))
+                rw, rh = (ph_, pw_) if rot else (pw_, ph_)
+                for _ in range(j["copies"]):
+                    if self.cancel.is_set():
+                        job.abort()
+                        return False, 0
+                    qi = doc.render(pi, QSize(max(1, rw), max(1, rh)))
+                    qi = qi.convertToFormat(QImage.Format_RGBA8888)
+                    im = pc.Image.frombuffer("RGBA", (qi.width(), qi.height()), bytes(qi.constBits()), "raw", "RGBA", qi.bytesPerLine(), 1)
+                    if rot:
+                        im = im.transpose(pc.Image.ROTATE_90)
+                    sheet = pc.Image.new("RGB", (W, H), "white")
+                    sheet.paste(im, (px, py), im)
+                    if j["cm"]:
+                        sheet = pc.apply_printer_profile(sheet, None, j["cm"])
+                    job.page(sheet)
+                    sent += 1
+                    self.sig.progress.emit(sent - 1, j["total"], "\x01" + tr("Отправляю в печать страницу") + " %d…" % (pi + 1))
+            job.finish()
+        try:
+            import print_stats
+            print_stats.record(j["printer"], 0, j["paper"], "document", "app", sent, [j["name"]])
+        except Exception:
+            pass
+        return True, sent
+
+
+class MainWindow(SmartMixin, DocMixin, QMainWindow):
     _only = None                         # на время расчёта листа — печатать только это фото
     update_checked = Signal(object, bool)    # (результат проверки, показать ли ответ «обновлений нет»)
 
@@ -3527,6 +3812,8 @@ class MainWindow(SmartMixin, QMainWindow):
         self.sig.done.connect(self._save_done)
         self.sig.sheets_ready.connect(self._print_sheets_ready)
         self.sig.printed.connect(self._print_done)
+        self.sig.doc_edited.connect(self._doc_edited)
+        self._doc_init()
         self.sig.queue.connect(self._queue_ready)
         self.smart_init()
         pr = self.pr = {"printer": "", "ppi": "Авто", "sharp": 0, "marks": False, "shrink": "0", "icm_off": True, "copies": 1,
@@ -3568,12 +3855,14 @@ class MainWindow(SmartMixin, QMainWindow):
         self.center_stack = QStackedWidget()
         self.center_stack.addWidget(self.canvas)
         self.center_stack.addWidget(self.sheet_view)
-        self.center_stack.addWidget(DocPlaceholder())
+        self.doc_view = DocView(self)
+        self.center_stack.addWidget(self.doc_view)
         self.overlay = SendOverlay(self.center_stack)
         outer = vbox(self._topbar(), spacing=0)
         if T.get("orn"):
             outer.addWidget(OrnBand())
-        main = hbox(self._left(), self._center(), self._right(), spacing=0)
+        self.left_w = self._left()
+        main = hbox(self.left_w, self._center(), self._right(), spacing=0)
         main.setStretch(1, 1)
         outer.addLayout(main, 1)
         root.setLayout(outer)
@@ -3652,8 +3941,13 @@ class MainWindow(SmartMixin, QMainWindow):
         name.setText(brand)
         cp = self.compact
 
+        self._caps = []
+        self._photo_only = []                        # элементы верхней панели, нужные только в режиме «Фото»
+
         def cap(text):                               # подпись у элемента; на узком экране скрыта (смысл — в подсказке)
             c_ = lbl(text, "muted")
+            self._photo_only.append(c_)
+            self._caps.append(c_)
             if cp:
                 c_.hide()
             return c_
@@ -3686,11 +3980,17 @@ class MainWindow(SmartMixin, QMainWindow):
         more.setPopupMode(QToolButton.InstantPopup)
         l = hbox(logo, name, 10, btn("Открыть", self.open_any, "primary", ico="open", tip="Открыть фото или папку (Ctrl+O)"), 10,
                  self.mode_switch, 10, cap("Бумага"), self.cb_format, 6,
-                 cap("Поля"), self.sw_borders, self.e_border, lbl("мм", "muted"), None,
+                 cap("Поля"), self.sw_borders, self.e_border, self._mm_lbl(), None,
                  self.seg_view, 6, self.b_grid, more, ibtn("settings", "Настройки", self.open_settings),
                  spacing=8, margins=(16, 0, 12, 0))
         bar.setLayout(l)
+        self._photo_only += [self.cb_format, self.sw_borders, self.e_border, self.seg_view, self.b_grid]
         return bar
+
+    def _mm_lbl(self):
+        w = lbl("мм", "muted")
+        self._photo_only.append(w)
+        return w
 
     @staticmethod
     def _logo():
@@ -3778,7 +4078,9 @@ class MainWindow(SmartMixin, QMainWindow):
         self.pages.addWidget(self._page_color())
         self.pages.addWidget(self._page_print())
         self.pages.addWidget(self._page_smart())
-        self.seg_page = Segmented([("Фото", 0), ("Умная рамка", 3), ("Принтер", 2)], 0)
+        self.pages.addWidget(self._page_doc())
+        self.seg_page = Segmented([("Фото", 0), ("Умная рамка", 3), ("Принтер", 2), ("Документ", 4)], 0)
+        self.seg_page.group.button(3).hide()                 # вкладка «Документ» видна только в режиме документа
         self.seg_page.changed.connect(self.show_page)
         self.progress = QProgressBar()
         self.progress.setTextVisible(False)
@@ -3991,6 +4293,8 @@ class MainWindow(SmartMixin, QMainWindow):
     def print_now(self, only=None):
         """Печать прямо из этого окна: листы собираются и уходят на выбранный принтер.
         only — напечатать только это фото (остальные отметки не трогаются)."""
+        if getattr(self, "app_mode", "photo") == "doc":
+            return self.print_doc()
         if self.saving or self.printing:
             return
         files = [only] if only is not None else self.checked_files()
@@ -4486,11 +4790,21 @@ class MainWindow(SmartMixin, QMainWindow):
         return sum(copies) if self.s["fill"] else -(-sum(copies) // n)
 
     def set_app_mode(self, mode):
-        """ФОТО / ДОКУМЕНТ. Документы пока заглушка; настройки и рамки фото не трогаем."""
+        """ФОТО / ДОКУМЕНТ: в режиме документа слева скрыты миниатюры, справа вместо «Фото» и «Умной рамки» — страница «Документ»."""
         self.app_mode = mode
-        self.center_stack.setCurrentIndex(2 if mode == "doc" else (1 if self.view == "sheet" else 0))
+        doc = mode == "doc"
+        self.center_stack.setCurrentIndex(2 if doc else (1 if self.view == "sheet" else 0))
         if hasattr(self, "mode_switch"):
             self.mode_switch.set(mode)
+        if hasattr(self, "left_w"):
+            self.left_w.setVisible(not doc)
+            btns = self.seg_page.group.buttons()
+            for i, b in enumerate(btns):                     # кнопки вкладок: 0 Фото, 1 Умная рамка, 2 Принтер, 3 Документ
+                b.setVisible((i >= 2) if doc else (i < 3))
+            self.b_save.setVisible(not doc)
+            for w in self._photo_only:
+                w.setVisible(not doc and not (self.compact and w in self._caps))
+            self.show_page(4 if doc else 0)
 
     def set_view(self, v):
         self.view = "sheet" if v == "sheet" else "crop"
@@ -4666,6 +4980,8 @@ class MainWindow(SmartMixin, QMainWindow):
         return pc.desktop_dir()
 
     def open_any(self):
+        if getattr(self, "app_mode", "photo") == "doc":
+            return self.doc_open()
         dlg = OpenDialog(self, self.start_dir())
         if not dlg.exec() or not dlg.choice:
             return
@@ -5701,7 +6017,7 @@ class MainWindow(SmartMixin, QMainWindow):
         s = self.s
         self._bleed_flush()
         fresh = pc.load_settings()                    # окно печати пишет свои разделы в тот же файл — не затираем их
-        for k in ("last_dir", "start_dir_mode", "snap_px", "anim", "icc_dir", "trim_l", "trim_t", "trim_r", "trim_b", "check_updates", "skip_update"):
+        for k in ("last_dir", "start_dir_mode", "snap_px", "anim", "icc_dir", "trim_l", "trim_t", "trim_r", "trim_b", "check_updates", "skip_update", "doc_paper", "doc_fit", "doc_margin", "doc_cm_on", "doc_icc", "converter_path"):
             if k in self.settings:
                 fresh[k] = self.settings[k]
         fresh.update(format=s["format"], orient=s["orient"], mode=s["mode"], recursive=s["recursive"], subfolder=s["subfolder"],
@@ -6529,6 +6845,27 @@ pc.EN.update({
     "Открыть страницу загрузки": "Open the download page", "Пропустить эту версию": "Skip this version", "Позже": "Later",
     "У вас последняя версия:": "You have the latest version:",
     "Не удалось проверить обновления. Проверьте подключение к интернету.": "Could not check for updates. Check your internet connection.",
+})
+pc.EN_FMT.update({"Страниц: {n}": "Pages: {n}"})
+pc.EN.update({
+    "Документ": "Document", "PDF, Word, Excel, PowerPoint и другие офисные файлы": "PDF, Word, Excel, PowerPoint and other office files",
+    "Открыть документ…": "Open document…", "Открыть документ": "Open document", "Документ не открыт": "No document open",
+    "Редактировать PDF": "Edit PDF", "Распознать текст": "Recognise text",
+    "Откроется в программе «КопиТехник Конвертор»": "Opens in KopiTehnik Converter", "Распознавание в «КопиТехник Конвертор»": "Recognition in KopiTehnik Converter",
+    "Печать документа": "Document printing", "Как страница ложится на лист": "How the page sits on the sheet", "По листу": "Fit to sheet",
+    "Только уменьшить": "Shrink only", "Как есть": "Actual size", "Поля, мм": "Margins, mm", "Страницы": "Pages", "Копий": "Copies",
+    "все, или 1-3, 5, 8-": "all, or 1-3, 5, 8-", "Профиль для документов": "Document profile",
+    "Использовать профиль принтера": "Use printer profile",
+    "У документов своя бумага и свой профиль, он не связан с профилем фото.": "Documents have their own paper and profile, separate from the photo profile.",
+    "Документы": "Documents", "Этот тип файла не поддерживается.": "This file type is not supported.",
+    "Не удалось перевести документ в PDF": "Could not convert the document to PDF", "Не удалось открыть PDF.": "Could not open the PDF.",
+    "переведён в PDF": "converted to PDF", "Сначала откройте документ.": "Open a document first.",
+    "Правка PDF и распознавание делаются в программе «КопиТехник Конвертор». Она не найдена на этом компьютере.": "PDF editing and recognition are done in KopiTehnik Converter. It was not found on this computer.",
+    "Скачать конвертер": "Download the converter", "Указать Converter.exe…": "Choose Converter.exe…", "Отмена": "Cancel",
+    "Открыт конвертер: закончите правку и сохраните.": "The converter is open: finish editing and save.",
+    "Не удалось запустить конвертер": "Could not start the converter", "изменён в конвертере": "edited in the converter",
+    "Неверный диапазон страниц": "Invalid page range", "копий": "copies", "Отправляю в печать страницу": "Sending page to print",
+    "Не удалось открыть PDF для печати.": "Could not open the PDF for printing.",
 })
 pc.EN.update({
     "Умная рамка": "Smart frame", "Анализ": "Analysis", "Дополнительно": "Advanced", "Результат": "Result", "Все": "All", "Отмеченные": "Checked",
