@@ -2981,7 +2981,8 @@ class MainWindow(SmartMixin, QMainWindow):
         self.theme_name = st.get("theme") if st.get("theme") in THEMES else DEFAULT_THEME
         first = lambda d, v: v if v in d else next(iter(d))
         self.s = {                                          # всё, что раньше было «переменными окна»
-            "format": first(pc.FORMATS, st.get("format")), "orient": first(pc.ORIENTS, st.get("orient")),
+            "format": first(pc.FORMATS, st.get("format")), "orient": next(iter(pc.ORIENTS)),         # при каждом запуске «Авто (по фото)»: горизонтальное — горизонтально, вертикальное — вертикально
+            
             "mode": next(iter(pc.MODES)), "grid": bool(st.get("grid", True)), "snap": bool(st.get("snap", True)),
             "recursive": bool(st.get("recursive", False)), "out_mode": st.get("out_mode", "orig"),
             "out_name": st.get("out_name", pc.OUT_SUBDIR), "outdir": st.get("outdir_custom", ""),
