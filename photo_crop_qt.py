@@ -3756,7 +3756,7 @@ class DocMixin:
             job.finish()
         try:
             import print_stats
-            print_stats.record(j["printer"], 0, j["paper"], "document", "app", sent, [j["name"]])
+            print_stats.record(j["printer"], 0, "%gx%g" % dt.PAPERS[j["paper"]], "document", "app", sent, [j["name"]], kind="doc")
         except Exception:
             pass
         return True, sent
@@ -6537,7 +6537,7 @@ class AdminStatsDialog(QDialog):
         sc.setFrameShape(QFrame.NoFrame)
         sc.setWidget(self.l_sum)
         self.table = QTableWidget(0, 8)
-        self.table.setHorizontalHeaderLabels([tr(x) for x in ("Время", "Принтер", "Бумага, мм", "Файлов на листе", "Режим", "Источник", "Листов", "Файлы")])
+        self.table.setHorizontalHeaderLabels([tr(x) for x in ("Время", "Принтер", "Тип", "Бумага", "Режим", "Источник", "Листов", "Файлы")])
         self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.table.horizontalHeader().setStretchLastSection(True)
@@ -6569,12 +6569,13 @@ class AdminStatsDialog(QDialog):
         s = ps.summary(self.recs)
         td = lambda x, al="left": '<td style="padding:2px 14px 2px 0" align="%s">%s</td>' % (al, x)
         h = ["<h3>%s</h3><table>" % tr("Всего напечатано")]
-        h.append("<tr>%s%s%s</tr>" % (td("<b>%s</b>" % tr("Период")), td("<b>%s</b>" % tr("Листов"), "right"), td("<b>%s</b>" % tr("Напечатано файлов"), "right")))
+        h.append("<tr>%s%s%s%s</tr>" % (td("<b>%s</b>" % tr("Период")), td("<b>%s</b>" % tr("Листов"), "right"), td("<b>%s</b>" % tr("Фото"), "right"),
+                                        td("<b>%s</b>" % tr("Документы"), "right")))
         for k, name in (("today", "Сегодня"), ("week", "7 дней"), ("month", "30 дней"), ("all", "Всё время")):
             p = s["periods"][k]
-            h.append("<tr>%s%s%s</tr>" % (td(tr(name)), td(p["sheets"], "right"), td(p["photos"], "right")))
+            h.append("<tr>%s%s%s%s</tr>" % (td(tr(name)), td(p["sheets"], "right"), td(p["photo"], "right"), td(p["doc"], "right")))
         h.append("</table>")
-        for field, title in (("printer", "По принтерам"), ("paper", "По формату бумаги"), ("source", "По источнику (app — окно программы, agent — ИИ-агент)")):
+        for field, title in (("printer", "По принтерам"), ("paper_photo", "Бумага: фото, листов"), ("paper_doc", "Бумага: документы, листов"), ("source", "По источнику (app — окно программы, agent — ИИ-агент)")):
             h.append("<h3>%s</h3><table>" % tr(title))
             for k, n in s[field][:12]:
                 h.append("<tr>%s%s</tr>" % (td(k), td(n, "right")))
@@ -6589,8 +6590,12 @@ class AdminStatsDialog(QDialog):
         rows = list(reversed(self.recs[-500:]))
         self.table.setRowCount(len(rows))
         for i, r in enumerate(rows):
-            for j, key in enumerate(("t", "printer", "paper", "photos", "mode", "source", "sheets", "files")):
+            for j, key in enumerate(("t", "printer", "kind", "paper", "mode", "source", "sheets", "files")):
                 v = r.get(key, "")
+                if key == "kind":
+                    v = tr("Документ" if ps.rkind(r) == "doc" else "Фото")
+                elif key == "paper":
+                    v = ps.paper_label(v)
                 self.table.setItem(i, j, QTableWidgetItem(", ".join(v) if isinstance(v, list) else str(v)))
         self.table.resizeColumnsToContents()
 
@@ -6735,7 +6740,7 @@ class SettingsDialog(QDialog):
 
     def _refresh_today(self):
         t = ps.today()
-        self.l_today.setText(trf("Напечатано сегодня: {s} листов, {p} файлов", s=t["sheets"], p=t["photos"]))
+        self.l_today.setText(trf("Напечатано сегодня: {s} листов (фото {p}, документы {d})", s=t["sheets"], p=t["photo"], d=t["doc"]))
 
     def _admin(self):
         if admin_login(self):
@@ -6847,6 +6852,7 @@ pc.EN.update({
     "Не удалось проверить обновления. Проверьте подключение к интернету.": "Could not check for updates. Check your internet connection.",
 })
 pc.EN_FMT.update({"Страниц: {n}": "Pages: {n}"})
+pc.EN.update({"Бумага: фото, листов": "Paper: photos, sheets", "Бумага: документы, листов": "Paper: documents, sheets", "Тип": "Type"})
 pc.EN.update({
     "Документ": "Document", "PDF, Word, Excel, PowerPoint и другие офисные файлы": "PDF, Word, Excel, PowerPoint and other office files",
     "Открыть документ…": "Open document…", "Открыть документ": "Open document", "Документ не открыт": "No document open",
@@ -7147,7 +7153,7 @@ pc.EN_FMT.update({
     "Слишком много неверных попыток. Подождите {m} мин {s} с.": "Too many wrong attempts. Wait {m} min {s} s.",
     "⚠ Журнал изменён или повреждён (строка {n}). Данные ниже могут быть неточными.": "⚠ The journal was changed or damaged (line {n}). The figures below may be inaccurate.",
     "Сохранено строк: {n}": "Rows saved: {n}",
-    "Напечатано сегодня: {s} листов, {p} файлов": "Printed today: {s} sheets, {p} files",
+    "Напечатано сегодня: {s} листов (фото {p}, документы {d})": "Printed today: {s} sheets (photos {p}, documents {d})",
 })
 
 

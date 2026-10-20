@@ -136,7 +136,7 @@ def _last_mac():
         return ""
 
 
-def record(printer, photos=0, paper="", mode="", source="app", sheets=1, files=None):
+def record(printer, photos=0, paper="", mode="", source="app", sheets=1, files=None, kind="photo"):
     """Adds one successfully printed sheet (x copies) to the journal. Failed or cancelled sheets are never recorded.
     Never raises: a broken counter must not stop printing."""
     try:
@@ -146,7 +146,7 @@ def record(printer, photos=0, paper="", mode="", source="app", sheets=1, files=N
                 _save_admin(d)
             now = time.time()
             rec = {"ts": round(now, 1), "t": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(now)), "printer": str(printer or ""),
-                   "photos": int(photos), "paper": str(paper or ""), "mode": str(mode or ""), "source": str(source or "app"), "sheets": int(sheets),
+                   "photos": int(photos), "paper": str(paper or ""), "mode": str(mode or ""), "source": str(source or "app"), "sheets": int(sheets), "kind": "doc" if kind == "doc" else "photo",
                    "files": [str(x) for x in (files or [])][:60]}
             body = json.dumps(rec, ensure_ascii=False, sort_keys=True)
             rec["h"] = _mac(d["key"], _last_mac(), body)
@@ -187,14 +187,38 @@ def _midnight(days_back=0):
     return time.mktime((t.tm_year, t.tm_mon, t.tm_mday - days_back, 0, 0, 0, 0, 0, -1))
 
 
+def rkind(r):
+    """'photo' или 'doc'; в старых записях типа нет — документом они считались по режиму."""
+    return r.get("kind") or ("doc" if r.get("mode") == "document" else "photo")
+
+
+_PAPERS = (("A3", 297, 420), ("A4", 210, 297), ("A5", 148, 210), ("A6", 105, 148), ("10x15", 102, 152), ("10x15", 100, 150),
+           ("13x18", 127, 178), ("13x18", 130, 180), ("15x21", 152, 203), ("15x21", 150, 210), ("20x25", 203, 254),
+           ("20x30", 203, 305), ("Letter", 216, 279), ("Legal", 216, 356))
+
+
+def paper_label(paper):
+    """'210x297' (мм) -> 'A4 (210x297 мм)'. Неизвестный размер остаётся числами."""
+    try:
+        a, b = (float(x) for x in str(paper).lower().replace(",", ".").split("x")[:2])
+    except ValueError:
+        return str(paper) or "-"
+    lo, hi = min(a, b), max(a, b)
+    for name, w, h in _PAPERS:
+        if abs(lo - w) <= 2 and abs(hi - h) <= 2:
+            return "%s (%gx%g мм)" % (name, round(lo), round(hi))
+    return "%gx%g мм" % (round(lo, 1), round(hi, 1))
+
+
 def totals(records=None, since=0.0):
-    """-> {"sheets": n, "photos": n}. since = epoch seconds."""
-    sheets = photos = 0
+    """-> {"sheets": n, "photo": n, "doc": n}: напечатанные листы всего, фото и документов. since = epoch seconds."""
+    t = {"sheets": 0, "photo": 0, "doc": 0}
     for r in (records if records is not None else read_all()):
         if r.get("ts", 0) >= since:
-            sheets += int(r.get("sheets", 1))
-            photos += int(r.get("photos", 0)) * int(r.get("sheets", 1))     # файлов напечатано = фото на листе x копии
-    return {"sheets": sheets, "photos": photos}
+            n = int(r.get("sheets", 1))
+            t["sheets"] += n
+            t[rkind(r)] += n
+    return t
 
 
 def today():
@@ -206,12 +230,19 @@ def summary(records=None):
     recs = [r for r in (records if records is not None else read_all()) if not r.get("bad")]
     periods = {"today": _midnight(0), "week": _midnight(6), "month": _midnight(29), "all": 0.0}
     out = {"periods": {k: totals(recs, v) for k, v in periods.items()}}
-    for field in ("printer", "paper", "source"):
+    for field in ("printer", "source"):
         agg = {}
         for r in recs:
             k = r.get(field) or "-"
             agg[k] = agg.get(k, 0) + int(r.get("sheets", 1))
         out[field] = sorted(agg.items(), key=lambda kv: -kv[1])
+    for kind in ("photo", "doc"):                          # размер бумаги: фото и документы отдельно
+        agg = {}
+        for r in recs:
+            if rkind(r) == kind:
+                k = paper_label(r.get("paper"))
+                agg[k] = agg.get(k, 0) + int(r.get("sheets", 1))
+        out["paper_" + kind] = sorted(agg.items(), key=lambda kv: -kv[1])
     days = {}
     for r in recs:
         if r.get("ts", 0) >= _midnight(13):
@@ -224,9 +255,9 @@ def export_csv(path):
     recs = [r for r in read_all() if not r.get("bad")]
     with open(path, "w", newline="", encoding="utf-8-sig") as f:
         w = csv.writer(f, delimiter=";")
-        w.writerow(["time", "printer", "paper_mm", "photos_on_sheet", "mode", "source", "sheets", "files"])
+        w.writerow(["time", "printer", "type", "paper", "paper_mm", "mode", "source", "sheets", "files"])
         for r in recs:
-            w.writerow([r.get("t"), r.get("printer"), r.get("paper"), r.get("photos"), r.get("mode"), r.get("source"), r.get("sheets", 1), " | ".join(r.get("files") or [])])
+            w.writerow([r.get("t"), r.get("printer"), rkind(r), paper_label(r.get("paper")), r.get("paper"), r.get("mode"), r.get("source"), r.get("sheets", 1), " | ".join(r.get("files") or [])])
     return len(recs)
 
 
