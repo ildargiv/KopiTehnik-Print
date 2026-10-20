@@ -39,7 +39,8 @@ try:
                                    QVBoxLayout, QGridLayout, QComboBox, QLineEdit, QSlider, QRadioButton, QButtonGroup,
                                    QListView, QStyledItemDelegate, QStyle, QScrollArea, QStackedWidget, QDialog, QFileDialog,
                                    QMessageBox, QProgressBar, QAbstractItemView, QGraphicsDropShadowEffect, QListWidget,
-                                   QListWidgetItem, QMenu, QSizePolicy, QAbstractButton, QTableWidget, QTableWidgetItem, QTabWidget)
+                                   QListWidgetItem, QMenu, QSizePolicy, QAbstractButton, QTableWidget, QTableWidgetItem, QTabWidget,
+                                   QSpinBox)
     from PySide6.QtSvg import QSvgRenderer
 except ImportError:
     sys.stderr.write("PhotoCrop: не установлена библиотека PySide6.\nВыполните в командной строке:  pip install PySide6\n")
@@ -241,17 +242,20 @@ def build_qss(t):
     #copies QToolButton:hover {{ background: rgba(0,0,0,0.18); }}
     #copies QToolButton:pressed {{ background: rgba(0,0,0,0.30); }}
     #sep {{ background: {t['border']}; }}
-    QPushButton {{ background: {t['raised']}; border: 1px solid {t['border']}; border-radius: 9px; padding: 7px 14px; font-weight: 500; }}
+    QPushButton {{ background: {t['raised']}; border: 1px solid {t['border']}; border-radius: 9px; padding: 9px 16px; min-height: 18px; font-size: 13px; font-weight: 500; }}
     QPushButton:hover {{ background: {t['hover']}; }}
     QPushButton:pressed {{ background: {t['border']}; }}
     QPushButton:disabled {{ color: {t['muted']}; }}
     QPushButton[kind="primary"] {{ background: {t['accent']}; border-color: {t['accent']}; color: {t['accent_text']}; font-weight: 600; }}
     QPushButton[kind="primary"]:hover {{ background: {acc_hi}; border-color: {acc_hi}; }}
     QPushButton[kind="primary"]:disabled {{ background: {t['raised']}; border-color: {t['border']}; color: {t['muted']}; }}
-    QPushButton[big="true"] {{ padding: 11px 14px; border-radius: 11px; font-size: 14px; }}
-    QPushButton[kind="seg"] {{ background: transparent; border: 1px solid transparent; border-radius: 7px; padding: 5px 12px; color: {t['muted']}; font-weight: 400; }}
+    QPushButton[big="true"] {{ padding: 13px 16px; border-radius: 11px; font-size: 14px; }}
+    QPushButton[kind="seg"] {{ background: transparent; border: 1px solid transparent; border-radius: 7px; padding: 6px 13px; color: {t['muted']}; font-weight: 400; }}
     QPushButton[kind="seg"]:hover {{ color: {t['text']}; }}
     QPushButton[kind="seg"]:checked {{ background: {t['surface']}; border-color: {t['border']}; color: {t['text']}; }}
+    QSpinBox {{ background: {t['raised']}; border: 1px solid {t['border']}; border-radius: 8px; padding: 4px 6px; min-width: 52px; color: {t['text']}; }}
+    QPushButton[kind="chip"] {{ background: {t['raised']}; border: 1px solid {t['border']}; border-radius: 8px; padding: 6px 4px; min-width: 34px; font-weight: 500; }}
+    QPushButton[kind="chip"]:checked {{ background: {t['accent']}; border-color: {t['accent']}; color: {t['accent_text']}; font-weight: 700; }}
     QPushButton[kind="link"] {{ background: transparent; border: none; color: {t['muted']}; padding: 4px 6px; }}
     QPushButton[kind="link"]:hover {{ color: {t['text']}; }}
     QPushButton[kind="place"] {{ background: transparent; border: none; text-align: left; padding: 8px 10px; border-radius: 8px; }}
@@ -323,8 +327,154 @@ class WrapLabel(QLabel):
         return QSize(48, self.fontMetrics().height() + 2)
 
 
+class LogoMark(QWidget):
+    """Знак программы с движением: три капли краски разлетаются и сходятся при запуске, а при наведении вращаются."""
+    COLORS = ("#00b7eb", "#ff7a1a", "#ffd400")
+    HOME = ((1, 1), (10, 1), (5.5, 9.5))
+
+    def __init__(self):
+        super().__init__()
+        self.setFixedSize(30, 30)
+        self._t, self._spin = 0.0, 0.0
+        self.setCursor(Qt.PointingHandCursor)
+        self._ain = QPropertyAnimation(self, b"gather", self)
+        self._ain.setDuration(1100)
+        self._ain.setEasingCurve(QEasingCurve.OutBack)
+        self._ain.setStartValue(0.0)
+        self._ain.setEndValue(1.0)
+        self._asp = QPropertyAnimation(self, b"spin", self)
+        self._asp.setDuration(900)
+        self._asp.setEasingCurve(QEasingCurve.InOutCubic)
+        QTimer.singleShot(150, self._ain.start)
+
+    def getGather(self):
+        return self._t
+
+    def setGather(self, v):
+        self._t = float(v)
+        self.update()
+
+    def getSpin(self):
+        return self._spin
+
+    def setSpin(self, v):
+        self._spin = float(v)
+        self.update()
+
+    gather = Property(float, getGather, setGather)
+    spin = Property(float, getSpin, setSpin)
+
+    def enterEvent(self, e):
+        if self._asp.state() != QPropertyAnimation.Running:
+            self._asp.setStartValue(0.0)
+            self._asp.setEndValue(360.0)
+            self._asp.start()
+        super().enterEvent(e)
+
+    def mousePressEvent(self, e):
+        self._ain.stop()
+        self._ain.start()
+
+    def paintEvent(self, e):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+        k = self.width() / 24.0
+        p.scale(k, k)
+        p.translate(12, 12)
+        p.rotate(self._spin)
+        p.translate(-12, -12)
+        p.setPen(Qt.NoPen)
+        for (x, y), col in zip(self.HOME, self.COLORS):
+            far = 1.0 - self._t                              # 0 — капли в знаке, 1 — разлетелись
+            cx, cy = x + 6.5, y + 6.5
+            dx, dy = (cx - 12) * far * 1.6, (cy - 12) * far * 1.6
+            c = QColor(col)
+            c.setAlpha(int(215 * min(1.0, 0.25 + self._t)))
+            p.setBrush(c)
+            r = 6.5 * (0.55 + 0.45 * min(1.0, self._t))
+            p.drawEllipse(QPointF(cx + dx, cy + dy), r, r)
+        p.end()
+
+
+class MotionButton(QPushButton):
+    """Кнопка с живым откликом: плавная подсветка при наведении и волна от места нажатия."""
+
+    def __init__(self, text=""):
+        super().__init__(text)
+        self._hv, self._rp, self._pt = 0.0, 1.0, QPointF()
+        self._ah = QPropertyAnimation(self, b"hv", self)
+        self._ah.setDuration(160)
+        self._ah.setEasingCurve(QEasingCurve.OutCubic)
+        self._ar = QPropertyAnimation(self, b"rp", self)
+        self._ar.setDuration(420)
+        self._ar.setEasingCurve(QEasingCurve.OutQuad)
+        self._ar.setStartValue(0.0)
+        self._ar.setEndValue(1.0)
+
+    def getHv(self):
+        return self._hv
+
+    def setHv(self, v):
+        self._hv = float(v)
+        self.update()
+
+    def getRp(self):
+        return self._rp
+
+    def setRp(self, v):
+        self._rp = float(v)
+        self.update()
+
+    hv = Property(float, getHv, setHv)
+    rp = Property(float, getRp, setRp)
+
+    def _fade(self, to):
+        self._ah.stop()
+        self._ah.setStartValue(self._hv)
+        self._ah.setEndValue(to)
+        self._ah.start()
+
+    def enterEvent(self, e):
+        self._fade(1.0)
+        super().enterEvent(e)
+
+    def leaveEvent(self, e):
+        self._fade(0.0)
+        super().leaveEvent(e)
+
+    def mousePressEvent(self, e):
+        if e.button() == Qt.LeftButton and self.isEnabled():
+            self._pt = e.position()
+            self._ar.stop()
+            self._ar.start()
+        super().mousePressEvent(e)
+
+    def paintEvent(self, e):
+        super().paintEvent(e)
+        if not self.isEnabled() or (self._hv <= 0.001 and self._rp >= 1.0):
+            return
+        primary = self.property("kind") == "primary"
+        base = QColor(T["accent_text"] if primary else T["accent"])
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+        path = QPainterPath()
+        path.addRoundedRect(QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5), 9, 9)
+        p.setClipPath(path)
+        c = QColor(base)
+        c.setAlphaF((0.20 if primary else 0.10) * self._hv)
+        p.fillPath(path, c)
+        if self._rp < 1.0:
+            r = max(self.width(), self.height()) * 1.1 * self._rp
+            c2 = QColor(base)
+            c2.setAlphaF(0.30 * (1.0 - self._rp))
+            p.setPen(Qt.NoPen)
+            p.setBrush(c2)
+            p.drawEllipse(self._pt, r, r)
+        p.end()
+
+
 def btn(text, slot=None, kind=None, big=False, ico=None, ico_color=None, tip=None):
-    b = QPushButton(tr(text))
+    b = MotionButton(tr(text))
     if kind:
         b.setProperty("kind", kind)
     if big:
@@ -751,7 +901,7 @@ class CropCanvas(QWidget):
     HANDLE = 10
     ROT_OFFSET = 30
     CORNERS = ("nw", "ne", "se", "sw")
-    PILL_ZONE = 66                       # место внизу под плавающую панель инструментов
+    PILL_ZONE = 58                       # место внизу под плавающую панель инструментов
 
     def __init__(self, app):
         super().__init__()
@@ -840,7 +990,7 @@ class CropCanvas(QWidget):
         pm = app.preview_pm
         uh = ch - self.PILL_ZONE
         if app.mode() == "fit":
-            pad = 28
+            pad = 18
             k = min((cw - 2 * pad) / paper[0], (uh - 2 * pad) / paper[1])
             PW, PH = paper[0] * k, paper[1] * k
             px, py = (cw - PW) / 2, (uh - PH) / 2
@@ -854,10 +1004,10 @@ class CropCanvas(QWidget):
             self.geom = None
             p.end()
             return
-        pad = max(46, int(0.09 * min(cw, uh)))
-        k = min((cw - 2 * pad) / W, (uh - 2 * pad) / H)
+        padx, pad_top, pad_bot = 20, self.ROT_OFFSET + 14, 18       # поля минимальные: сверху — место под ручку поворота
+        k = min((cw - 2 * padx) / W, (uh - pad_top - pad_bot) / H)
         dw, dh = max(1.0, W * k), max(1.0, H * k)
-        ox, oy = (cw - dw) / 2, (uh - dh) / 2
+        ox, oy = (cw - dw) / 2, pad_top + (uh - pad_top - pad_bot - dh) / 2
         g = pc.frame_geom(W, H, paper, st)
         P = [(ox + x * k, oy + y * k) for x, y in pc.frame_corners(*g)]
         poly = QPolygonF([QPointF(x, y) for x, y in P])
@@ -1343,7 +1493,63 @@ class PrintButton(QPushButton):
 
 # ---------------------------------------------------------------- вид «Лист»: несколько фото на одном листе
 
-NUP = {1: (1, 1), 2: (1, 2), 3: (1, 3), 4: (2, 2), 6: (2, 3), 8: (2, 4), 9: (3, 3)}     # фото на листе -> (столбцов, рядов) на книжном листе
+NUP = {1: (1, 1), 2: (1, 2), 3: (1, 3), 4: (2, 2), 6: (2, 3), 8: (2, 4), 9: (3, 3),
+       12: (3, 4), 16: (4, 4), 24: (4, 6)}                                # быстрый выбор: фото на листе -> (столбцов, рядов) на книжном листе
+NUP_MAX = 30
+
+
+def nup_grid(n):
+    """Сетка (столбцов, рядов) на книжном листе для любого числа фото: ближайшая к квадрату без пустых ячеек
+    (простое число — в один ряд)."""
+    n = max(1, min(NUP_MAX, int(n)))
+    if n in NUP:
+        return NUP[n]
+    c = max(d for d in range(1, int(n ** 0.5) + 1) if n % d == 0)
+    return c, n // c
+
+
+class NupPicker(QFrame):
+    """Сколько фото на листе: быстрые кнопки и ручной ввод числа."""
+    changed = Signal(int)
+
+    def __init__(self, value=1):
+        super().__init__()
+        self.group = QButtonGroup(self)
+        self.group.setExclusive(False)
+        grid = QGridLayout()
+        grid.setSpacing(4)
+        grid.setContentsMargins(0, 0, 0, 0)
+        self.btns = {}
+        for i, n in enumerate(NUP):
+            b = MotionButton(str(n))
+            b.setProperty("kind", "chip")
+            b.setCheckable(True)
+            b.setCursor(Qt.PointingHandCursor)
+            b.clicked.connect(lambda _=False, k=n: self._pick(k))
+            self.btns[n] = b
+            grid.addWidget(b, i // 5, i % 5)
+        self.spin = QSpinBox()
+        self.spin.setRange(1, NUP_MAX)
+        self.spin.setButtonSymbols(QSpinBox.NoButtons)
+        self.spin.setFixedWidth(64)
+        self.spin.setToolTip(tr("Своё число фото на листе"))
+        self.spin.editingFinished.connect(lambda: self._pick(self.spin.value()))
+        self.setLayout(vbox(grid, hbox(lbl("Своё число", "muted"), self.spin, None), spacing=6))
+        self.set(value)
+
+    def _pick(self, n):
+        self.set(n)
+        self.changed.emit(int(n))
+
+    def set(self, n):
+        for k, b in self.btns.items():
+            b.setChecked(k == n)
+        self.spin.blockSignals(True)
+        self.spin.setValue(int(n))
+        self.spin.blockSignals(False)
+
+    def value(self):
+        return self.spin.value()
 
 
 class Aff:
@@ -2969,8 +3175,36 @@ class SmartMixin:
             QTimer.singleShot(250, lambda: self.smart_run(files=files, auto=True))
 
 
+# ---------------------------------------------------------------- обновление с GitHub
+APP_VERSION = "1.0.0"
+RELEASES_API = "https://api.github.com/repos/ildargiv/KopiTehnik-Print/releases/latest"
+RELEASES_PAGE = "https://github.com/ildargiv/KopiTehnik-Print/releases/latest"
+
+
+def _ver(tag):
+    import re
+    return tuple(int(x) for x in re.findall(r"\d+", str(tag))[:3]) or (0,)
+
+
+def fetch_latest_release(timeout=8):
+    """(тег, адрес страницы) последнего релиза на GitHub или None, если проверить не удалось."""
+    import urllib.request
+    try:
+        rq = urllib.request.Request(RELEASES_API, headers={"User-Agent": "KopiTehnikPrint", "Accept": "application/vnd.github+json"})
+        with urllib.request.urlopen(rq, timeout=timeout) as r:
+            d = json.loads(r.read().decode("utf-8"))
+        return str(d.get("tag_name", "")), str(d.get("html_url") or RELEASES_PAGE)
+    except Exception:
+        return None
+
+
+def update_available(latest):
+    return bool(latest and latest[0] and _ver(latest[0]) > _ver(APP_VERSION))
+
+
 class MainWindow(SmartMixin, QMainWindow):
     _only = None                         # на время расчёта листа — печатать только это фото
+    update_checked = Signal(object, bool)    # (результат проверки, показать ли ответ «обновлений нет»)
 
     def __init__(self):
         super().__init__()
@@ -2992,7 +3226,7 @@ class MainWindow(SmartMixin, QMainWindow):
             "quality": int(st.get("quality", 95)), "cm_on": bool(st.get("cm_on", False)), "icc": st.get("icc", ""),
             "intent": first(pc.INTENTS, st.get("intent")), "bpc": bool(st.get("bpc", True)), "embed": bool(st.get("embed", True)),
             "proof": False, "gamut": False, "adj_scope": "one",
-            "nup": st.get("nup") if st.get("nup") in NUP else 1, "borders": bool(st.get("borders", False)),
+            "nup": (int(st["nup"]) if str(st.get("nup", "")).isdigit() and 1 <= int(st["nup"]) <= NUP_MAX else 1), "borders": bool(st.get("borders", False)),
             "border_mm": ("%g" % float(st.get("border_mm", 3) or 3)), "fill": bool(st.get("sheet_fill", False)), "free": False,
         }
         self.view = "crop"
@@ -3034,7 +3268,7 @@ class MainWindow(SmartMixin, QMainWindow):
         self._auto_timer.setInterval(pc.AUTOSAVE_SECONDS * 1000)
         self._auto_timer.timeout.connect(self._autosave_tick)
         self._auto_timer.start()
-        self.setWindowTitle(tr("PhotoCrop — кадрирование для фотопечати"))
+        self.setWindowTitle(tr("КопиТехник Принт — кадрирование для фотопечати"))
         self.setAcceptDrops(True)
         self.resize(1400, 880)
         self.build()
@@ -3074,6 +3308,39 @@ class MainWindow(SmartMixin, QMainWindow):
         self.upd_counts()
         self.sync_inspector()
         self.redraw()
+        if "--selftest" not in sys.argv and not getattr(self, "_upd_wired", False):
+            self._upd_wired = True
+            self.update_checked.connect(self._update_result)
+            if self.settings.get("check_updates", True):
+                QTimer.singleShot(4000, lambda: self.check_updates(False))
+
+    def check_updates(self, manual=True):
+        """Проверка последнего релиза на GitHub в фоне; manual — ответить и когда обновлений нет."""
+        threading.Thread(target=lambda: self.update_checked.emit(fetch_latest_release(), manual), daemon=True).start()
+
+    def _update_result(self, latest, manual):
+        if latest is None:
+            if manual:
+                warn(self, "Не удалось проверить обновления. Проверьте подключение к интернету.")
+            return
+        if not update_available(latest):
+            if manual:
+                info(self, "%s %s" % (tr("У вас последняя версия:"), APP_VERSION))
+            return
+        if not manual and self.settings.get("skip_update") == latest[0]:
+            return
+        box = QMessageBox(self)
+        box.setWindowTitle(tr("Доступно обновление"))
+        box.setText("%s %s → %s" % (tr("Вышла новая версия:"), APP_VERSION, latest[0]))
+        go = box.addButton(tr("Открыть страницу загрузки"), QMessageBox.AcceptRole)
+        skip = box.addButton(tr("Пропустить эту версию"), QMessageBox.DestructiveRole)
+        box.addButton(tr("Позже"), QMessageBox.RejectRole)
+        box.exec()
+        if box.clickedButton() is go:
+            import webbrowser
+            webbrowser.open(latest[1])
+        elif box.clickedButton() is skip:
+            self.settings["skip_update"] = latest[0]
 
     def copies_chip(self):
         """Копий каждого листа: заметная цветная плашка в плавающей панели над рабочим полем (одна величина на все панели)."""
@@ -3103,9 +3370,8 @@ class MainWindow(SmartMixin, QMainWindow):
         bar = QFrame()
         bar.setObjectName("topbar")
         bar.setFixedHeight(58)
-        logo = QLabel()
-        logo.setPixmap(self._logo())
-        name = lbl("PhotoCrop", "logo")
+        logo = LogoMark()
+        name = lbl("КопиТехник Принт", "logo")
         cp = self.compact
         if cp:
             name.hide()
@@ -3120,7 +3386,7 @@ class MainWindow(SmartMixin, QMainWindow):
         self.cb_format.setCurrentText(self.s["format"])
         self.cb_format.setMinimumWidth(120 if self.compact else 150)
         self.cb_format.currentTextChanged.connect(lambda v: self._layout_set("format", v))
-        self.seg_nup = Segmented([(str(n), n) for n in NUP], self.s["nup"])
+        self.seg_nup = NupPicker(self.s["nup"])
         self.seg_nup.setToolTip(tr("Сколько фото печатать на одном листе"))
         self.seg_nup.changed.connect(lambda v: self._layout_set("nup", v))
         self.sw_borders = Switch(self.s["borders"])
@@ -3141,7 +3407,7 @@ class MainWindow(SmartMixin, QMainWindow):
         more.setMenu(menu)
         more.setPopupMode(QToolButton.InstantPopup)
         l = hbox(logo, name, 10, btn("Открыть", self.open_any, "primary", ico="open", tip="Открыть фото или папку (Ctrl+O)"), 10,
-                 cap("Бумага"), self.cb_format, 6, cap("Фото на листе"), self.seg_nup, 6,
+                 cap("Бумага"), self.cb_format, 6,
                  cap("Поля"), self.sw_borders, self.e_border, lbl("мм", "muted"), None,
                  self.seg_view, 6, self.b_grid, more, ibtn("settings", "Настройки", self.open_settings),
                  spacing=8, margins=(16, 0, 12, 0))
@@ -3637,17 +3903,16 @@ class MainWindow(SmartMixin, QMainWindow):
         self.l_sheet2 = lbl("", "muted", wrap=True)
         sw_fill = Switch(s["fill"])
         sw_fill.toggled.connect(lambda on: self._layout_set("fill", bool(on)))
-        sheet = card("Лист", self.l_sheet, self.l_sheet2, row("Весь лист — копии одного фото", sw_fill),
+        sheet = card("Лист", lbl("Фото на листе"), self.seg_nup, self.l_sheet, self.l_sheet2, row("Весь лист — копии одного фото", sw_fill),
                      btn("Показать лист", lambda: self.set_view("sheet"), ico="image"))
-        # --- цвет
+        # --- цвет (профиль принтера выбирается на странице «Принтер»)
         self.sw_cm, self.sw_proof, self.sw_gamut = Switch(s["cm_on"]), Switch(False), Switch(False)
         self.sw_cm.toggled.connect(lambda on: (self._cm_set("cm_on", on), self.sw_cm2.set(on)))
         self.sw_proof.toggled.connect(lambda on: self._cm_set("proof", on))
         self.sw_gamut.toggled.connect(lambda on: self._cm_set("gamut", on))
         self.l_icc = lbl("", "muted", wrap=True)
-        color = card("Цвет", row("Профиль принтера", self.sw_cm), self.l_icc,
-                     btn("Выбрать профиль…", self.open_cm_dialog, ico="profile"),
-                     row("Имитация печати на экране", self.sw_proof), row("Показать цвета вне охвата", self.sw_gamut))
+        self.l_icc.hide()
+        color = card("Цвет", row("Имитация печати на экране", self.sw_proof), row("Показать цвета вне охвата", self.sw_gamut))
         self._icc_info()
         return self._scroll(photo, sheet, color)
 
@@ -3798,7 +4063,7 @@ class MainWindow(SmartMixin, QMainWindow):
         """Геометрия листа, мм: бумага книжная PW×PH, сетка cols×rows, поле m по краю листа и такое же
         расстояние m между фото (как задано в поле «Рамка, мм»), ячейка cw×ch."""
         short, long_, tag = pc.FORMATS[self.s["format"]]
-        cols, rows = NUP[self.s["nup"]]
+        cols, rows = nup_grid(self.s["nup"])
         m = self.border_mm() if self.s["borders"] else 0.0
         while True:
             g = m
@@ -5151,7 +5416,7 @@ class MainWindow(SmartMixin, QMainWindow):
         s = self.s
         self._bleed_flush()
         fresh = pc.load_settings()                    # окно печати пишет свои разделы в тот же файл — не затираем их
-        for k in ("last_dir", "start_dir_mode", "snap_px", "anim", "icc_dir", "trim_l", "trim_t", "trim_r", "trim_b"):
+        for k in ("last_dir", "start_dir_mode", "snap_px", "anim", "icc_dir", "trim_l", "trim_t", "trim_r", "trim_b", "check_updates", "skip_update"):
             if k in self.settings:
                 fresh[k] = self.settings[k]
         fresh.update(format=s["format"], orient=s["orient"], mode=s["mode"], recursive=s["recursive"], subfolder=s["subfolder"],
@@ -5185,7 +5450,7 @@ class MainWindow(SmartMixin, QMainWindow):
         if lang:
             pc.set_language(lang)
         page = self.pages.currentIndex()
-        self.setWindowTitle(tr("PhotoCrop — кадрирование для фотопечати"))
+        self.setWindowTitle(tr("КопиТехник Принт — кадрирование для фотопечати"))
         self.build()
         self.thumbs_view.model().refresh()
         if self.idx >= 0:
@@ -5798,8 +6063,13 @@ class SettingsDialog(QDialog):
         crop = card("Кадрирование", row("Прилипание рамки к краям и центру фото", sw_snap),
                     row("Сила прилипания, пикселей экрана", hbox(sl, l_px)),
                     lbl("Ctrl при перетаскивании — временно отключает прилипание.", "muted"))
+        sw_upd = Switch(st.get("check_updates", True))
+        sw_upd.toggled.connect(lambda on: st.__setitem__("check_updates", bool(on)))
+        upd_card = card("Обновление", row("Версия программы", lbl(APP_VERSION)),
+                        row("Проверять обновления при запуске", sw_upd),
+                        hbox(None, btn("Проверить обновления", lambda: app.check_updates(True), ico="sparkle")))
         about = lbl(tr("Настройки хранятся в файле") + ": " + str(pc.SETTINGS_PATH), "muted", wrap=True)
-        left = vbox(look, general, crop, None, spacing=12)
+        left = vbox(look, general, crop, upd_card, None, spacing=12)
         trim = hbox(spacing=6)
         for text, k in (("Лево", "l"), ("Верх", "t"), ("Право", "r"), ("Низ", "b")):
             e = QLineEdit("%g" % app.trim_mm()["ltrb".index(k)])
@@ -5965,6 +6235,15 @@ pc.EN.update({
     "Предыдущий лист": "Previous sheet", "Следующий лист": "Next sheet",
     "Отметьте фото слева — они разложатся по листам": "Check photos on the left — they will be laid out on sheets",
     "Не удалось подготовить листы": "Could not prepare the sheets",
+})
+pc.EN.update({
+    "КопиТехник Принт": "KopiTehnik Print", "КопиТехник Принт — кадрирование для фотопечати": "KopiTehnik Print — cropping for photo printing",
+    "Своё число": "Custom", "Своё число фото на листе": "Custom number of photos per sheet",
+    "Обновление": "Updates", "Версия программы": "Program version", "Проверять обновления при запуске": "Check for updates at start",
+    "Проверить обновления": "Check for updates", "Доступно обновление": "Update available", "Вышла новая версия:": "A new version is out:",
+    "Открыть страницу загрузки": "Open the download page", "Пропустить эту версию": "Skip this version", "Позже": "Later",
+    "У вас последняя версия:": "You have the latest version:",
+    "Не удалось проверить обновления. Проверьте подключение к интернету.": "Could not check for updates. Check your internet connection.",
 })
 pc.EN.update({
     "Умная рамка": "Smart frame", "Анализ": "Analysis", "Дополнительно": "Advanced", "Результат": "Result", "Все": "All", "Отмеченные": "Checked",
@@ -6179,6 +6458,8 @@ def selftest(app):
     step("ползунок яркости", lambda: win.sliders["bright"][0].setValue(20))
     step("улучшение Epson", lambda: win.enhance(1))
     step("снимок: цвет", lambda: shot("color"))
+    step("12 фото на листе", lambda: (win._layout_set("nup", 12), win.seg_nup.set(12)))
+    step("7 фото на листе (своё число)", lambda: (win._layout_set("nup", 7), win.seg_nup.set(7), win.layout_spec()))
     step("4 фото на листе", lambda: win._layout_set("nup", 4))
     step("вид «Лист»", lambda: (win.set_view("sheet"), win.sheet_view.update()))
     step("снимок: лист 4", lambda: (time.sleep(1.5), shot("sheet4")))
