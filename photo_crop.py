@@ -1371,14 +1371,38 @@ def sheet_capacity(size, area, gap, rotate_fit):
     return max(1, len(res[0])) if res else 1
 
 
-def make_edge_test(w_mm, h_mm, ppi=300):
-    """Шкала краёв: чёрточки через 0,5 мм от края фото, цифры в мм. После печати без полей последняя различимая цифра
-    у каждого края = сколько мм срезал принтер."""
+EDGE_TEXT = {      # подпись тестового листа: (заголовок, подсказка)
+    "ru": ("Шкала краёв: цифра = мм от края фото", "Последняя видимая цифра у края = сколько мм срезал принтер"),
+    "en": ("Edge scale: number = mm from the photo edge", "Last visible number at an edge = mm the printer cut off"),
+    "de": ("Randskala: Zahl = mm vom Fotorand", "Letzte sichtbare Zahl am Rand = vom Drucker abgeschnittene mm"),
+    "es": ("Escala de bordes: número = mm desde el borde", "Último número visible = mm que recortó la impresora"),
+    "tr": ("Kenar skalası: sayı = fotoğraf kenarından mm", "Kenarda görünen son sayı = yazıcının kestiği mm"),
+}
+
+
+def _font_bold(px):
+    key = ("b", px)
+    if key not in _FONTS:
+        f = None
+        for name in ("arialbd.ttf", "segoeuib.ttf", "DejaVuSans-Bold.ttf", "LiberationSans-Bold.ttf"):
+            try:
+                f = ImageFont.truetype(name, px)
+                break
+            except Exception:
+                continue
+        _FONTS[key] = f or _font(px)
+    return _FONTS[key]
+
+
+def make_edge_test(w_mm, h_mm, ppi=300, lang=None):
+    """Шкала краёв: чёрточки через 0,5 мм от края фото, крупные жирные цифры в мм. После печати без полей последняя различимая
+    цифра у каждого края = сколько мм срезал принтер. Подпись на 5 языках: язык интерфейса — крупнее и первым."""
     W, H = max(1, round(w_mm / 25.4 * ppi)), max(1, round(h_mm / 25.4 * ppi))
     im = Image.new("RGB", (W, H), "white")
     d = ImageDraw.Draw(im)
     px = ppi / 25.4
-    f = _font(max(10, round(px * 2.2)))
+    f = _font_bold(max(12, round(px * 3.8)))          # цифры ~3,8 мм высотой: читаются без лупы
+    halo = max(1, round(px * 0.35))                    # белая окантовка: цифра не сливается с чёрточками
     d.rectangle((0, 0, W - 1, H - 1), outline="black", width=max(1, round(px * 0.15)))
     for k in range(0, 21):                            # 0 … 10 мм через 0,5
         mm = k / 2.0
@@ -1391,16 +1415,47 @@ def make_edge_test(w_mm, h_mm, ppi=300):
             d.line((xs, H - 1 - o_, xs, H - 1 - o_ - ln), fill="black", width=wd)  # низ
             d.line((o_, ys, o_ + ln, ys), fill="black", width=wd)                 # лево
             d.line((W - 1 - o_, ys, W - 1 - o_ - ln, ys), fill="black", width=wd)  # право
-        if k % 2 == 0 and k > 0:
-            t = str(k // 2)
-            d.text((W * 0.5 + px * 1.0, o_ + px * 0.2), t, fill="black", font=f)
-            d.text((W * 0.5 + px * 1.0, H - o_ - px * 2.8), t, fill="black", font=f)
-            d.text((o_ + px * 0.4, H * 0.5 - px * 4.0), t, fill="black", font=f)
-            d.text((W - o_ - px * 2.2, H * 0.5 - px * 4.0), t, fill="black", font=f)
+    kw = dict(fill="black", font=f, stroke_width=halo, stroke_fill="white")
+    lw = max(1, round(px * 0.18))
+    for m in range(1, 11):                             # цифры лесенкой: каждая стоит под своей линией глубиной m мм, друг на друга не налезают
+        o_, t = m * px, str(m)
+        bw = d.textbbox((0, 0), t, font=f)
+        tw, th = bw[2] - bw[0], bw[3] - bw[1]
+        fx, fy = 0.14 + 0.72 * (m - 1) / 9, 0.14 + 0.72 * (m - 1) / 9
+        half = max(tw, px * 3) / 2 + px * 0.6
+        x, y = W * fx, H * fy
+        d.line((x - half, o_, x + half, o_), fill="black", width=lw)                        # верх: линия m мм от края, цифра под ней
+        d.text((x - tw / 2 - bw[0], o_ + px * 0.5 - bw[1]), t, **kw)
+        d.line((x - half, H - 1 - o_, x + half, H - 1 - o_), fill="black", width=lw)        # низ: цифра над линией
+        d.text((x - tw / 2 - bw[0], H - 1 - o_ - px * 0.5 - th - bw[1]), t, **kw)
+        half = max(th, px * 3) / 2 + px * 0.6
+        d.line((o_, y - half, o_, y + half), fill="black", width=lw)                        # лево: цифра правее линии
+        d.text((o_ + px * 0.5 - bw[0], y - th / 2 - bw[1]), t, **kw)
+        d.line((W - 1 - o_, y - half, W - 1 - o_, y + half), fill="black", width=lw)        # право: цифра левее линии
+        d.text((W - 1 - o_ - px * 0.5 - tw - bw[0], y - th / 2 - bw[1]), t, **kw)
     c = (W // 2, H // 2)
     d.line((c[0] - px * 8, c[1], c[0] + px * 8, c[1]), fill="red", width=max(1, round(px * 0.15)))
     d.line((c[0], c[1] - px * 8, c[0], c[1] + px * 8), fill="red", width=max(1, round(px * 0.15)))
-    d.text((c[0] - px * 18, c[1] + px * 10), "Шкала краёв: цифра = мм от края фото", fill="black", font=f)
+    first = lang if lang in EDGE_TEXT else (get_language() if get_language() in EDGE_TEXT else "en")
+    order = [first] + [x for x in EDGE_TEXT if x != first]
+    lines = [(EDGE_TEXT[first][0], 3.4, True), (EDGE_TEXT[first][1], 2.6, False)] + [(EDGE_TEXT[x][0], 2.6, False) for x in order[1:]]
+    maxw, items = W * 0.64, []
+    for text, mm_, bold in lines:                      # каждую строку сжимаем, чтобы она влезла по ширине листа
+        size = max(8, round(px * mm_))
+        while size > 8:
+            ft = (_font_bold if bold else _font)(size)
+            if d.textlength(text, font=ft) <= maxw:
+                break
+            size -= 1
+        items.append((text, (_font_bold if bold else _font)(size), size))
+    gap = px * 0.8
+    total = sum(sz for _, _, sz in items) + gap * (len(items) - 1)
+    y = min(H - total - px * 12, c[1] + px * 10)
+    box = (W * 0.18 - px, y - px, W * 0.82 + px, y + total + px)
+    d.rectangle(box, fill="white", outline="black", width=max(1, round(px * 0.1)))
+    for text, ft, sz in items:
+        d.text((W / 2, y), text, fill="black", font=ft, anchor="ma")
+        y += sz + gap
     return im
 
 
