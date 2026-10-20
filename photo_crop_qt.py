@@ -33,14 +33,13 @@ if len(sys.argv) > 1 and sys.argv[1] in ("agent", "mcp", "mcp-config", "--print-
 try:
     from PySide6.QtCore import (Qt, QSize, QRect, QRectF, QPointF, QTimer, Signal, QObject, QThreadPool, QRunnable,
                                 QAbstractListModel, QModelIndex, QEvent, QPropertyAnimation, QEasingCurve, Property, QByteArray)
-    from PySide6.QtGui import (QPainter, QColor, QPen, QBrush, QPixmap, QImage, QIcon, QPolygonF, QPainterPath, QFont,
+    from PySide6.QtGui import (QPainter, QColor, QPen, QBrush, QPixmap, QImage, QIcon, QPolygonF, QPainterPath, QFont, QIntValidator,
                                QKeySequence, QShortcut, QFontMetrics, QTransform)
     from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QFrame, QLabel, QPushButton, QToolButton, QHBoxLayout,
                                    QVBoxLayout, QGridLayout, QComboBox, QLineEdit, QSlider, QRadioButton, QButtonGroup,
                                    QListView, QStyledItemDelegate, QStyle, QScrollArea, QStackedWidget, QDialog, QFileDialog,
                                    QMessageBox, QProgressBar, QAbstractItemView, QGraphicsDropShadowEffect, QListWidget,
-                                   QListWidgetItem, QMenu, QSizePolicy, QAbstractButton, QTableWidget, QTableWidgetItem, QTabWidget,
-                                   QSpinBox)
+                                   QListWidgetItem, QMenu, QSizePolicy, QAbstractButton, QTableWidget, QTableWidgetItem, QTabWidget)
     from PySide6.QtSvg import QSvgRenderer
 except ImportError:
     sys.stderr.write("PhotoCrop: не установлена библиотека PySide6.\nВыполните в командной строке:  pip install PySide6\n")
@@ -253,7 +252,6 @@ def build_qss(t):
     QPushButton[kind="seg"] {{ background: transparent; border: 1px solid transparent; border-radius: 7px; padding: 6px 13px; color: {t['muted']}; font-weight: 400; }}
     QPushButton[kind="seg"]:hover {{ color: {t['text']}; }}
     QPushButton[kind="seg"]:checked {{ background: {t['surface']}; border-color: {t['border']}; color: {t['text']}; }}
-    QSpinBox {{ background: {t['raised']}; border: 1px solid {t['border']}; border-radius: 8px; padding: 4px 6px; min-width: 52px; color: {t['text']}; }}
     QPushButton[kind="chip"] {{ background: {t['raised']}; border: 1px solid {t['border']}; border-radius: 8px; padding: 6px 4px; min-width: 34px; font-weight: 500; }}
     QPushButton[kind="chip"]:checked {{ background: {t['accent']}; border-color: {t['accent']}; color: {t['accent_text']}; font-weight: 700; }}
     QPushButton[kind="link"] {{ background: transparent; border: none; color: {t['muted']}; padding: 4px 6px; }}
@@ -1528,12 +1526,12 @@ class NupPicker(QFrame):
             b.clicked.connect(lambda _=False, k=n: self._pick(k))
             self.btns[n] = b
             grid.addWidget(b, i // 5, i % 5)
-        self.spin = QSpinBox()
-        self.spin.setRange(1, NUP_MAX)
-        self.spin.setButtonSymbols(QSpinBox.NoButtons)
+        self.spin = QLineEdit()
+        self.spin.setValidator(QIntValidator(1, NUP_MAX))
         self.spin.setFixedWidth(64)
+        self.spin.setAlignment(Qt.AlignCenter)
         self.spin.setToolTip(tr("Своё число фото на листе"))
-        self.spin.editingFinished.connect(lambda: self._pick(self.spin.value()))
+        self.spin.editingFinished.connect(self._typed)
         self.setLayout(vbox(grid, hbox(lbl("Своё число", "muted"), self.spin, None), spacing=6))
         self.set(value)
 
@@ -1541,15 +1539,21 @@ class NupPicker(QFrame):
         self.set(n)
         self.changed.emit(int(n))
 
+    def _typed(self):
+        t = self.spin.text().strip()
+        if t.isdigit() and 1 <= int(t) <= NUP_MAX and int(t) != self.cur:
+            self._pick(int(t))
+        else:
+            self.spin.setText(str(self.cur))
+
     def set(self, n):
+        self.cur = int(n)
         for k, b in self.btns.items():
             b.setChecked(k == n)
-        self.spin.blockSignals(True)
-        self.spin.setValue(int(n))
-        self.spin.blockSignals(False)
+        self.spin.setText(str(self.cur))
 
     def value(self):
-        return self.spin.value()
+        return self.cur
 
 
 class Aff:
@@ -3371,10 +3375,8 @@ class MainWindow(SmartMixin, QMainWindow):
         bar.setObjectName("topbar")
         bar.setFixedHeight(58)
         logo = LogoMark()
-        name = lbl("КопиТехник Принт", "logo")
+        name = lbl("КопиТехник Принт", "logo")                  # название видно и на узком экране
         cp = self.compact
-        if cp:
-            name.hide()
 
         def cap(text):                               # подпись у элемента; на узком экране скрыта (смысл — в подсказке)
             c_ = lbl(text, "muted")
