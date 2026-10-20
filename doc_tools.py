@@ -6,6 +6,7 @@
 import os
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 PAPERS = {"A4": (210.0, 297.0), "A5": (148.0, 210.0), "A3": (297.0, 420.0), "Letter": (215.9, 279.4), "Legal": (215.9, 355.6)}
@@ -104,9 +105,17 @@ def edit_command(exe, src, ocr=False, out=None):
 
 
 def run_edit(exe, src, ocr=False, out=None):
-    """Запускает редактор конвертера и ждёт его закрытия. Возвращает путь сохранённого PDF или None (закрыли без сохранения)."""
-    r = subprocess.run(edit_command(exe, src, ocr, out), capture_output=True, text=True, creationflags=_NO_WINDOW)
-    if r.returncode != 0:
-        return None
-    lines = [x.strip() for x in (r.stdout or "").splitlines() if x.strip()]
-    return lines[-1] if lines and Path(lines[-1]).is_file() else None
+    """Запускает редактор конвертера и ждёт его закрытия. Возвращает путь сохранённого PDF или None (закрыли без сохранения).
+
+    Консоль Windows (cp1251) не кодирует часть символов имён файлов, и конвертер может упасть уже после сохранения,
+    поэтому вывод читается как UTF-8, а при ненулевом коде проверяется, не появился ли сам файл результата."""
+    env = dict(os.environ, PYTHONIOENCODING="utf-8", PYTHONUTF8="1")
+    started = time.time() - 2
+    expect = Path(out) if out else Path(src).with_name(Path(src).stem + "_edited.pdf")
+    r = subprocess.run(edit_command(exe, src, ocr, out), capture_output=True, env=env, creationflags=_NO_WINDOW)
+    lines = [x.strip() for x in r.stdout.decode("utf-8", "replace").splitlines() if x.strip()]
+    if r.returncode == 0 and lines and Path(lines[-1]).is_file():
+        return lines[-1]
+    if r.returncode == 1 and expect.is_file() and expect.stat().st_mtime >= started:
+        return str(expect)
+    return None

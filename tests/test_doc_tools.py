@@ -38,6 +38,27 @@ class DocTools(unittest.TestCase):
         self.assertEqual(d.find_converter(str(exe)), str(exe))      # свой путь из настроек проверяется первым
         self.assertEqual(str(d.converter_candidates(str(exe))[0]), str(exe))
 
+    def _fake(self, body):
+        import stat
+        import tempfile
+        from pathlib import Path
+        dirp = Path(tempfile.mkdtemp())
+        exe = dirp / "fake.py"
+        exe.write_text("#!%s\nimport sys, pathlib\nsrc = pathlib.Path(sys.argv[2])\n%s\n" % (sys.executable, body), encoding="utf-8")
+        exe.chmod(exe.stat().st_mode | stat.S_IEXEC)
+        src = dirp / "док.pdf"
+        src.write_bytes(b"%PDF")
+        return exe, src
+
+    @unittest.skipIf(sys.platform == "win32", "fake exe is a shebang script")
+    def test_run_edit(self):
+        exe, src = self._fake("o = src.with_name(src.stem + '_edited.pdf'); o.write_bytes(b'x'); print(o)")
+        self.assertEqual(d.run_edit(exe, src), str(src.with_name("док_edited.pdf")))
+        exe, src = self._fake("sys.exit(1)")                           # закрыли без сохранения
+        self.assertIsNone(d.run_edit(exe, src))
+        exe, src = self._fake("src.with_name(src.stem + '_edited.pdf').write_bytes(b'x'); sys.exit(1)")  # упал после сохранения
+        self.assertEqual(d.run_edit(exe, src), str(src.with_name("док_edited.pdf")))
+
 
 if __name__ == "__main__":
     unittest.main()
