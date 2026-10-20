@@ -31,7 +31,12 @@ class DocTools(unittest.TestCase):
 
     def test_cmd(self):
         self.assertEqual(d.edit_command("C.exe", "a.pdf", True, "o.pdf"), ["C.exe", "--edit", "a.pdf", "--ocr", "--out", "o.pdf"])
-        self.assertIsNone(d.find_converter("/nonexistent/x.exe"))
+        import tempfile
+        from pathlib import Path
+        exe = Path(tempfile.mkdtemp()) / "Converter.exe"
+        exe.write_bytes(b"")
+        self.assertEqual(d.find_converter(str(exe)), str(exe))      # свой путь из настроек проверяется первым
+        self.assertEqual(str(d.converter_candidates(str(exe))[0]), str(exe))
 
 
 if __name__ == "__main__":
