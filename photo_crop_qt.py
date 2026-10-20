@@ -996,9 +996,12 @@ class CropCanvas(QWidget):
             return
         f, st, W, H, paper = cur
         ex, ey = e.position().x(), e.position().y()
-        app.push_undo([f])
         g = pc.frame_geom(W, H, paper, st)
         ix, iy = self._to_img(ex, ey)
+        handle = self._rot_at(ex, ey) or self._corner_at(ex, ey) or self._edge_at(ex, ey)
+        if not handle and not pc.point_in_frame(g, ix, iy):
+            return                                           # клик мимо рамки её не двигает
+        app.push_undo([f])
         if self._rot_at(ex, ey):
             self.drag = ("rotate",)
         elif self._corner_at(ex, ey):
@@ -1010,9 +1013,6 @@ class CropCanvas(QWidget):
             dx, dy = pc.rot(-sx * w / 2 if sx else 0, -sy * h / 2 if sy else 0, ang)
             self.drag = ("edge", edge, cx + dx, cy + dy)
         else:
-            if not pc.point_in_frame(g, ix, iy):
-                st.cx, st.cy = ix / W, iy / H
-                pc.normalize(st)
             self.drag = ("move", ix - st.cx * W, iy - st.cy * H)
         app.mark(f)
         app.redraw()
