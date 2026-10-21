@@ -1574,6 +1574,9 @@ class LevelsWidget(QWidget):
             p.setPen(QPen(QColor(T["select"]), 1.4))
             p.setBrush(QColor(fill))
             p.drawPolygon(tri)
+        if self.app.idx < 0:
+            p.setPen(QColor(T["muted"]))
+            p.drawText(QRectF(0, 0, w, y1), Qt.AlignCenter, tr("Откройте фото, чтобы менять уровни"))
         p.end()
 
     def _hit(self, x):
@@ -1689,6 +1692,9 @@ class CurveWidget(QWidget):
         if i is not None and 0 <= i < len(pts):
             p.setPen(QColor(T["text"]))
             p.drawText(QRectF(r.left() + 6, r.top() + 4, r.width(), 18), Qt.AlignLeft, "%d → %d" % tuple(pts[i]))
+        if self.app.idx < 0:
+            p.setPen(QColor(T["muted"]))
+            p.drawText(r, Qt.AlignCenter, tr("Откройте фото, чтобы менять кривые"))
         p.end()
 
     def _near(self, pos, pts):
@@ -7341,7 +7347,7 @@ pc.EN.update({
     "Сохранить проект (рамки и настройки)": "Save project (frames and settings)",
 })
 pc.EN.update({
-    "Бумага": "Paper", "Фото на листе": "Photos per sheet", "Поля": "Borders", "Пресет 1": "Preset 1", "Пресет 2": "Preset 2", "Сохранить": "Save", "Запомнить текущие ползунки в «Пресет %s»; прежний пресет заменится": "Remember the current sliders in Preset %s; the old preset is replaced", "Применить «Пресет %s» к выбранным фото": "Apply Preset %s to the selected photos", "Пока пуст: настройте ползунки и нажмите «Сохранить» под кнопкой": "Empty for now: set the sliders and press Save under the button", "Заменить сохранённый «Пресет %s» текущими настройками?": "Replace the saved Preset %s with the current settings?", "«Пресет %s» сохранён": "Preset %s saved", "Пресет пока пуст: настройте ползунки и нажмите «Сохранить» под кнопкой пресета.": "The preset is empty: set the sliders and press Save under the preset button.", "Открыть фото, папку или документ": "Open photos, a folder or a document", "Документ…": "Document…", "PDF, Word, Excel, PowerPoint: откроется раздел «Документ»": "PDF, Word, Excel, PowerPoint: opens the Document section", "Поля: белая рамка по краю и между фото": "Borders: white margin at the edge and between photos", "мм": "mm", "Кадр": "Crop", "Лист": "Sheet",
+    "Бумага": "Paper", "Фото на листе": "Photos per sheet", "Поля": "Borders", "Откройте фото, чтобы менять уровни": "Open a photo to change the levels", "Откройте фото, чтобы менять кривые": "Open a photo to change the curves", "Пресет 1": "Preset 1", "Пресет 2": "Preset 2", "Сохранить": "Save", "Запомнить текущие ползунки в «Пресет %s»; прежний пресет заменится": "Remember the current sliders in Preset %s; the old preset is replaced", "Применить «Пресет %s» к выбранным фото": "Apply Preset %s to the selected photos", "Пока пуст: настройте ползунки и нажмите «Сохранить» под кнопкой": "Empty for now: set the sliders and press Save under the button", "Заменить сохранённый «Пресет %s» текущими настройками?": "Replace the saved Preset %s with the current settings?", "«Пресет %s» сохранён": "Preset %s saved", "Пресет пока пуст: настройте ползунки и нажмите «Сохранить» под кнопкой пресета.": "The preset is empty: set the sliders and press Save under the preset button.", "Открыть фото, папку или документ": "Open photos, a folder or a document", "Документ…": "Document…", "PDF, Word, Excel, PowerPoint: откроется раздел «Документ»": "PDF, Word, Excel, PowerPoint: opens the Document section", "Поля: белая рамка по краю и между фото": "Borders: white margin at the edge and between photos", "мм": "mm", "Кадр": "Crop", "Лист": "Sheet",
     "Сколько фото печатать на одном листе": "How many photos to print on one sheet",
     "Выключено — печать без полей, фото вплотную. Включено — белое поле по краю листа и между фото.": "Off — borderless, photos edge to edge. On — a white margin at the sheet edge and between photos.",
     "Поле по краю листа и расстояние между фото, мм": "Sheet margin and distance between photos, mm",
