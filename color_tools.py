@@ -30,24 +30,24 @@ def _num(v, default):
 
 # ---------------------------------------------------------------- нормализация значений
 
+def norm_levels_row(row):
+    try:
+        b, g, w, ob, ow = (_num(x, d) for x, d in zip(row, LEVELS_NEUTRAL))
+    except (TypeError, ValueError):
+        return LEVELS_NEUTRAL
+    b = _clamp(b, 0, 254)
+    w = _clamp(w, b + 1, 255)
+    ob = _clamp(ob, 0, 254)
+    ow = _clamp(ow, ob + 1, 255)
+    return (round(b, 1), round(_clamp(g, 0.1, 10.0), 2), round(w, 1), round(ob, 1), round(ow, 1))
+
+
 def norm_levels(v):
     try:
         rows = list(v)
     except TypeError:
         return ()
-    out = []
-    for i in range(4):
-        row = rows[i] if i < len(rows) else LEVELS_NEUTRAL
-        try:
-            b, g, w, ob, ow = (_num(x, d) for x, d in zip(row, LEVELS_NEUTRAL))
-        except (TypeError, ValueError):
-            b, g, w, ob, ow = LEVELS_NEUTRAL
-        b = _clamp(b, 0, 254)
-        w = _clamp(w, b + 1, 255)
-        ob = _clamp(ob, 0, 254)
-        ow = _clamp(ow, ob + 1, 255)
-        out.append((round(b, 1), round(_clamp(g, 0.1, 10.0), 2), round(w, 1), round(ob, 1), round(ow, 1)))
-    out = tuple(out)
+    out = tuple(norm_levels_row(rows[i] if i < len(rows) else LEVELS_NEUTRAL) for i in range(4))
     return () if all(r == LEVELS_NEUTRAL for r in out) else out
 
 

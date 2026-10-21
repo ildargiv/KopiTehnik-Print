@@ -24,6 +24,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import print_stats as ps                                  # noqa: E402  (счётчик печати)
 import photo_crop as pc                                    # noqa: E402  (движок программы)
+import color_tools as ct                                   # noqa: E402  (уровни, кривые, выборочный цвет)
 import i18n                                                # noqa: E402  (переводы интерфейса)
 
 if len(sys.argv) > 1 and sys.argv[1] in ("agent", "mcp", "mcp-config", "--print-project"):
@@ -307,6 +308,13 @@ def lbl(text, role=None, wrap=False):
     if role:
         w.setProperty("role", role)
     w.setWordWrap(wrap)
+    return w
+
+
+def hint(text):
+    """Мелкая пояснительная подпись с переносом по словам, без лишней высоты."""
+    w = lbl(text, "muted", wrap=True)
+    w.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Maximum)
     return w
 
 
@@ -841,6 +849,47 @@ class Segmented(QFrame):
     def value(self):
         i = self.group.checkedId()
         return self.values[i] if i >= 0 else None
+
+    def clear(self):
+        """Снимает выбор со всех кнопок (для двух рядов вкладок, где активна одна кнопка из обоих рядов)."""
+        self.group.setExclusive(False)
+        for b in self.group.buttons():
+            b.setChecked(False)
+        self.group.setExclusive(True)
+
+
+class PageStack(QWidget):
+    """Как QStackedWidget, но высота равна высоте только видимой страницы (у обычного — самой высокой из всех)."""
+    currentChanged = Signal(int)
+
+    def __init__(self):
+        super().__init__()
+        self._lay = vbox()
+        self.setLayout(self._lay)
+        self._pages, self._cur = [], -1
+
+    def addWidget(self, w):
+        self._pages.append(w)
+        self._lay.addWidget(w)
+        w.setVisible(not self._pages[:-1])
+        if len(self._pages) == 1:
+            self._cur = 0
+
+    def count(self):
+        return len(self._pages)
+
+    def widget(self, i):
+        return self._pages[i]
+
+    def currentIndex(self):
+        return self._cur
+
+    def setCurrentIndex(self, i):
+        for k, w in enumerate(self._pages):
+            w.setVisible(k == i)
+        self._cur = i
+        self.updateGeometry()
+        self.currentChanged.emit(i)
 
 
 class Switch(QAbstractButton):
@@ -1512,6 +1561,486 @@ class Histogram(QWidget):
                 p.setBrush(Qt.NoBrush)
                 p.drawPath(path)
         p.end()
+
+
+# ---------------------------------------------------------------- уровни, кривые и выборочный цвет (вкладка «Цвет»)
+
+CH_NAMES = (("RGB", "rgb"), ("R", "r"), ("G", "g"), ("B", "b"))
+CH_COLORS = {"rgb": "#d6d8dd", "r": "#ff5a5a", "g": "#4fd06a", "b": "#5a8cff"}
+
+
+def hist_channel(h, ch):
+    """256 значений гистограммы канала ("rgb" — сумма трёх) из 768-значной pc.hist_rgb."""
+    if not h:
+        return None
+    if ch == "rgb":
+        return [h[i] + h[256 + i] + h[512 + i] for i in range(256)]
+    k = {"r": 0, "g": 1, "b": 2}[ch]
+    return list(h[k * 256:(k + 1) * 256])
+
+
+def paint_hist_fill(p, rect, hv, color):
+    """Залитая гистограмма в прямоугольнике rect; «пики» чёрного и белого отсекаются, чтобы не прижимать остальное."""
+    if not hv:
+        return
+    cap = sorted(hv[2:254])[-6] or 1
+    path = QPainterPath()
+    path.moveTo(rect.left(), rect.bottom())
+    for j in range(256):
+        path.lineTo(rect.left() + j * rect.width() / 255.0, rect.bottom() - min(1.0, hv[j] / cap) * rect.height())
+    path.lineTo(rect.right(), rect.bottom())
+    path.closeSubpath()
+    c = QColor(color)
+    c.setAlpha(110)
+    p.setPen(Qt.NoPen)
+    p.setBrush(c)
+    p.drawPath(path)
+
+
+class ChannelBar(Segmented):
+    """Выбор канала RGB / R / G / B."""
+
+    def __init__(self):
+        super().__init__([(n, c) for n, c in CH_NAMES], "rgb")
+        self.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Fixed)
+        for b, (_, c) in zip(self.group.buttons(), CH_NAMES):
+            b.setToolTip(tr({"rgb": "Все каналы сразу", "r": "Красный канал", "g": "Зелёный канал", "b": "Синий канал"}[c]))
+
+
+class _LevelsCanvas(QWidget):
+    """Гистограмма с тремя бегунками: чёрная точка, гамма (середина), белая точка."""
+
+    def __init__(self, ed):
+        super().__init__()
+        self.ed, self.drag = ed, None
+        self.setFixedHeight(132)
+        self.setMouseTracking(True)
+
+    def _plot(self):
+        return QRectF(10, 6, self.width() - 20, self.height() - 34)
+
+    def _marks(self):
+        b, g, w = self.ed.row()[:3]
+        r = self._plot()
+        xb, xw = r.left() + b / 255.0 * r.width(), r.left() + w / 255.0 * r.width()
+        return {"b": xb, "g": xb + (xw - xb) * 0.5 ** g, "w": xw}
+
+    def _pick(self, x):
+        m = self._marks()
+        best = min(m, key=lambda k: abs(m[k] - x))
+        return best if abs(m[best] - x) <= 12 else None
+
+    def mousePressEvent(self, e):
+        if e.button() == Qt.LeftButton:
+            self.drag = self._pick(e.position().x())
+
+    def mouseMoveEvent(self, e):
+        if self.drag is None:
+            self.setCursor(Qt.SizeHorCursor if self._pick(e.position().x()) else Qt.ArrowCursor)
+            return
+        r = self._plot()
+        v = min(255.0, max(0.0, (e.position().x() - r.left()) / r.width() * 255.0))
+        self.ed.drag_to(self.drag, v)
+
+    def mouseReleaseEvent(self, e):
+        self.drag = None
+
+    def mouseDoubleClickEvent(self, e):
+        k = self._pick(e.position().x())
+        if k:
+            self.ed.reset_mark(k)
+
+    def paintEvent(self, e):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+        r = self._plot()
+        p.setPen(QPen(QColor(T["border"]), 1))
+        p.setBrush(QColor(T["canvas"]))
+        p.drawRoundedRect(r.adjusted(-2, -2, 2, 2), 6, 6)
+        ch = self.ed.channel()
+        paint_hist_fill(p, r, hist_channel(self.ed.hist, ch), CH_COLORS[ch])
+        for k, x in self._marks().items():
+            y = r.bottom() + 8
+            tri = QPolygonF([QPointF(x, y), QPointF(x - 7, y + 14), QPointF(x + 7, y + 14)])
+            p.setPen(QPen(QColor(T["border"]), 1))
+            p.setBrush(QColor({"b": "#000000", "g": "#9a9a9a", "w": "#ffffff"}[k]))
+            p.drawPolygon(tri)
+        p.end()
+
+
+class LevelsEditor(QWidget):
+    """Уровни: канал, гистограмма с бегунками, числа входа/выхода, «Авто» и «Сбросить»."""
+    changed = Signal(object)
+    auto_requested = Signal()
+
+    def __init__(self):
+        super().__init__()
+        self.rows = [list(ct.LEVELS_NEUTRAL) for _ in range(4)]
+        self.hist = None
+        self.bar = ChannelBar()
+        self.bar.changed.connect(lambda _c: self._refresh())
+        self.canvas = _LevelsCanvas(self)
+        self.f = []
+        for i, tip in enumerate(("Чёрная точка (вход)", "Гамма (середина)", "Белая точка (вход)", "Выход: чёрный", "Выход: белый")):
+            e = QLineEdit()
+            e.setAlignment(Qt.AlignCenter)
+            e.setToolTip(tr(tip))
+            e.editingFinished.connect(lambda i=i: self._typed(i))
+            self.f.append(e)
+        self.f[0].setMinimumWidth(40)
+        grid = QGridLayout()
+        grid.setSpacing(4)
+        for c, t in enumerate(("Вход: чёрный", "гамма", "белый")):
+            grid.addWidget(lbl(t, "muted"), 0, c)
+            grid.addWidget(self.f[c], 1, c)
+        grid.addWidget(lbl("Выход: чёрный", "muted"), 2, 0)
+        grid.addWidget(lbl("белый", "muted"), 2, 2)
+        grid.addWidget(self.f[3], 3, 0)
+        grid.addWidget(self.f[4], 3, 2)
+        self.setLayout(vbox(hbox(self.bar, None), self.canvas, grid,
+                            hbox(btn("Авто", lambda: self.auto_requested.emit(), ico="sparkle"),
+                                 btn("Сбросить", self.reset_all, "link"), None),
+                            hint("Двойной щелчок по бегунку — сбросить его."), spacing=8))
+        self._refresh()
+
+    def channel(self):
+        return self.bar.value()
+
+    def row(self):
+        return self.rows[ct.CHANNELS.index(self.channel())]
+
+    def set_value(self, levels):
+        self.rows = [list(r) for r in ct.levels_full(levels)]
+        self._refresh()
+
+    def set_hist(self, h):
+        self.hist = h
+        self.canvas.update()
+
+    def _refresh(self):
+        b, g, w, ob, ow = self.row()
+        for e, v in zip(self.f, (b, g, w, ob, ow)):
+            e.setText(("%.2f" % v) if e is self.f[1] else ("%d" % round(v)))
+        self.canvas.update()
+
+    def _emit(self):
+        self._refresh()
+        self.changed.emit(ct.norm_levels(self.rows))
+
+    def _set_row(self, b, g, w, ob, ow):
+        self.rows[ct.CHANNELS.index(self.channel())] = list(ct.norm_levels_row((b, g, w, ob, ow)))
+
+    def drag_to(self, mark, v):
+        b, g, w, ob, ow = self.row()
+        if mark == "b":
+            b = min(v, w - 1)
+        elif mark == "w":
+            w = max(v, b + 1)
+        else:
+            x = min(0.98, max(0.02, (v - b) / max(1.0, w - b)))
+            g = min(10.0, max(0.1, math.log(0.5) / math.log(x)))
+        self._set_row(b, g, w, ob, ow)
+        self._emit()
+
+    def reset_mark(self, mark):
+        b, g, w, ob, ow = self.row()
+        if mark == "b":
+            b = 0.0
+        elif mark == "w":
+            w = 255.0
+        else:
+            g = 1.0
+        self._set_row(b, g, w, ob, ow)
+        self._emit()
+
+    def _typed(self, i):
+        vals = list(self.row())
+        try:
+            vals[i] = float(self.f[i].text().replace(",", "."))
+        except ValueError:
+            self._refresh()
+            return
+        self._set_row(*vals)
+        self._emit()
+
+    def reset_all(self):
+        self.rows = [list(ct.LEVELS_NEUTRAL) for _ in range(4)]
+        self._emit()
+
+
+class CurveEditor(QWidget):
+    """Кривая: точки двигаются мышью, щелчок по пустому месту добавляет точку, двойной щелчок или правая кнопка удаляют."""
+    changed = Signal(object)                       # tuple из четырёх списков точек (как curves)
+    hovered = Signal(str)
+
+    def __init__(self, size=260):
+        super().__init__()
+        self.pts = [list(ct.CURVE_NEUTRAL) for _ in range(4)]
+        self.ch = "rgb"
+        self.hist = None
+        self.drag = None
+        self.setMinimumSize(size, size)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self.setMouseTracking(True)
+
+    def heightForWidth(self, w):
+        return w
+
+    def set_value(self, curves):
+        self.pts = [list(map(tuple, c)) for c in ct.curves_full(curves)]
+        self.update()
+
+    def set_channel(self, ch):
+        self.ch = ch
+        self.update()
+
+    def cur(self):
+        return self.pts[ct.CHANNELS.index(self.ch)]
+
+    def _box(self):
+        m = 12
+        s = min(self.width(), self.height()) - 2 * m
+        return QRectF((self.width() - s) / 2.0, (self.height() - s) / 2.0, s, s)
+
+    def _to_px(self, x, y):
+        r = self._box()
+        return QPointF(r.left() + x / 255.0 * r.width(), r.bottom() - y / 255.0 * r.height())
+
+    def _from_px(self, pos):
+        r = self._box()
+        return (min(255.0, max(0.0, (pos.x() - r.left()) / r.width() * 255.0)),
+                min(255.0, max(0.0, (r.bottom() - pos.y()) / r.height() * 255.0)))
+
+    def _hit(self, pos):
+        for i, (x, y) in enumerate(self.cur()):
+            q = self._to_px(x, y)
+            if abs(q.x() - pos.x()) <= 9 and abs(q.y() - pos.y()) <= 9:
+                return i
+        return None
+
+    def _emit(self):
+        self.changed.emit(tuple(tuple(c) for c in self.pts))
+
+    def mousePressEvent(self, e):
+        pos = e.position()
+        i = self._hit(pos)
+        pts = self.cur()
+        if e.button() == Qt.RightButton:
+            if i is not None and 0 < i < len(pts) - 1:
+                del pts[i]
+                self._emit()
+                self.update()
+            return
+        if e.button() != Qt.LeftButton:
+            return
+        if i is None:
+            x, _y = self._from_px(pos)
+            x = int(round(x))
+            if any(abs(px - x) < 2 for px, _ in pts):
+                return
+            tab = ct.curve_lut(pts)
+            pts.append((x, tab[x]))
+            pts.sort()
+            i = [p[0] for p in pts].index(x)
+            self._emit()
+        self.drag = i
+        self.update()
+
+    def mouseDoubleClickEvent(self, e):
+        i = self._hit(e.position())
+        pts = self.cur()
+        if i is not None and 0 < i < len(pts) - 1:
+            del pts[i]
+            self.drag = None
+            self._emit()
+            self.update()
+
+    def mouseMoveEvent(self, e):
+        x, y = self._from_px(e.position())
+        pts = self.cur()
+        if self.drag is not None and self.drag < len(pts):
+            i = self.drag
+            nx = pts[i][0]
+            if 0 < i < len(pts) - 1:
+                nx = int(round(min(pts[i + 1][0] - 1, max(pts[i - 1][0] + 1, x))))
+            pts[i] = (nx, int(round(y)))
+            self._emit()
+            self.update()
+        else:
+            self.setCursor(Qt.PointingHandCursor if self._hit(e.position()) is not None else Qt.CrossCursor)
+        tab = ct.curve_lut(pts)
+        xi = int(round(x))
+        self.hovered.emit(trf("Вход {a} → выход {b}", a=xi, b=tab[xi]))
+
+    def mouseReleaseEvent(self, e):
+        self.drag = None
+
+    def leaveEvent(self, e):
+        self.hovered.emit("")
+
+    def paintEvent(self, e):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+        r = self._box()
+        p.setPen(QPen(QColor(T["border"]), 1))
+        p.setBrush(QColor(T["canvas"]))
+        p.drawRoundedRect(r.adjusted(-3, -3, 3, 3), 6, 6)
+        paint_hist_fill(p, r, hist_channel(self.hist, self.ch), CH_COLORS[self.ch])
+        p.setPen(QPen(QColor(T["border"]), 1))
+        for k in range(1, 4):
+            f = k / 4.0
+            p.drawLine(QPointF(r.left() + f * r.width(), r.top()), QPointF(r.left() + f * r.width(), r.bottom()))
+            p.drawLine(QPointF(r.left(), r.top() + f * r.height()), QPointF(r.right(), r.top() + f * r.height()))
+        p.setPen(QPen(QColor(T["muted"]), 1, Qt.DashLine))
+        p.drawLine(r.bottomLeft(), r.topRight())
+        pts = self.cur()
+        tab = ct.curve_lut(pts)
+        path = QPainterPath()
+        for i in range(256):
+            q = self._to_px(i, tab[i])
+            path.lineTo(q) if i else path.moveTo(q)
+        p.setPen(QPen(QColor(CH_COLORS[self.ch]), 2))
+        p.setBrush(Qt.NoBrush)
+        p.drawPath(path)
+        for i, (x, y) in enumerate(pts):
+            q = self._to_px(x, y)
+            p.setPen(QPen(QColor("#111111"), 1.5))
+            p.setBrush(QColor("#ffffff") if i == self.drag else QColor(CH_COLORS[self.ch]))
+            p.drawEllipse(q, 5.5, 5.5)
+        p.end()
+
+
+class CurvesPanel(QWidget):
+    """Кривые целиком: канал, поле кривой, быстрые формы и сброс. Используется и во вкладке, и на большом экране."""
+    changed = Signal(object)
+
+    def __init__(self, size=260):
+        super().__init__()
+        self.bar = ChannelBar()
+        self.ed = CurveEditor(size)
+        self.l_read = lbl("", "muted")
+        self.bar.changed.connect(self.ed.set_channel)
+        self.ed.changed.connect(self.changed.emit)
+        self.ed.hovered.connect(self.l_read.setText)
+        shapes = hbox(btn("Контраст S", lambda: self.shape(((0, 0), (64, 48), (192, 208), (255, 255))), tip="Мягкая S-кривая: больше контраста"),
+                      btn("Светлее", lambda: self.shape(((0, 0), (128, 150), (255, 255))), tip="Поднять средние тона"),
+                      btn("Темнее", lambda: self.shape(((0, 0), (128, 108), (255, 255))), tip="Опустить средние тона"), spacing=6)
+        self.setLayout(vbox(hbox(self.bar, None), self.ed, self.l_read, shapes,
+                            hbox(btn("Сбросить канал", self.reset_channel, "link"), btn("Сбросить всё", self.reset_all, "link"), None),
+                            hint("Щелчок по кривой — новая точка, двойной щелчок или правая кнопка — удалить точку."),
+                            spacing=8))
+
+    def set_value(self, curves):
+        self.ed.set_value(curves)
+
+    def set_hist(self, h):
+        self.ed.hist = h
+        self.ed.update()
+
+    def shape(self, pts):
+        self.ed.cur()[:] = list(pts)
+        self.ed._emit()
+        self.ed.update()
+
+    def reset_channel(self):
+        self.shape(ct.CURVE_NEUTRAL)
+
+    def reset_all(self):
+        self.ed.pts = [list(ct.CURVE_NEUTRAL) for _ in range(4)]
+        self.ed._emit()
+        self.ed.update()
+
+
+class CurvesWindow(QDialog):
+    """Большой экран кривых: крупное поле, гистограмма под кривой, живой просмотр в главном окне."""
+
+    def __init__(self, app):
+        super().__init__(app)
+        self.setWindowTitle(tr("Кривые"))
+        self.setModal(False)
+        self.resize(760, 860)
+        self.panel = CurvesPanel(560)
+        v = vbox(lbl("Кривые: перетаскивайте точки, результат сразу виден в главном окне. Канал RGB меняет все цвета, R, G, B — по одному.", "muted", wrap=True),
+                 self.panel, hbox(None, btn("Закрыть", self.close, "primary"), spacing=8), spacing=10, margins=(16, 14, 16, 14))
+        self.setLayout(v)
+
+
+class SelColorPanel(QWidget):
+    """Выборочный цвет: для каждого из шести цветов — оттенок, насыщенность и яркость."""
+    changed = Signal(object)
+    NAMES = (("R", "Красный", "#ff5a5a"), ("Y", "Жёлтый", "#ffd21f"), ("G", "Зелёный", "#4fd06a"),
+             ("C", "Голубой", "#3fd0e0"), ("B", "Синий", "#5a8cff"), ("M", "Пурпурный", "#d96bff"))
+
+    def __init__(self):
+        super().__init__()
+        self.vals = [list(ct.SEL_NEUTRAL) for _ in ct.SEL_COLORS]
+        self.cur = 0
+        self.lock = False
+        row = hbox(spacing=4)
+        self.chips = []
+        for i, (k, name, col) in enumerate(self.NAMES):
+            b = MotionButton(k)
+            b.setProperty("kind", "chip")
+            b.setCheckable(True)
+            b.setToolTip(tr(name))
+            b.setStyleSheet("QPushButton{color:%s;font-weight:700;}QPushButton:checked{color:%s;}" % (col, T["accent_text"]))
+            b.clicked.connect(lambda _=False, i=i: self.pick(i))
+            self.chips.append(b)
+            row.addWidget(b)
+        self.sl, self.val = [], []
+        sl_rows = []
+        for j, (name, step) in enumerate((("Оттенок", 1), ("Насыщенность", 1), ("Яркость", 1))):
+            s = _ResetSlider(Qt.Horizontal)
+            s.setRange(-100, 100)
+            s.setValue(0)
+            v = lbl("0", "muted")
+            v.setFixedWidth(34)
+            v.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+            s.valueChanged.connect(lambda x, j=j: self._moved(j, x))
+            s.reset.connect(lambda j=j: self.sl[j].setValue(0))
+            self.sl.append(s)
+            self.val.append(v)
+            sl_rows.append(vbox(hbox(lbl(name), None, v), s, spacing=1, margins=(0, 3, 0, 3)))
+        self.l_name = lbl("", "muted")
+        self.setLayout(vbox(row, self.l_name, *sl_rows, hbox(btn("Сбросить цвет", self.reset_cur, "link"), btn("Сбросить всё", self.reset_all, "link"), None),
+                            hint("Серые и нейтральные цвета не затрагиваются."), spacing=6))
+        self.pick(0)
+
+    def pick(self, i):
+        self.cur = i
+        for k, b in enumerate(self.chips):
+            b.setChecked(k == i)
+        self.l_name.setText(tr(self.NAMES[i][1]))
+        self._show()
+
+    def _show(self):
+        self.lock = True
+        for j, s in enumerate(self.sl):
+            v = int(round(self.vals[self.cur][j]))
+            s.setValue(v)
+            self.val[j].setText("%+d" % v if v else "0")
+        self.lock = False
+
+    def set_value(self, sel):
+        self.vals = [list(r) for r in ct.selcol_full(sel)]
+        self._show()
+
+    def _moved(self, j, x):
+        self.val[j].setText("%+d" % x if x else "0")
+        if self.lock:
+            return
+        self.vals[self.cur][j] = float(x)
+        self.changed.emit(ct.norm_selcol(self.vals))
+
+    def reset_cur(self):
+        self.vals[self.cur] = list(ct.SEL_NEUTRAL)
+        self._show()
+        self.changed.emit(ct.norm_selcol(self.vals))
+
+    def reset_all(self):
+        self.vals = [list(ct.SEL_NEUTRAL) for _ in ct.SEL_COLORS]
+        self._show()
+        self.changed.emit(ct.norm_selcol(self.vals))
 
 
 class SendOverlay(QWidget):
@@ -4506,8 +5035,7 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         self.hist = Histogram()
         self.l_hist = lbl("", "muted", wrap=True)
         tabs = Segmented([(t_[0], i) for i, t_ in enumerate(pc.AdjustPanel.TABS)], 0)
-        stack = QStackedWidget()
-        tabs.changed.connect(stack.setCurrentIndex)
+        stack = PageStack()
         for title, rows in pc.AdjustPanel.TABS:
             page = QWidget()
             l = vbox(spacing=4)
@@ -4529,6 +5057,26 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
             l.addStretch(1)
             page.setLayout(l)
             stack.addWidget(page)
+        n_tabs = len(pc.AdjustPanel.TABS)                   # дальше: уровни, кривые, выборочный цвет
+        self.levels_ed = LevelsEditor()
+        self.levels_ed.changed.connect(self.levels_changed)
+        self.levels_ed.auto_requested.connect(self.levels_auto)
+        self.curves_panel = CurvesPanel(230)
+        self.curves_panel.changed.connect(lambda v: self.curves_changed(self.curves_panel, v))
+        if getattr(self, "curves_win", None) is not None:      # окно кривых от прежнего построения интерфейса
+            self.curves_win.close()
+            self.curves_win = None
+        curv_page = QWidget()
+        curv_page.setLayout(vbox(self.curves_panel, hbox(btn("На весь экран…", self.open_curves_window, ico="image"), None), spacing=8))
+        self.sel_panel = SelColorPanel()
+        self.sel_panel.changed.connect(self.selcol_changed)
+        for w_ in (self.levels_ed, curv_page, self.sel_panel):
+            stack.addWidget(w_)
+
+        tabs2 = Segmented([("Уровни", n_tabs), ("Кривые", n_tabs + 1), ("По цветам", n_tabs + 2)], n_tabs)
+        tabs2.clear()
+        tabs.changed.connect(lambda i: (stack.setCurrentIndex(i), tabs2.clear()))
+        tabs2.changed.connect(lambda i: (stack.setCurrentIndex(i), tabs.clear()))
         self.l_enh = lbl("", "muted", wrap=True)
         self.l_enh.hide()
         b_orig = ibtn("eye", "Показать оригинал (удерживайте)", None, 34, True)
@@ -4554,7 +5102,7 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
                           ibtn("trash", "Сбросить коррекцию у всех фото", lambda: self.adj_reset(True), 32, True, isize=16), spacing=4),
                      self.l_enh)
         top = card(None, hbox(self.seg_scope, None), self.hist, self.l_hist)
-        sl = card(None, tabs, stack, lbl("Двойной щелчок по ползунку — сбросить его.", "muted", wrap=True))
+        sl = card(None, tabs, tabs2, stack, lbl("Двойной щелчок по ползунку — сбросить его.", "muted", wrap=True))
         self.adj_lock = False
         self._preset_tips()
         return self._scroll(top, quick, sl)
@@ -5684,9 +6232,68 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
             self.sw_bw.set(full["bw"])
             self.sw_sepia.set(full["sepia"])
             self.seg_auto.set(full["auto"])
+            self.levels_ed.set_value(full["levels"])
+            for pnl in self._curve_panels():
+                pnl.set_value(full["curves"])
+            self.sel_panel.set_value(full["selcol"])
         finally:
             self.adj_lock = False
+        self._color_hist()
         self.update_hist()
+
+    def _curve_panels(self):
+        w = getattr(self, "curves_win", None)
+        return [self.curves_panel] + ([w.panel] if w is not None else [])
+
+    def _color_hist(self):
+        """Гистограмма исходного (ещё не исправленного) кадра — подложка для уровней и кривых."""
+        if self.raw is None:
+            h = None
+        else:
+            if getattr(self, "_hist_img", None) is not self.raw:
+                small = self.raw
+                if max(small.size) > 800:
+                    small = small.copy()
+                    small.thumbnail((800, 800))
+                self._hist_img, self._hist_src = self.raw, pc.hist_rgb(small)[0]
+            h = self._hist_src
+        self.levels_ed.set_hist(h)
+        for pnl in self._curve_panels():
+            pnl.set_hist(h)
+
+    def levels_changed(self, val):
+        self.adj_set({"levels": val}, key=("levels",))
+
+    def selcol_changed(self, val):
+        self.adj_set({"selcol": val}, key=("selcol",))
+
+    def curves_changed(self, sender, val):
+        self.adj_set({"curves": val}, key=("curves",))
+        for pnl in self._curve_panels():
+            if pnl is not sender:
+                pnl.set_value(val)
+
+    def open_curves_window(self):
+        w = getattr(self, "curves_win", None)
+        if w is None:
+            w = self.curves_win = CurvesWindow(self)
+            w.panel.changed.connect(lambda v: self.curves_changed(w.panel, v))
+        w.panel.set_value(pc.adj_full(self.cur_adj())["curves"] if self.idx >= 0 else ())
+        self._color_hist()
+        w.show()
+        w.raise_()
+        w.activateWindow()
+
+    def levels_auto(self):
+        if self.idx < 0 or self.raw is None:
+            return
+        small = self.raw
+        if max(small.size) > 800:
+            small = small.copy()
+            small.thumbnail((800, 800))
+        val = ct.auto_levels_rows(*pc._auto_bounds(small.convert("RGB"), "color"))
+        self.adj_set({"levels": val}, key=("levels",))
+        self.levels_ed.set_value(val)
 
     def update_hist(self, note=None):
         img = self.adj_img if self.adj_img is not None else self.raw
@@ -5810,6 +6417,7 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
             return
         presets = self.settings.setdefault("adj_presets", {})
         old, new = presets.get(str(n)), dict(self.cur_adj())
+        old = pc.clean_adj(old) if old is not None else None             # из файла настроек списки возвращаются кортежами
         if old is not None and old != new and not ask(self, trf("Заменить сохранённый пресет {n} текущими настройками?", n=n)):
             return
         presets[str(n)] = new
@@ -6913,7 +7521,20 @@ pc.EN.update({
     "В другую папку": "To another folder", "Папка не выбрана": "No folder chosen", "Выбрать папку": "Choose folder",
     "Разрешение, dpi": "Resolution, dpi", "Тип файла": "File type", "Качество JPEG": "JPEG quality",
     "Точный размер печати": "Exact print size", "Подпапка по формату": "Subfolder per format", "Число копий в имени файла": "Copies count in file name",
-    "Цвет": "Colour", "Пресет 1": "Preset 1", "Пресет 2": "Preset 2", "Сохранить": "Save", "Сохранённые настройки: нажмите, чтобы применить": "Saved settings: click to apply", "Пресет пуст: настройте ползунки и нажмите «Сохранить» под ним": "Preset is empty: set the sliders and press Save under it", "Запомнить текущие настройки ползунков в этот пресет. Он хранится, пока вы не сохраните в него другие.": "Store the current slider values in this preset. It stays until you save other values into it.", "Цвет на экране": "Colour on screen", "Профиль принтера": "Printer profile", "Выбрать профиль…": "Choose profile…",
+    "Цвет": "Colour", "Уровни": "Levels", "Кривые": "Curves", "По цветам": "By colour", "На весь экран…": "Full screen…",
+    "Все каналы сразу": "All channels together", "Красный канал": "Red channel", "Зелёный канал": "Green channel", "Синий канал": "Blue channel",
+    "Чёрная точка (вход)": "Black point (input)", "Гамма (середина)": "Gamma (midtones)", "Белая точка (вход)": "White point (input)",
+    "Выход: чёрный": "Output: black", "Вход: чёрный": "Input: black", "гамма": "gamma", "белый": "white",
+    "Двойной щелчок по бегунку — сбросить его.": "Double-click a marker to reset it.", "Авто": "Auto", "Сбросить": "Reset",
+    "Сбросить канал": "Reset channel", "Сбросить всё": "Reset all", "Сбросить цвет": "Reset colour", "Контраст S": "S contrast",
+    "Светлее": "Lighter", "Темнее": "Darker", "Мягкая S-кривая: больше контраста": "Soft S-curve: more contrast",
+    "Поднять средние тона": "Raise the midtones", "Опустить средние тона": "Lower the midtones",
+    "Щелчок по кривой — новая точка, двойной щелчок или правая кнопка — удалить точку.": "Click the curve to add a point; double-click or right-click a point to remove it.",
+    "Кривые: перетаскивайте точки, результат сразу виден в главном окне. Канал RGB меняет все цвета, R, G, B — по одному.": "Curves: drag the points, the result shows at once in the main window. RGB changes all colours; R, G, B one at a time.",
+    "Красный": "Red", "Жёлтый": "Yellow", "Зелёный": "Green", "Голубой": "Cyan", "Синий": "Blue", "Пурпурный": "Magenta",
+    "Оттенок": "Hue", "Насыщенность": "Saturation", "Яркость": "Brightness",
+    "Серые и нейтральные цвета не затрагиваются.": "Greys and neutral colours are left alone.",
+    "Пресет 1": "Preset 1", "Пресет 2": "Preset 2", "Сохранить": "Save", "Сохранённые настройки: нажмите, чтобы применить": "Saved settings: click to apply", "Пресет пуст: настройте ползунки и нажмите «Сохранить» под ним": "Preset is empty: set the sliders and press Save under it", "Запомнить текущие настройки ползунков в этот пресет. Он хранится, пока вы не сохраните в него другие.": "Store the current slider values in this preset. It stays until you save other values into it.", "Цвет на экране": "Colour on screen", "Профиль принтера": "Printer profile", "Выбрать профиль…": "Choose profile…",
     "Имитация печати на экране": "Simulate print on screen", "Показать цвета вне охвата": "Show out-of-gamut colours",
     "Параметры": "Settings", "это фото": "this photo", "все отмеченные": "all checked", "Менять": "Apply to",
     "Татарская": "Tatar", "Марийская": "Mari", "Основное": "Basic", "Детали": "Detail", "нет": "off", "контраст": "contrast", "цвет": "colour", "Ч/Б": "B/W", "Авто-уровни": "Auto levels",
@@ -6971,7 +7592,7 @@ pc.EN.update({
     "У вас последняя версия:": "You have the latest version:",
     "Не удалось проверить обновления. Проверьте подключение к интернету.": "Could not check for updates. Check your internet connection.",
 })
-pc.EN_FMT.update({"Пресет {n} пока пуст. Настройте ползунки и нажмите «Сохранить» под ним.": "Preset {n} is empty. Set the sliders and press Save under it.", "Заменить сохранённый пресет {n} текущими настройками?": "Replace saved preset {n} with the current settings?", "Применён пресет {n}": "Preset {n} applied", "Пресет {n} сохранён": "Preset {n} saved", "Страниц: {n}": "Pages: {n}", "Открыть документ «{name}»": "Open document “{name}”"})
+pc.EN_FMT.update({"Вход {a} → выход {b}": "Input {a} → output {b}", "Пресет {n} пока пуст. Настройте ползунки и нажмите «Сохранить» под ним.": "Preset {n} is empty. Set the sliders and press Save under it.", "Заменить сохранённый пресет {n} текущими настройками?": "Replace saved preset {n} with the current settings?", "Применён пресет {n}": "Preset {n} applied", "Пресет {n} сохранён": "Preset {n} saved", "Страниц: {n}": "Pages: {n}", "Открыть документ «{name}»": "Open document “{name}”"})
 pc.EN.update({"Бумага: фото, листов": "Paper: photos, sheets", "Бумага: документы, листов": "Paper: documents, sheets", "Тип": "Type"})
 pc.EN.update({
     "Документ": "Document", "PDF, Word, Excel, PowerPoint и другие офисные файлы": "PDF, Word, Excel, PowerPoint and other office files",
@@ -7232,6 +7853,36 @@ def selftest(app):
         win.adj_replace({}, [win.files[win.idx]])
         win.sync_adj()
     step("пресеты коррекции: сохранить и применить", presets_flow)
+    def levels_curves_selcol():
+        win.adj_replace({}, [win.files[win.idx]])
+        win.sync_adj()
+        win.levels_ed.rows[0] = [20.0, 1.2, 235.0, 0.0, 255.0]
+        win.levels_ed._emit()
+        if not win.cur_adj().get("levels"):
+            raise RuntimeError("уровни не записались в коррекцию")
+        win.curves_panel.shape(((0, 0), (64, 48), (192, 208), (255, 255)))
+        if not win.cur_adj().get("curves"):
+            raise RuntimeError("кривые не записались в коррекцию")
+        win.sel_panel.pick(0)
+        win.sel_panel.sl[1].setValue(40)
+        if not win.cur_adj().get("selcol"):
+            raise RuntimeError("выборочный цвет не записался в коррекцию")
+        win.levels_auto()
+        win.sync_adj()
+        win.open_curves_window()
+        app.processEvents()
+        win.curves_win.grab().save(str(out / "selftest_curves.png"))
+        win.curves_win.close()
+        a = dict(win.cur_adj())
+        win.settings["adj_presets"] = {}                      # занятый пресет спросил бы подтверждение
+        win.preset_save(2)                                   # структурные параметры проходят через пресеты и JSON
+        win.adj_replace({}, [win.files[win.idx]])
+        win.preset_pick(2)
+        if win.cur_adj() != a:
+            raise RuntimeError("пресет потерял уровни, кривые или выборочный цвет")
+        win.adj_replace({}, [win.files[win.idx]])
+        win.sync_adj()
+    step("уровни, кривые, выборочный цвет", levels_curves_selcol)
     step("снимок: цвет", lambda: shot("color"))
     step("12 фото на листе", lambda: (win._layout_set("nup", 12), win.seg_nup.set(12)))
     step("7 фото на листе (своё число)", lambda: (win._layout_set("nup", 7), win.seg_nup.set(7), win.layout_spec()))
