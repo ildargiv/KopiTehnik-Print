@@ -3798,7 +3798,6 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         self.show_orig = False
         self.saving = False
         self.adj_clipboard = None
-        self.preset_cur = 0                                  # выбранный пресет коррекции: 0 — никакой, 1 или 2
         self._undo, self._redo, self._undo_key, self._undo_t = [], [], None, 0.0
         self._auto_sig = None
         self._last_check = None
@@ -4537,17 +4536,15 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         b_orig.released.connect(lambda: self.adj_show_original(False))
         b_enh = btn("Улучшить", lambda: self.enhance(1), ico="sparkle", tip="Улучшение для печати на Epson: светлее, чуть контрастнее и резче. Подбирается под каждый снимок.")
         b_sup = btn("Супер", lambda: self.enhance(2), ico="sparkle", tip="Более сильное улучшение: ярче, сочнее, резче")
-        self.b_pre = {}
+        self.b_pre, self.b_pre_save = {}, {}
         for n in (1, 2):
             b = btn("Пресет %d" % n, lambda k=n: self.preset_pick(k))
             b.setProperty("kind", "chip")
-            b.setCheckable(True)
-            b.setChecked(self.preset_cur == n)
             self.b_pre[n] = b
-        b_pre_save = btn("Сохранить", self.preset_save, ico="save",
-                         tip="Запомнить текущие настройки ползунков в выбранный пресет. Он хранится, пока вы не сохраните в него другие.")
+            self.b_pre_save[n] = btn("Сохранить", lambda k=n: self.preset_save(k), ico="save",
+                                     tip="Запомнить текущие настройки ползунков в этот пресет. Он хранится, пока вы не сохраните в него другие.")
         quick = card(None, hbox(b_enh, b_sup, b_orig, spacing=6),
-                     hbox(self.b_pre[1], self.b_pre[2], spacing=6), hbox(b_pre_save, None),
+                     hbox(vbox(self.b_pre[1], self.b_pre_save[1], spacing=4), vbox(self.b_pre[2], self.b_pre_save[2], spacing=4), spacing=6),
                      hbox(ibtn("sun", "Авто-яркость", self.auto_bright, 32, True, isize=16),
                           ibtn("copy", "Копировать настройки этого фото", self.adj_copy, 32, True, isize=16),
                           ibtn("paste", "Вставить настройки в это фото", lambda: self.adj_paste(False), 32, True, isize=16),
@@ -5796,16 +5793,13 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
     def _preset_tips(self):
         for n, b in self.b_pre.items():
             b.setToolTip(tr("Сохранённые настройки: нажмите, чтобы применить") if str(n) in self.settings.get("adj_presets", {})
-                         else tr("Пресет пуст: настройте ползунки, выберите пресет и нажмите «Сохранить»"))
+                         else tr("Пресет пуст: настройте ползунки и нажмите «Сохранить» под ним"))
 
     def preset_pick(self, n):
-        """Выбор пресета: выделяет его и применяет сохранённые значения к фото (или к отмеченным, как задано выше)."""
-        self.preset_cur = n
-        for k, b in self.b_pre.items():
-            b.setChecked(k == n)
+        """Применяет сохранённый пресет к фото (или к отмеченным, как задано переключателем выше)."""
         data = self.settings.get("adj_presets", {}).get(str(n))
         if data is None:
-            self.update_hist(trf("Пресет {n} пока пуст. Настройте ползунки и нажмите «Сохранить».", n=n))
+            self.update_hist(trf("Пресет {n} пока пуст. Настройте ползунки и нажмите «Сохранить» под ним.", n=n))
             return
         if self.idx < 0:
             return
@@ -5813,18 +5807,19 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         self.sync_adj()
         self.update_hist(trf("Применён пресет {n}", n=n))
 
-    def preset_save(self):
-        """Запоминает текущие настройки этого фото в выбранный пресет, пока их не заменят другими."""
-        if self.preset_cur not in (1, 2):
-            info(self, "Сначала выберите «Пресет 1» или «Пресет 2», в который нужно сохранить.")
-            return
+    def preset_save(self, n):
+        """Запоминает текущие настройки этого фото в пресет n, пока их не заменят другими."""
         if self.idx < 0:
             info(self, "Сначала откройте фото.")
             return
-        self.settings.setdefault("adj_presets", {})[str(self.preset_cur)] = dict(self.cur_adj())
+        presets = self.settings.setdefault("adj_presets", {})
+        old, new = presets.get(str(n)), dict(self.cur_adj())
+        if old is not None and old != new and not ask(self, trf("Заменить сохранённый пресет {n} текущими настройками?", n=n)):
+            return
+        presets[str(n)] = new
         self.persist()
         self._preset_tips()
-        self.update_hist(trf("Пресет {n} сохранён", n=self.preset_cur))
+        self.update_hist(trf("Пресет {n} сохранён", n=n))
 
     def adj_reset(self, all_files):
         if self.idx < 0:
@@ -6922,7 +6917,7 @@ pc.EN.update({
     "В другую папку": "To another folder", "Папка не выбрана": "No folder chosen", "Выбрать папку": "Choose folder",
     "Разрешение, dpi": "Resolution, dpi", "Тип файла": "File type", "Качество JPEG": "JPEG quality",
     "Точный размер печати": "Exact print size", "Подпапка по формату": "Subfolder per format", "Число копий в имени файла": "Copies count in file name",
-    "Цвет": "Colour", "Пресет 1": "Preset 1", "Пресет 2": "Preset 2", "Сохранить": "Save", "Сохранённые настройки: нажмите, чтобы применить": "Saved settings: click to apply", "Пресет пуст: настройте ползунки, выберите пресет и нажмите «Сохранить»": "Preset is empty: set the sliders, pick the preset and press Save", "Запомнить текущие настройки ползунков в выбранный пресет. Он хранится, пока вы не сохраните в него другие.": "Store the current slider values in the selected preset. It stays until you save other values into it.", "Сначала выберите «Пресет 1» или «Пресет 2», в который нужно сохранить.": "First choose Preset 1 or Preset 2 to save into.", "Цвет на экране": "Colour on screen", "Профиль принтера": "Printer profile", "Выбрать профиль…": "Choose profile…",
+    "Цвет": "Colour", "Пресет 1": "Preset 1", "Пресет 2": "Preset 2", "Сохранить": "Save", "Сохранённые настройки: нажмите, чтобы применить": "Saved settings: click to apply", "Пресет пуст: настройте ползунки и нажмите «Сохранить» под ним": "Preset is empty: set the sliders and press Save under it", "Запомнить текущие настройки ползунков в этот пресет. Он хранится, пока вы не сохраните в него другие.": "Store the current slider values in this preset. It stays until you save other values into it.", "Цвет на экране": "Colour on screen", "Профиль принтера": "Printer profile", "Выбрать профиль…": "Choose profile…",
     "Имитация печати на экране": "Simulate print on screen", "Показать цвета вне охвата": "Show out-of-gamut colours",
     "Параметры": "Settings", "это фото": "this photo", "все отмеченные": "all checked", "Менять": "Apply to",
     "Татарская": "Tatar", "Марийская": "Mari", "Основное": "Basic", "Детали": "Detail", "нет": "off", "контраст": "contrast", "цвет": "colour", "Ч/Б": "B/W", "Авто-уровни": "Auto levels",
@@ -6980,7 +6975,7 @@ pc.EN.update({
     "У вас последняя версия:": "You have the latest version:",
     "Не удалось проверить обновления. Проверьте подключение к интернету.": "Could not check for updates. Check your internet connection.",
 })
-pc.EN_FMT.update({"Пресет {n} пока пуст. Настройте ползунки и нажмите «Сохранить».": "Preset {n} is empty. Set the sliders and press Save.", "Применён пресет {n}": "Preset {n} applied", "Пресет {n} сохранён": "Preset {n} saved", "Страниц: {n}": "Pages: {n}", "Открыть документ «{name}»": "Open document “{name}”"})
+pc.EN_FMT.update({"Пресет {n} пока пуст. Настройте ползунки и нажмите «Сохранить» под ним.": "Preset {n} is empty. Set the sliders and press Save under it.", "Заменить сохранённый пресет {n} текущими настройками?": "Replace saved preset {n} with the current settings?", "Применён пресет {n}": "Preset {n} applied", "Пресет {n} сохранён": "Preset {n} saved", "Страниц: {n}": "Pages: {n}", "Открыть документ «{name}»": "Open document “{name}”"})
 pc.EN.update({"Бумага: фото, листов": "Paper: photos, sheets", "Бумага: документы, листов": "Paper: documents, sheets", "Тип": "Type"})
 pc.EN.update({
     "Документ": "Document", "PDF, Word, Excel, PowerPoint и другие офисные файлы": "PDF, Word, Excel, PowerPoint and other office files",
@@ -7220,14 +7215,13 @@ def selftest(app):
         win.preset_pick(1)                                   # пресет пуст: ничего не применяется, настройки на месте
         if win.cur_adj().get("bright") != 17.0:
             raise RuntimeError("пустой пресет изменил настройки")
-        win.preset_save()
+        win.preset_save(1)
         win.adj_replace({}, [win.files[win.idx]])
         win.preset_pick(1)
         if win.cur_adj().get("bright") != 17.0 or win.cur_adj().get("sat") != 9.0:
             raise RuntimeError("пресет 1 не применился")
         win.adj_set({"bright": -5.0})
-        win.preset_pick(2)
-        win.preset_save()
+        win.preset_save(2)
         win.preset_pick(1)
         if win.cur_adj().get("bright") != 17.0 or pc.load_settings().get("adj_presets", {}).get("2", {}).get("bright") != -5.0:
             raise RuntimeError("пресеты перепутались или не сохранились в файл")
