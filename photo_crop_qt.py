@@ -1205,6 +1205,13 @@ class CropCanvas(QWidget):
         self.guides = []
         self.pill = None
         self.pbtn = None                 # кнопка «Печать фото» в верхнем углу
+        self.cbtn = None                 # кнопка «До / После» левее неё
+        self.cmp = False                 # режим сравнения: слева от линии снимок без правок, справа — с правками
+        self.cmp_x = 0.5                 # положение линии: доля ширины снимка
+        self.cmp_drag = False
+        self.img_rect = None             # где снимок лежит на экране (x, y, w, h)
+        self._orig_key = None
+        self._orig_pm = None
         self._pb_pending = False
         self.setMouseTracking(True)
         self.setFocusPolicy(Qt.ClickFocus)
@@ -1247,6 +1254,94 @@ class CropCanvas(QWidget):
             b.setVisible(show)
         if show:
             b.raise_()
+        c = self.cbtn
+        if c is not None:
+            c.adjustSize()
+            cx = max(8, b.x() - c.width() - 8)
+            if c.x() != cx or c.y() != y:
+                c.move(cx, y)
+            c.setEnabled(b.isEnabled())
+            if c.isVisible() != show:
+                c.setVisible(show)
+            if show:
+                c.raise_()
+
+    # ---- сравнение «до / после»
+    def set_compare(self, on):
+        self.cmp = bool(on)
+        self.cmp_drag = False
+        self.setCursor(Qt.SplitHCursor if self.cmp else Qt.ArrowCursor)
+        self.update()
+
+    def _orig_pixmap(self):
+        raw = self.app.raw
+        if raw is None:
+            return None
+        if self._orig_key is not id(raw):
+            self._orig_key = id(raw)
+            self._orig_pm = QPixmap.fromImage(pil_to_qimage(raw))
+        return self._orig_pm
+
+    def _cmp_under(self, p, rect):
+        """Левая от линии часть снимка — без правок (рисуется поверх снимка с правками)."""
+        self.img_rect = rect
+        if not self.cmp:
+            return
+        pm = self._orig_pixmap()
+        if pm is None:
+            return
+        x, y, w, h = rect
+        sx = x + w * self.cmp_x
+        p.save()
+        p.setClipRect(QRectF(x, y, sx - x, h), Qt.IntersectClip)
+        p.drawPixmap(QRectF(x, y, w, h), pm, QRectF(pm.rect()))
+        p.restore()
+
+    def _cmp_over(self, p):
+        """Линия-разделитель, ручка и подписи «До» / «После»."""
+        if not self.cmp or not self.img_rect:
+            return
+        x, y, w, h = self.img_rect
+        sx = x + w * self.cmp_x
+        p.save()
+        p.setPen(QPen(QColor(0, 0, 0, 140), 4))
+        p.drawLine(QPointF(sx, y), QPointF(sx, y + h))
+        p.setPen(QPen(QColor("#ffffff"), 2))
+        p.drawLine(QPointF(sx, y), QPointF(sx, y + h))
+        cy = y + h / 2
+        p.setPen(QPen(QColor(0, 0, 0, 160), 1))
+        p.setBrush(QColor("#ffffff"))
+        p.drawEllipse(QPointF(sx, cy), 14, 14)
+        p.setPen(QPen(QColor("#222222"), 2))
+        for d in (-1, 1):
+            p.drawLine(QPointF(sx + d * 9, cy), QPointF(sx + d * 4, cy - 5))
+            p.drawLine(QPointF(sx + d * 9, cy), QPointF(sx + d * 4, cy + 5))
+        fnt = QFont(p.font())
+        fnt.setPixelSize(12)
+        fnt.setBold(True)
+        p.setFont(fnt)
+        for text, tx, al in ((tr("До"), x + 8, Qt.AlignLeft), (tr("После"), x + w - 78, Qt.AlignRight)):
+            r = QRectF(tx, y + 8, 70, 22)
+            if (al == Qt.AlignLeft and tx + 30 < sx) or (al == Qt.AlignRight and tx + 30 > sx):
+                p.setPen(Qt.NoPen)
+                p.setBrush(QColor(0, 0, 0, 150))
+                p.drawRoundedRect(r, 6, 6)
+                p.setPen(QColor("#ffffff"))
+                p.drawText(r, Qt.AlignCenter, text)
+        p.restore()
+
+    def _cmp_mouse(self, e, kind):
+        if not self.img_rect:
+            return
+        x, y, w, h = self.img_rect
+        if kind == "press" and e.button() == Qt.LeftButton:
+            self.cmp_drag = True
+        if kind == "release":
+            self.cmp_drag = False
+            return
+        if self.cmp_drag:
+            self.cmp_x = min(1.0, max(0.0, (e.position().x() - x) / max(1.0, w)))
+            self.update()
 
     def paintEvent(self, e):
         self._paint(e)
@@ -1271,6 +1366,7 @@ class CropCanvas(QWidget):
         cur = app.cur()
         if not cur or app.preview_pm is None:
             self.geom = None
+            self.img_rect = None
             fnt = QFont(p.font())
             fnt.setPixelSize(15)
             p.setFont(fnt)
@@ -1293,9 +1389,11 @@ class CropCanvas(QWidget):
             kk = min(PW / W, PH / H)
             dw, dh = W * kk, H * kk
             p.drawPixmap(QRectF(px + (PW - dw) / 2, py + (PH - dh) / 2, dw, dh), pm, QRectF(pm.rect()))
+            self._cmp_under(p, (px + (PW - dw) / 2, py + (PH - dh) / 2, dw, dh))
             self._bleed(p, [(px, py), (px + PW, py), (px + PW, py + PH), (px, py + PH)], paper[0])
             self._trim(p, [(px, py), (px + PW, py), (px + PW, py + PH), (px, py + PH)], paper)
             self.geom = None
+            self._cmp_over(p)
             p.end()
             return
         padx, pad_top, pad_bot = 20, self.ROT_OFFSET + 14, 18       # поля минимальные: сверху — место под ручку поворота
@@ -1309,6 +1407,7 @@ class CropCanvas(QWidget):
         p.setBrush(QColor("#ffffff"))
         p.drawPolygon(poly)                                           # «бумага»: видна там, где рамка вышла за фото
         p.drawPixmap(QRectF(ox, oy, dw, dh), pm, QRectF(pm.rect()))
+        self._cmp_under(p, (ox, oy, dw, dh))
         shade = QPainterPath()
         shade.setFillRule(Qt.OddEvenFill)
         shade.addRect(QRectF(0, 0, cw, ch))
@@ -1349,6 +1448,7 @@ class CropCanvas(QWidget):
         for hx, hy in P:
             p.drawRoundedRect(QRectF(hx - 5.5, hy - 5.5, 11, 11), 3, 3)
         self.geom = (ox, oy, k, P, rh)
+        self._cmp_over(p)
         app.smart_banner(p, cw, f)
         p.end()
 
@@ -1431,6 +1531,9 @@ class CropCanvas(QWidget):
         return (ex - rx) ** 2 + (ey - ry) ** 2 <= 12 ** 2
 
     def mousePressEvent(self, e):
+        if self.cmp:                                          # режим «до / после»: рамку не двигаем, тянем линию
+            self._cmp_mouse(e, "press")
+            return
         if e.button() != Qt.LeftButton:
             return
         self.setFocus()
@@ -1462,6 +1565,9 @@ class CropCanvas(QWidget):
         app.redraw()
 
     def mouseMoveEvent(self, e):
+        if self.cmp:
+            self._cmp_mouse(e, "move")
+            return
         ex, ey = e.position().x(), e.position().y()
         app = self.app
         cur = app.cur()
@@ -1499,6 +1605,9 @@ class CropCanvas(QWidget):
         app.redraw()
 
     def mouseReleaseEvent(self, e):
+        if self.cmp:
+            self._cmp_mouse(e, "release")
+            return
         if self.guides:
             self.guides = []
             self.update()
@@ -4640,6 +4749,12 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         pb.setParent(self.canvas)
         pb.hide()
         self.canvas.pbtn = pb
+        cb = btn("До / После", None, ico="eye", tip="Сравнить: слева снимок без правок, справа с правками. Проведите линию мышью по фото")
+        cb.setCheckable(True)
+        cb.setParent(self.canvas)
+        cb.toggled.connect(self.canvas.set_compare)
+        cb.hide()
+        self.canvas.cbtn = cb
         self.l_dot = QLabel("●")
         self.l_info = lbl("", "muted")
         st = hbox(self.l_dot, self.l_info, None, spacing=8, margins=(6, 8, 6, 0))
@@ -7739,7 +7854,7 @@ pc.EN.update({
     "Групповое фото — от, чел.": "Group photo — from, people", "Начиная с этого числа людей кадр всегда стоит проверить": "From this many people the shot is always worth checking",
     "белые поля листа напечатаются красителем; для печати обычно берут «Относительный»": "the white margins of the sheet will be printed with ink; “Relative” is normally used for printing",
     "Включено управление цветом Windows (ICM) при включённом профиле принтера — цвет обработается дважды. Включите «Цвет Windows (ICM) отключён» на вкладке «Принтер».": "Windows colour management (ICM) is on together with the printer profile — colour would be processed twice. Turn on “Windows colour (ICM) off” on the Printer tab.",
-    "Печать фото": "Print photo", "Напечатать только это фото (Ctrl+Shift+P)": "Print only this photo (Ctrl+Shift+P)",
+    "Печать фото": "Print photo", "До / После": "Before / After", "До": "Before", "После": "After", "Сравнить: слева снимок без правок, справа с правками. Проведите линию мышью по фото": "Compare: the original on the left, the edited photo on the right. Drag the line over the photo", "Напечатать только это фото (Ctrl+Shift+P)": "Print only this photo (Ctrl+Shift+P)",
     "Нет открытого фото для печати.": "No open photo to print.",
     "Мелкие люди на дальнем плане": "Small people in the background", "Люди мельче этой доли от самого крупного (с лицом) считаются дальним планом": "People smaller than this share of the largest (with a face) count as background",
     "Не учитывать мелких людей": "Ignore small people", "Люди дальнего плана вообще не влияют на рамку и не дают замечаний; выключено — они лишь менее важны": "Background people do not affect the frame or raise warnings; off — they are just less important",
