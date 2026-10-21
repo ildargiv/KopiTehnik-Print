@@ -5138,7 +5138,7 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         b_orig = ibtn("eye", "Показать оригинал (удерживайте)", None, 34, True)
         b_orig.pressed.connect(lambda: self.adj_show_original(True))
         b_orig.released.connect(lambda: self.adj_show_original(False))
-        b_enh = btn("Улучшить", lambda: self.enhance(1), ico="sparkle", tip="Улучшение для печати на Epson: светлее, чуть контрастнее и резче. Подбирается под каждый снимок.")
+        b_enh = btn("Улучшить", lambda: self.enhance(1), ico="sparkle", tip="Улучшение для печати на Epson: светлее, чуть контрастнее и резче. Подбирается под каждый снимок. Прежняя коррекция сбрасывается.")
         b_sup = btn("Супер", lambda: self.enhance(2), ico="sparkle", tip="Более сильное улучшение: ярче, сочнее, резче")
         self.b_pre, self.b_pre_save = {}, {}
         for n in (1, 2):
@@ -6416,7 +6416,7 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
             return
         name = tr("Супер улучшения") if level >= 2 else tr("Улучшения для Epson")
         if len(files) > 1 and not ask(self, tr("Применить «%s» к %d фото?") % (name, len(files)) + "\n" + tr(
-                "Для каждого фото параметры подберутся отдельно. Отменить можно Ctrl+Z.")):
+                "Для каждого фото параметры подберутся отдельно, прежняя коррекция будет сброшена. Отменить можно Ctrl+Z.")):
             return
         self._enh_busy = True
         QApplication.setOverrideCursor(Qt.WaitCursor)
@@ -6435,13 +6435,12 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
             QApplication.restoreOverrideCursor()
             self._enh_busy = False
         notes = []
-        mapping = {f: pc.keep_channel_edits(self.states[f].adj, m) for f, m in mapping.items()}
         cur = self.files[self.idx]
         if cur in mapping and self.raw is not None and self.s["cm_on"]:      # цвета не должны уходить за охват принтера
             try:
                 cm = self.cm_build()
                 for _ in range(2):
-                    probe = type("S", (), {"adj": {**{k: v for k, v in self.states[cur].adj.items() if k not in pc.ENHANCE_KEYS}, **mapping[cur]}})()
+                    probe = type("S", (), {"adj": {**{k: v for k, v in self.states[cur].adj.items() if k not in pc.ADJ_KEYS}, **mapping[cur]}})()
                     test = pc.adjust_tile(self.raw, pc.merge_adj({}, probe), 100, preview=True)
                     pct = pc.gamut_preview(test, self.icc, cm)[1]
                     boost = any(s > 0 for _h, s, _l in ct.selcol_full(mapping[cur].get("selcol")))
@@ -6452,7 +6451,7 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
                     notes.append(tr("красочность уменьшена: принтер не передаёт часть цветов"))
             except Exception:
                 pass
-        self.adj_apply_each(mapping, pc.ENHANCE_KEYS)
+        self.adj_apply_each(mapping, pc.ADJ_KEYS)          # прежняя коррекция сбрасывается целиком
         if self.s["dpi"].replace(",", ".").strip() not in ("360", "720"):
             self.s["dpi"] = "360"                                           # родное разрешение печати Epson
             notes.append(tr("разрешение сохранения 360 dpi"))
@@ -7647,7 +7646,7 @@ pc.EN.update({
     "Не удалось прочитать файл профиля": "Could not read the profile file", "В чёрном": "Clipped black", "В белом": "Clipped white",
     "Вне охвата принтера": "Out of printer gamut", "Супер улучшения": "Super enhance", "Улучшения для Epson": "Epson enhance",
     "Применить «%s» к %d фото?": "Apply “%s” to %d photos?",
-    "Для каждого фото параметры подберутся отдельно. Отменить можно Ctrl+Z.": "Settings are chosen for each photo separately. Undo with Ctrl+Z.",
+    "Для каждого фото параметры подберутся отдельно, прежняя коррекция будет сброшена. Отменить можно Ctrl+Z.": "Settings are chosen for each photo separately, the previous correction is reset. Undo with Ctrl+Z.",
     "Анализ": "Analysing", "Готово": "Done", "не удалось": "failed", "Куда сохранять": "Where to save",
     "красочность уменьшена: принтер не передаёт часть цветов": "vibrance reduced: the printer cannot reproduce some colours",
     "разрешение сохранения 360 dpi": "save resolution set to 360 dpi", "включена компенсация точки чёрного": "black point compensation turned on",
@@ -7809,7 +7808,7 @@ pc.EN.update({
 })
 pc.EN_FMT.update({"Конечности: нейросеть позы (скелет найден у {n} из {m} чел.), остальные — по размеру головы": "Limbs: pose network (skeleton found for {n} of {m} people), the rest from head size"})
 pc.EN.update({
-    "Улучшение для печати на Epson: светлее, чуть контрастнее и резче. Подбирается под каждый снимок.": "Enhancement for Epson printing: lighter, slightly more contrast and sharpness. Tuned for each photo.",
+    "Улучшение для печати на Epson: светлее, чуть контрастнее и резче. Подбирается под каждый снимок. Прежняя коррекция сбрасывается.": "Enhancement for Epson printing: lighter, slightly more contrast and sharpness. Tuned for each photo. The previous correction is reset.",
     "Более сильное улучшение: ярче, сочнее, резче": "Stronger enhancement: brighter, more vivid, sharper",
     "Авто-яркость": "Auto brightness", "Копировать настройки этого фото": "Copy this photo's settings", "Вставить настройки в это фото": "Paste settings into this photo",
     "Применить настройки этого фото ко всем": "Apply this photo's settings to all", "Сбросить коррекцию этого фото": "Reset this photo's adjustments",
@@ -7929,7 +7928,14 @@ def selftest(app):
     step("отметить все", lambda: win.check_all(True))
     step("страница цвета", lambda: win.show_page(1))
     step("ползунок яркости", lambda: win.sliders["bright"][0].setValue(20))
+    def enhance_resets():
+        win.adj_set({"temp": 30.0, "sepia": True, "bright": 25.0})
+        win.enhance(1)
+        a = win.cur_adj()
+        if a.get("temp") or a.get("sepia") or a.get("bright"):
+            raise RuntimeError("улучшение не сбросило прежнюю коррекцию")
     step("улучшение Epson", lambda: win.enhance(1))
+    step("улучшение сбрасывает прежнюю коррекцию", enhance_resets)
     def presets_flow():
         win.settings["adj_presets"] = {}                      # пресеты прошлых запусков спросили бы подтверждение замены
         win.adj_replace({}, [win.files[win.idx]])

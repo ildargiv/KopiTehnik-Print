@@ -48,16 +48,6 @@ class EnhanceTest(unittest.TestCase):
         self.assertEqual(a, pc.clean_adj(a))
         self.assertTrue(set(a) <= set(pc.NEUTRAL_ADJ))
 
-    def test_manual_channel_edits_survive_enhance(self):
-        manual = pc.clean_adj({"levels": [ct.LEVELS_NEUTRAL, (10, 1, 240, 0, 255)],
-                               "curves": [ct.CURVE_NEUTRAL, ct.CURVE_NEUTRAL, ((0, 0), (128, 140), (255, 255))]})
-        new = pc.enhance_adj(pc.analyze_image(photo((70, 80, 90))), 2)
-        merged = pc.clean_adj(pc.keep_channel_edits(manual, new))
-        lv, cv = ct.levels_full(merged["levels"]), ct.curves_full(merged["curves"])
-        self.assertEqual(lv[1], (10.0, 1.0, 240.0, 0.0, 255.0))
-        self.assertEqual(cv[2], ((0, 0), (128, 140), (255, 255)))
-        self.assertGreater(lv[0][1], 1.0)                    # общая строка — новая
-
     def test_halve_selcol_sat(self):
         sel = pc.halve_selcol_sat([(0, 0, 0), (0, 0, 0), (0, 10, 0), (0, 0, 0), (0, -6, 0), (0, 0, 0)])
         self.assertEqual(sel[2][1], 5.0)

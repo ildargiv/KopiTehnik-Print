@@ -2607,20 +2607,6 @@ def suggest_adjust(an, strength=1.0):
 
 ENHANCE_KEYS = ("bright", "contrast", "shadows", "highlights", "sat", "vib", "auto", "denoise", "sharp", "sharp_radius", "sharp_thr",
                 "levels", "curves", "selcol")
-SEL_INDEX = {c: i for i, c in enumerate(color_tools.SEL_COLORS)}
-
-
-def keep_channel_edits(old, new):
-    """Улучшение заменяет только общую строку уровней и общую кривую: ручные правки по каналам R, G, B остаются."""
-    out = dict(new)
-    for key, neutral, norm in (("levels", color_tools.LEVELS_NEUTRAL, color_tools.levels_full),
-                               ("curves", color_tools.CURVE_NEUTRAL, color_tools.curves_full)):
-        keep = norm(old.get(key))[1:]
-        if all(r == neutral for r in keep):
-            continue
-        master = norm(new.get(key))[0]
-        out[key] = (master,) + tuple(keep)
-    return out
 
 
 def halve_selcol_sat(sel):
@@ -2634,8 +2620,7 @@ def enhance_adj(an, level=1):
     светлота (отпечаток темнее экрана), детали в тенях и светах, красочность, резкость под размер печати.
     Инструменты: уровни (точки чёрного и белого по краям гистограммы и гамма вместо сдвига яркости), мягкая S-кривая
     вместо контраста, выборочный цвет (небо и зелень насыщеннее, кожа бережно), красочность и резкость.
-    level 1 — осторожно, level 2 — сильнее и подстраивается под снимок. Ручные уровни и кривые по каналам R/G/B
-    сохраняет keep_channel_edits."""
+    level 1 — осторожно, level 2 — сильнее и подстраивается под снимок. Прежняя коррекция фото сбрасывается целиком."""
     lvl = 2 if level >= 2 else 1
     mean0 = mean = max(1.0, an["mean_luma"])
     rng = max(1.0, an["p99"] - an["p1"])
