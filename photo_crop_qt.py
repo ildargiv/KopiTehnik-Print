@@ -4985,7 +4985,10 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         if not dlg.exec() or not dlg.choice:
             return
         kind, val, add = dlg.choice
-        if kind == "files":
+        if kind == "doc":                                   # документ из окна «Открыть» — сразу в раздел «Документ»
+            self.set_app_mode("doc")
+            self.doc_load(Path(val))
+        elif kind == "files":
             self.load_files(val, add)
         else:
             self.load_folder(Path(val), add)
@@ -5003,6 +5006,11 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
 
     def drop_paths(self, paths, sheet_pos=None):
         """Добавляет брошенные файлы и папки. Если бросили на лист — первое новое фото встаёт в точку, куда бросили."""
+        docs = [Path(q) for q in paths if Path(q).suffix.lower() in DOC_EXTS and Path(q).is_file()]
+        if docs and not any(Path(q).is_dir() or Path(q).suffix.lower() in pc.EXTS for q in paths):
+            self.set_app_mode("doc")                        # брошен документ: переходим в раздел «Документ»
+            self.doc_load(docs[0])
+            return
         files = []
         for q in paths:
             q = Path(q)
@@ -6099,7 +6107,7 @@ class OpenDialog(QDialog):
         self.app, self.choice = app, None
         self.cwd = Path(start) if start and Path(start).is_dir() else Path(pc.desktop_dir())
         self.n_files = 0
-        self.setWindowTitle(tr("Открыть фото или папку"))
+        self.setWindowTitle(tr("Открыть фото, папку или документ"))
         self.resize(980, 660)
         self.e_path = QLineEdit(str(self.cwd))
         self.e_path.returnPressed.connect(lambda: self.goto(self.e_path.text()))
@@ -6150,7 +6158,9 @@ class OpenDialog(QDialog):
             opts.addWidget(lbl("добавить к уже открытым"))
         opts.addStretch(1)
         opts.addWidget(self.l_hint)
-        bottom = hbox(lbl("Ctrl или Shift — выбрать несколько, Ctrl+A — все", "muted"), None, btn("Отмена", self.reject, big=True), self.b_ok, spacing=10)
+        self.b_doc = btn("Документ…", self.pick_doc, ico="doc", big=True)
+        self.b_doc.setToolTip(tr("PDF, Word, Excel, PowerPoint: откроется раздел «Документ»"))
+        bottom = hbox(lbl("Ctrl или Shift — выбрать несколько, Ctrl+A — все", "muted"), None, self.b_doc, btn("Отмена", self.reject, big=True), self.b_ok, spacing=10)
         right = vbox(top, self.list, opts, spacing=10)
         body = hbox(side, right, spacing=12)
         self.setLayout(vbox(body, bottom, spacing=12, margins=(14, 14, 14, 14)))
@@ -6277,6 +6287,13 @@ class OpenDialog(QDialog):
         self.b_ok.setText(text)
         self.b_ok.setEnabled(ok)
         self.l_hint.setText(trf("В папке фото: {n}", n=self.n_files))
+
+    def pick_doc(self):
+        p, _ = QFileDialog.getOpenFileName(self, tr("Открыть документ"), str(self.cwd),
+                                           "%s (%s);;* (*.*)" % (tr("Документы"), " ".join("*" + x for x in sorted(DOC_EXTS))))
+        if p:
+            self.choice = ("doc", Path(p), False)
+            self.accept()
 
     def accept_choice(self):
         act = pc.OpenDialog.decide(self._sel(), self.cwd, self.n_files)
@@ -6881,7 +6898,7 @@ pc.EN.update({
     "Сохранить проект (рамки и настройки)": "Save project (frames and settings)",
 })
 pc.EN.update({
-    "Бумага": "Paper", "Фото на листе": "Photos per sheet", "Поля": "Borders", "Поля: белая рамка по краю и между фото": "Borders: white margin at the edge and between photos", "мм": "mm", "Кадр": "Crop", "Лист": "Sheet",
+    "Бумага": "Paper", "Фото на листе": "Photos per sheet", "Поля": "Borders", "Открыть фото, папку или документ": "Open photos, a folder or a document", "Документ…": "Document…", "PDF, Word, Excel, PowerPoint: откроется раздел «Документ»": "PDF, Word, Excel, PowerPoint: opens the Document section", "Поля: белая рамка по краю и между фото": "Borders: white margin at the edge and between photos", "мм": "mm", "Кадр": "Crop", "Лист": "Sheet",
     "Сколько фото печатать на одном листе": "How many photos to print on one sheet",
     "Выключено — печать без полей, фото вплотную. Включено — белое поле по краю листа и между фото.": "Off — borderless, photos edge to edge. On — a white margin at the sheet edge and between photos.",
     "Поле по краю листа и расстояние между фото, мм": "Sheet margin and distance between photos, mm",
