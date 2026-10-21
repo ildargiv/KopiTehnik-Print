@@ -39,7 +39,7 @@ try:
                                 QAbstractListModel, QModelIndex, QEvent, QPropertyAnimation, QEasingCurve, Property, QByteArray,
                                 QVariantAnimation)
     from PySide6.QtGui import (QPainter, QColor, QPen, QBrush, QPixmap, QImage, QIcon, QPolygonF, QPainterPath, QFont, QIntValidator, QLinearGradient, QRadialGradient, QFontMetricsF,
-                               QKeySequence, QShortcut, QFontMetrics, QTransform)
+                               QKeySequence, QShortcut, QFontMetrics, QTransform, QFontDatabase)
     from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QFrame, QLabel, QPushButton, QToolButton, QHBoxLayout,
                                    QVBoxLayout, QGridLayout, QComboBox, QLineEdit, QSlider, QRadioButton, QButtonGroup,
                                    QListView, QStyledItemDelegate, QStyle, QScrollArea, QStackedWidget, QDialog, QFileDialog,
@@ -339,7 +339,22 @@ class WrapLabel(QLabel):
         return QSize(48, self.fontMetrics().height() + 2)
 
 
-BRAND_FONT = "Bahnschrift SemiBold"            # на Windows; иначе подставится ближайший шрифт
+BRAND_FONT = "Bahnschrift SemiBold"            # запасной шрифт, если свой не загрузился
+BRAND_FILE = "assets/fonts/Tektur.ttf"          # фирменный шрифт названия (SIL OFL, лицензия рядом)
+
+
+def load_brand_font():
+    """Подключает шрифт названия из папки программы (и из сборки PyInstaller). Возвращает имя семейства или запасной шрифт."""
+    global BRAND_FONT
+    base = Path(getattr(sys, "_MEIPASS", None) or Path(__file__).resolve().parent)
+    try:
+        fid = QFontDatabase.addApplicationFont(str(base / BRAND_FILE))
+        fams = QFontDatabase.applicationFontFamilies(fid) if fid >= 0 else []
+        if fams:
+            BRAND_FONT = fams[0]
+    except Exception:
+        pass
+    return BRAND_FONT
 
 
 def draw_brand_k(p, rect, color=QColor(255, 255, 255)):
@@ -533,9 +548,9 @@ class BrandTitle(QWidget):
     @staticmethod
     def _font():
         f = QFont(BRAND_FONT)
-        f.setPixelSize(21)
-        f.setBold(True)
-        f.setLetterSpacing(QFont.AbsoluteSpacing, 0.6)
+        f.setPixelSize(22)
+        f.setWeight(QFont.Bold)
+        f.setLetterSpacing(QFont.AbsoluteSpacing, 0.5)
         return f
 
     def sizeHint(self):
@@ -8477,6 +8492,7 @@ def main():
     app = QApplication(sys.argv)
     app.setApplicationName("PhotoCrop")
     app.setStyle("Fusion")
+    load_brand_font()
     if sys.platform == "win32":
         try:                                         # свой значок на панели задач, а не значок python
             import ctypes
