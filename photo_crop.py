@@ -2543,6 +2543,21 @@ def spooler_pause_printer(name, pause):
 
 # ---- анализ изображения (числа вместо глаз)
 
+def _hue_shares(im):
+    """Доли кадра: тона кожи, неба (голубой–синий) и зелени. HSV по PIL: оттенок 0..255 (красный 0, жёлтый 43, зелёный 85, голубой 128, синий 170)."""
+    try:
+        import numpy as np
+        a = np.asarray(im.convert("HSV"))
+        h, sa, v = a[..., 0].astype(np.int16), a[..., 1], a[..., 2]
+        n = float(h.size) or 1.0
+        skin = ((h >= 4) & (h <= 24) & (sa >= 50) & (sa <= 190) & (v >= 80)).sum() / n
+        sky = ((h >= 118) & (h <= 185) & (sa >= 40) & (v >= 90)).sum() / n
+        green = ((h >= 45) & (h <= 112) & (sa >= 45) & (v >= 50)).sum() / n
+        return round(float(skin), 3), round(float(sky), 3), round(float(green), 3)
+    except Exception:
+        return 0.0, 0.0, 0.0
+
+
 def analyze_image(img):
     from PIL import ImageStat
     im = to_rgb(img).copy()                          # не трогаем чужую картинку (предпросмотр на экране)
@@ -2569,8 +2584,10 @@ def analyze_image(img):
     wsum = sum(v * v for v in px) or 1.0
     fx = sum((i % 48 + 0.5) / 48 * v * v for i, v in enumerate(px)) / wsum
     fy = sum((i // 48 + 0.5) / 48 * v * v for i, v in enumerate(px)) / wsum
+    shares = _hue_shares(im)
     return {"size": list(img.size), "mean_luma": round(st.mean[0], 1), "contrast_std": round(st.stddev[0], 1),
-            "p1": pct(0.01), "p50": pct(0.5), "p99": pct(0.99),
+            "p1": pct(0.01), "p50": pct(0.5), "p99": pct(0.99), "p01": pct(0.001), "p999": pct(0.999),
+            "skin_share": shares[0], "sky_share": shares[1], "green_share": shares[2],
             "shadow_clip_pct": round(sum(hist[:6]) / n * 100, 2), "highlight_clip_pct": round(sum(hist[250:]) / n * 100, 2),
             "saturation": round(sat, 3), "mean_rgb": [round(v, 1) for v in rgb], "warmth_r_minus_b": round(rgb[0] - rgb[2], 1),
             "sharpness": round(sharp, 2), "focus_point": [round(fx, 3), round(fy, 3)],
@@ -2588,45 +2605,104 @@ def suggest_adjust(an, strength=1.0):
     return {"bright": round(bright * strength, 1), "contrast": round(max(0.0, contrast) * strength, 1)}
 
 
-ENHANCE_KEYS = ("bright", "contrast", "shadows", "highlights", "sat", "vib", "auto", "denoise", "sharp", "sharp_radius", "sharp_thr")
+ENHANCE_KEYS = ("bright", "contrast", "shadows", "highlights", "sat", "vib", "auto", "denoise", "sharp", "sharp_radius", "sharp_thr",
+                "levels", "curves", "selcol")
+SEL_INDEX = {c: i for i, c in enumerate(color_tools.SEL_COLORS)}
+
+
+def keep_channel_edits(old, new):
+    """Улучшение заменяет только общую строку уровней и общую кривую: ручные правки по каналам R, G, B остаются."""
+    out = dict(new)
+    for key, neutral, norm in (("levels", color_tools.LEVELS_NEUTRAL, color_tools.levels_full),
+                               ("curves", color_tools.CURVE_NEUTRAL, color_tools.curves_full)):
+        keep = norm(old.get(key))[1:]
+        if all(r == neutral for r in keep):
+            continue
+        master = norm(new.get(key))[0]
+        out[key] = (master,) + tuple(keep)
+    return out
+
+
+def halve_selcol_sat(sel):
+    """Вдвое уменьшает положительную насыщенность выборочного цвета (цвета выходят за охват принтера)."""
+    return tuple((h, s / 2 if s > 0 else s, l) for h, s, l in color_tools.selcol_full(sel))
 
 
 def enhance_adj(an, level=1):
     """Улучшение под фотопечать на струйном принтере Epson (шестицветные водные чернила, например L8050) с
-    индивидуальным ICC-профилем. Профиль уже отвечает за точность цвета, поэтому здесь правятся только то, что
-    профиль не исправляет: общая светлота (отпечаток темнее экрана), детали в тенях и светах, мягкая красочность
-    и резкость под размер печати. level 1 — осторожно, level 2 — сильнее и подстраивается под снимок."""
+    индивидуальным ICC-профилем. Профиль отвечает за точность цвета, поэтому правится то, что он не исправляет:
+    светлота (отпечаток темнее экрана), детали в тенях и светах, красочность, резкость под размер печати.
+    Инструменты: уровни (точки чёрного и белого по краям гистограммы и гамма вместо сдвига яркости), мягкая S-кривая
+    вместо контраста, выборочный цвет (небо и зелень насыщеннее, кожа бережно), красочность и резкость.
+    level 1 — осторожно, level 2 — сильнее и подстраивается под снимок. Ручные уровни и кривые по каналам R/G/B
+    сохраняет keep_channel_edits."""
     lvl = 2 if level >= 2 else 1
     mean0 = mean = max(1.0, an["mean_luma"])
     rng = max(1.0, an["p99"] - an["p1"])
+    lo_pt = an.get("p01", an["p1"])                  # края гистограммы без пыли (0,1 %)
+    hi_pt = an.get("p999", an["p99"])
+    std = an.get("contrast_std", 55.0)
     target = 126.0 if lvl == 2 else 122.0
-    cap = 24.0 if lvl == 2 else 14.0
-    # растягиваем уровни только у плоских снимков средней светлоты: у светлых (high-key) растяжение ставит
-    # «чёрную точку» и затемняет весь кадр, у тёмных (ночь) — ломает настроение
+    out = {}
+    # --- уровни: точки чёрного и белого. Растягиваем только плоские снимки средней светлоты: у светлых (high-key) растяжение
+    # ставит «чёрную точку» и затемняет кадр, у тёмных (ночь) — ломает настроение. Точки не заходят в данные дальше 0,1 % пикселей.
+    ib, iw = 0, 255
     stretch = 120 <= rng < (200 if lvl == 1 else 225) and 80 <= mean0 <= 150
-    if stretch:                                      # яркость считаем уже после растяжения уровней
-        mean = max(1.0, min(254.0, (mean - an["p1"]) / rng * 255.0))
-    # улучшение для печати никогда не затемняет: отпечаток и так темнее экрана
-    bright = max(0.0, (target - mean) / target * 100.0 * (0.55 if lvl == 2 else 0.4))
-    if mean0 < 170:
-        bright += 5.0 if lvl == 2 else 3.0           # запас на то, что бумага темнее светящегося экрана
-    if mean0 < 75:                                   # тёмный (night/low-key): оставляем настроение кадра
-        bright = min(bright, 14.0 if lvl == 2 else 8.0)
-    bright = min(cap, bright)
+    if stretch:
+        k = 0.7 if lvl == 1 else 0.9
+        ib = int(min(40, max(0, lo_pt)) * k)
+        iw = int(255 - min(40, max(0, 255 - hi_pt)) * k)
+        if iw - ib < 120:
+            ib, iw = 0, 255
+        if ib <= 2:
+            ib = 0
+        if iw >= 253:
+            iw = 255
+        mean = max(1.0, min(254.0, (mean - ib) / float(max(1, iw - ib)) * 255.0))
+    # --- светлота: гамма уровней вместо сдвига яркости. Улучшение для печати никогда не затемняет: отпечаток и так темнее экрана
+    want = target + (5.0 if mean0 < 170 else 0.0) * (1.0 if lvl == 2 else 0.6)
+    if mean0 < 75:                                   # тёмный кадр (night/low-key): оставляем настроение
+        want = min(want, mean + (12.0 if lvl == 2 else 7.0))
+    g_cap = 1.38 if lvl == 2 else 1.22
+    gamma = 1.0
+    if mean < want:
+        gamma = math.log(min(0.95, mean / 255.0)) / math.log(min(0.95, want / 255.0)) if mean > 1 else 1.0
+        gamma = min(g_cap, max(1.0, 1.0 + (gamma - 1.0) * (0.85 if lvl == 2 else 0.7)))
+    gamma = round(gamma, 2) if gamma > 1.01 else 1.0
+    if ib or iw < 255 or gamma != 1.0:
+        out["levels"] = [(ib, gamma, iw, 0, 255)]
     shadows = (10.0 if lvl == 1 else 16.0) + min(12.0, an["shadow_clip_pct"] * 1.5)
     if mean0 > 150 or mean0 < 75:                    # светлый снимок: тени и так открыты; ночной: не высветляем черноту
         shadows *= 0.5
     clip = an["highlight_clip_pct"]                  # света приглушаем, только когда они действительно выбиты
     highlights = -min(10.0 if lvl == 1 else 14.0, max(0.0, clip - 0.5) * (1.5 if lvl == 1 else 2.0))
-    out = {"bright": bright, "shadows": shadows, "highlights": highlights,
-           "contrast": 5.0 if lvl == 1 else 10.0}
-    if mean0 < 90:                                   # тёмный кадр: контраст вокруг середины только вдавит тени в чёрное
-        out["contrast"] = 0.0
-    if stretch:                                      # плоский снимок: растянуть уровни
-        out["auto"] = "contrast"
-        out["contrast"] = out["contrast"] * 0.5
+    out["shadows"], out["highlights"] = shadows, highlights
+    # --- кривая: мягкая S вместо контраста. Чем контрастнее снимок сам, тем слабее; тёмный кадр S-образно не давим
+    if mean0 >= 90:
+        amp = (3.0 if lvl == 1 else 6.0) * (1.0 - min(1.0, max(0.0, (std - 45.0) / 40.0)))
+        if amp >= 1.0:
+            out["curves"] = [[(0, 0), (64, round(64 - amp)), (192, round(192 + amp)), (255, 255)]]
+    # --- красочность и выборочный цвет
+    skin, sky, green = an.get("skin_share", 0.0), an.get("sky_share", 0.0), an.get("green_share", 0.0)
     dull = an["saturation"] < 0.22
-    out["vib"] = (8.0 if lvl == 1 else 18.0) + (6.0 if dull and lvl == 2 else 0.0)
+    vib = (8.0 if lvl == 1 else 18.0) + (6.0 if dull and lvl == 2 else 0.0)
+    if skin > 0.04:                                  # люди: общую красочность уменьшаем, кожа не должна «гореть»
+        vib *= 0.6 if skin < 0.12 else 0.4
+    out["vib"] = vib
+    f = 1.0 if lvl == 1 else 1.7                     # во сколько раз сильнее выборочный цвет на втором уровне
+    sel = {}
+    if sky > 0.08:                                   # небо: синее и чуть глубже
+        k = min(1.0, sky / 0.25)
+        sel["B"] = (0, 8 * f * k, -3 * f * k)
+        sel["C"] = (0, 5 * f * k, 0)
+    if green > 0.08:                                 # зелень: сочнее
+        k = min(1.0, green / 0.25)
+        sel["G"] = (0, 7 * f * k, 0)
+        sel["Y"] = (0, 3 * f * k, 0)
+    if skin > 0.04:                                  # кожа: красные и оранжевые не насыщаем, чуть светлее
+        sel["R"] = (0, -3 * f, 2.0 if lvl == 2 else 0)
+    if sel:
+        out["selcol"] = [sel.get(c, color_tools.SEL_NEUTRAL) for c in color_tools.SEL_COLORS]
     if lvl == 2:
         out["sat"] = 4.0 if dull else 0.0
         if mean < 80:

@@ -1954,18 +1954,68 @@ class CurvesPanel(QWidget):
         self.ed.update()
 
 
-class CurvesWindow(QDialog):
-    """Большой экран кривых: крупное поле, гистограмма под кривой, живой просмотр в главном окне."""
+class PhotoPreview(QWidget):
+    """Редактируемое фото рядом с редактором: как главное окно, с применённой коррекцией."""
+
+    def __init__(self):
+        super().__init__()
+        self.pm = None
+        self.setMinimumSize(360, 300)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+
+    def set_pixmap(self, pm):
+        self.pm = pm
+        self.update()
+
+    def paintEvent(self, e):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.SmoothPixmapTransform)
+        p.setPen(Qt.NoPen)
+        p.setBrush(QColor(T["canvas"]))
+        p.drawRoundedRect(QRectF(self.rect()), 10, 10)
+        if self.pm is None or self.pm.isNull():
+            p.setPen(QColor(T["muted"]))
+            p.drawText(self.rect(), Qt.AlignCenter, tr("Нет фото"))
+        else:
+            r = QRectF(self.rect()).adjusted(8, 8, -8, -8)
+            k = min(r.width() / self.pm.width(), r.height() / self.pm.height())
+            w, h = self.pm.width() * k, self.pm.height() * k
+            p.drawPixmap(QRectF(r.center().x() - w / 2, r.center().y() - h / 2, w, h), self.pm, QRectF(self.pm.rect()))
+        p.end()
+
+
+class ColorWindow(QDialog):
+    """Большой экран уровней и кривых: слева редактор, справа само фото с живой коррекцией."""
 
     def __init__(self, app):
         super().__init__(app)
-        self.setWindowTitle(tr("Кривые"))
+        self.setWindowTitle(tr("Уровни и кривые"))
         self.setModal(False)
-        self.resize(760, 860)
-        self.panel = CurvesPanel(560)
-        v = vbox(lbl("Кривые: перетаскивайте точки, результат сразу виден в главном окне. Канал RGB меняет все цвета, R, G, B — по одному.", "muted", wrap=True),
-                 self.panel, hbox(None, btn("Закрыть", self.close, "primary"), spacing=8), spacing=10, margins=(16, 14, 16, 14))
-        self.setLayout(v)
+        self.setWindowFlags(self.windowFlags() | Qt.WindowMaximizeButtonHint)
+        geo = QApplication.primaryScreen().availableGeometry() if QApplication.primaryScreen() else QRect(0, 0, 1400, 900)
+        self.resize(min(1360, geo.width() - 60), min(880, geo.height() - 80))
+        self.levels = LevelsEditor()
+        self.panel = CurvesPanel(520)
+        self.stack = PageStack()
+        self.stack.addWidget(self.levels)
+        self.stack.addWidget(self.panel)
+        self.seg = Segmented([("Уровни", 0), ("Кривые", 1)], 1)
+        self.seg.changed.connect(self.show_tab)
+        self.preview = PhotoPreview()
+        b_orig = btn("Показать оригинал (удерживайте)", None, ico="eye")
+        b_orig.pressed.connect(lambda: app.adj_show_original(True))
+        b_orig.released.connect(lambda: app.adj_show_original(False))
+        left = vbox(self.seg, self.stack, None, spacing=10)
+        lw = QWidget()
+        lw.setLayout(left)
+        lw.setFixedWidth(560)
+        right = vbox(self.preview, hbox(b_orig, None, btn("Закрыть", self.close, "primary"), spacing=8), spacing=10)
+        self.setLayout(hbox(lw, right, spacing=16, margins=(16, 14, 16, 14)))
+        self.show_tab(1)
+
+    def show_tab(self, i):
+        self.stack.setCurrentIndex(i)
+        self.seg.set(i)
 
 
 class SelColorPanel(QWidget):
@@ -5062,7 +5112,7 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
             stack.addWidget(page)
         n_tabs = len(pc.AdjustPanel.TABS)                   # дальше: уровни, кривые, выборочный цвет
         self.levels_ed = LevelsEditor()
-        self.levels_ed.changed.connect(self.levels_changed)
+        self.levels_ed.changed.connect(lambda v: self.levels_changed(v, self.levels_ed))
         self.levels_ed.auto_requested.connect(self.levels_auto)
         self.curves_panel = CurvesPanel(230)
         self.curves_panel.changed.connect(lambda v: self.curves_changed(self.curves_panel, v))
@@ -5071,6 +5121,7 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
             self.curves_win = None
         curv_page = QWidget()
         curv_page.setLayout(vbox(self.curves_panel, hbox(btn("На весь экран…", self.open_curves_window, ico="image"), None), spacing=8))
+        self.levels_ed.layout().addLayout(hbox(btn("На весь экран…", lambda: self.open_color_window(0), ico="image"), None))
         self.sel_panel = SelColorPanel()
         self.sel_panel.changed.connect(self.selcol_changed)
         for w_ in (self.levels_ed, curv_page, self.sel_panel):
@@ -6216,6 +6267,7 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
             return
         self.refresh_proof()
         self.redraw()
+        self._color_win_update()
         self.update_hist()
 
     def adj_show_original(self, on):
@@ -6225,7 +6277,7 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
 
     def _color_editors_enable(self, on):
         """Без открытого фото уровни, кривые и выбор по цветам недоступны (серые), а не молча не реагируют на мышь."""
-        for w in (self.levels_ed, self.sel_panel, *self._curve_panels()):
+        for w in (self.sel_panel, *self._levels_editors(), *self._curve_panels()):
             w.setEnabled(on)
             w.setToolTip("" if on else tr("Сначала откройте фото"))
 
@@ -6242,18 +6294,29 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
             self.sw_bw.set(full["bw"])
             self.sw_sepia.set(full["sepia"])
             self.seg_auto.set(full["auto"])
-            self.levels_ed.set_value(full["levels"])
+            for ed in self._levels_editors():
+                ed.set_value(full["levels"])
             for pnl in self._curve_panels():
                 pnl.set_value(full["curves"])
             self.sel_panel.set_value(full["selcol"])
         finally:
             self.adj_lock = False
         self._color_hist()
+        self._color_win_update()
         self.update_hist()
 
     def _curve_panels(self):
         w = getattr(self, "curves_win", None)
         return [self.curves_panel] + ([w.panel] if w is not None else [])
+
+    def _levels_editors(self):
+        w = getattr(self, "curves_win", None)
+        return [self.levels_ed] + ([w.levels] if w is not None else [])
+
+    def _color_win_update(self):
+        w = getattr(self, "curves_win", None)
+        if w is not None and w.isVisible():
+            w.preview.set_pixmap(self.preview_pm)
 
     def _color_hist(self):
         """Гистограмма исходного (ещё не исправленного) кадра — подложка для уровней и кривых."""
@@ -6267,12 +6330,16 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
                     small.thumbnail((800, 800))
                 self._hist_img, self._hist_src = self.raw, pc.hist_rgb(small)[0]
             h = self._hist_src
-        self.levels_ed.set_hist(h)
+        for ed in self._levels_editors():
+            ed.set_hist(h)
         for pnl in self._curve_panels():
             pnl.set_hist(h)
 
-    def levels_changed(self, val):
+    def levels_changed(self, val, sender=None):
         self.adj_set({"levels": val}, key=("levels",))
+        for ed in self._levels_editors():
+            if ed is not sender:
+                ed.set_value(val)
 
     def selcol_changed(self, val):
         self.adj_set({"selcol": val}, key=("selcol",))
@@ -6284,14 +6351,24 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
                 pnl.set_value(val)
 
     def open_curves_window(self):
+        self.open_color_window(1)
+
+    def open_color_window(self, tab=1):
+        """Большой экран: уровни (0) или кривые (1) слева, редактируемое фото справа."""
         w = getattr(self, "curves_win", None)
         if w is None:
-            w = self.curves_win = CurvesWindow(self)
+            w = self.curves_win = ColorWindow(self)
             w.panel.changed.connect(lambda v: self.curves_changed(w.panel, v))
-        w.panel.set_value(pc.adj_full(self.cur_adj())["curves"] if self.idx >= 0 else ())
+            w.levels.changed.connect(lambda v: self.levels_changed(v, w.levels))
+            w.levels.auto_requested.connect(self.levels_auto)
+        full = pc.adj_full(self.cur_adj()) if self.idx >= 0 else pc.adj_full({})
+        w.panel.set_value(full["curves"])
+        w.levels.set_value(full["levels"])
+        w.show_tab(tab)
         self._color_editors_enable(self.idx >= 0)
         self._color_hist()
         w.show()
+        w.preview.set_pixmap(self.preview_pm)
         w.raise_()
         w.activateWindow()
 
@@ -6304,7 +6381,8 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
             small.thumbnail((800, 800))
         val = ct.auto_levels_rows(*pc._auto_bounds(small.convert("RGB"), "color"))
         self.adj_set({"levels": val}, key=("levels",))
-        self.levels_ed.set_value(val)
+        for ed in self._levels_editors():
+            ed.set_value(val)
 
     def update_hist(self, note=None):
         img = self.adj_img if self.adj_img is not None else self.raw
@@ -6355,6 +6433,7 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
             QApplication.restoreOverrideCursor()
             self._enh_busy = False
         notes = []
+        mapping = {f: pc.keep_channel_edits(self.states[f].adj, m) for f, m in mapping.items()}
         cur = self.files[self.idx]
         if cur in mapping and self.raw is not None and self.s["cm_on"]:      # цвета не должны уходить за охват принтера
             try:
@@ -6363,9 +6442,11 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
                     probe = type("S", (), {"adj": {**{k: v for k, v in self.states[cur].adj.items() if k not in pc.ENHANCE_KEYS}, **mapping[cur]}})()
                     test = pc.adjust_tile(self.raw, pc.merge_adj({}, probe), 100, preview=True)
                     pct = pc.gamut_preview(test, self.icc, cm)[1]
-                    if pct <= 3.0 or not (mapping[cur].get("vib") or mapping[cur].get("sat")):
+                    boost = any(s > 0 for _h, s, _l in ct.selcol_full(mapping[cur].get("selcol")))
+                    if pct <= 3.0 or not (mapping[cur].get("vib") or mapping[cur].get("sat") or boost):
                         break
-                    mapping[cur] = pc.clean_adj({**mapping[cur], "vib": mapping[cur].get("vib", 0) / 2, "sat": 0})
+                    half = {"selcol": pc.halve_selcol_sat(mapping[cur]["selcol"])} if boost else {}
+                    mapping[cur] = pc.clean_adj({**mapping[cur], **half, "vib": mapping[cur].get("vib", 0) / 2, "sat": 0})
                     notes.append(tr("красочность уменьшена: принтер не передаёт часть цветов"))
             except Exception:
                 pass
@@ -7532,7 +7613,7 @@ pc.EN.update({
     "В другую папку": "To another folder", "Папка не выбрана": "No folder chosen", "Выбрать папку": "Choose folder",
     "Разрешение, dpi": "Resolution, dpi", "Тип файла": "File type", "Качество JPEG": "JPEG quality",
     "Точный размер печати": "Exact print size", "Подпапка по формату": "Subfolder per format", "Число копий в имени файла": "Copies count in file name",
-    "Цвет": "Colour", "Сначала откройте фото": "Open a photo first", "Уровни": "Levels", "Кривые": "Curves", "По цветам": "By colour", "На весь экран…": "Full screen…",
+    "Цвет": "Colour", "Уровни и кривые": "Levels and curves", "Нет фото": "No photo", "Показать оригинал (удерживайте)": "Show original (hold)", "Сначала откройте фото": "Open a photo first", "Уровни": "Levels", "Кривые": "Curves", "По цветам": "By colour", "На весь экран…": "Full screen…",
     "Все каналы сразу": "All channels together", "Красный канал": "Red channel", "Зелёный канал": "Green channel", "Синий канал": "Blue channel",
     "Чёрная точка (вход)": "Black point (input)", "Гамма (середина)": "Gamma (midtones)", "Белая точка (вход)": "White point (input)",
     "Выход: чёрный": "Output: black", "Вход: чёрный": "Input: black", "гамма": "gamma", "белый": "white",
@@ -7848,6 +7929,7 @@ def selftest(app):
     step("ползунок яркости", lambda: win.sliders["bright"][0].setValue(20))
     step("улучшение Epson", lambda: win.enhance(1))
     def presets_flow():
+        win.settings["adj_presets"] = {}                      # пресеты прошлых запусков спросили бы подтверждение замены
         win.adj_replace({}, [win.files[win.idx]])
         win.adj_set({"bright": 17.0, "sat": 9.0})
         win.preset_pick(1)                                   # пресет пуст: ничего не применяется, настройки на месте
