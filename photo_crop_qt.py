@@ -4975,12 +4975,18 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         return pc.desktop_dir()
 
     def open_any(self):
-        if getattr(self, "app_mode", "photo") == "doc":
-            return self.doc_open()
+        """Одна кнопка на фото, папки и документы: выбрали документ — открывается раздел «Документ»,
+        выбрали фото или папку — раздел «Фото»."""
         dlg = OpenDialog(self, self.start_dir())
         if not dlg.exec() or not dlg.choice:
             return
         kind, val, add = dlg.choice
+        if kind == "doc":
+            self.set_app_mode("doc")
+            self.doc_load(Path(val))
+            return
+        if getattr(self, "app_mode", "photo") == "doc":
+            self.set_app_mode("photo")
         if kind == "files":
             self.load_files(val, add)
         else:
@@ -5000,6 +5006,11 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
     def drop_paths(self, paths, sheet_pos=None):
         """Добавляет брошенные файлы и папки. Если бросили на лист — первое новое фото встаёт в точку, куда бросили."""
         files = []
+        docs = [Path(q) for q in paths if Path(q).suffix.lower() in DOC_EXTS and Path(q).is_file()]
+        if docs and not any(Path(q).suffix.lower() in pc.EXTS or Path(q).is_dir() for q in paths):
+            self.set_app_mode("doc")                       # бросили только документ — открываем раздел «Документ»
+            self.doc_load(docs[0])
+            return
         for q in paths:
             q = Path(q)
             if q.is_dir():
@@ -6095,7 +6106,7 @@ class OpenDialog(QDialog):
         self.app, self.choice = app, None
         self.cwd = Path(start) if start and Path(start).is_dir() else Path(pc.desktop_dir())
         self.n_files = 0
-        self.setWindowTitle(tr("Открыть фото или папку"))
+        self.setWindowTitle(tr("Открыть фото, документ или папку"))
         self.resize(980, 660)
         self.e_path = QLineEdit(str(self.cwd))
         self.e_path.returnPressed.connect(lambda: self.goto(self.e_path.text()))
@@ -6159,6 +6170,7 @@ class OpenDialog(QDialog):
         self._timer.start()
         self._folder_icon = self._big_icon("open", T["select"])
         self._blank_icon = self._big_icon("image", T["muted"])
+        self._doc_icon = self._big_icon("doc", T["accent"])
         self.fill()
 
     def _place(self, text, ico, pth, translate=True):
@@ -6197,6 +6209,16 @@ class OpenDialog(QDialog):
             it.setToolTip(q.name)
             self.list.addItem(it)
             self._pending.append(it)
+        try:                                               # документы (PDF, Word, Excel, ...) тоже видны, миниатюр у них нет
+            docs = sorted((q for q in self.cwd.iterdir() if q.suffix.lower() in DOC_EXTS and not q.name.startswith(("~", ".")) and q.is_file()),
+                          key=lambda q: q.name.lower())
+        except OSError:
+            docs = []
+        for q in docs:
+            it = QListWidgetItem(self._doc_icon, q.name)
+            it.setData(Qt.UserRole, ("x", str(q)))
+            it.setToolTip(q.name)
+            self.list.addItem(it)
         self.e_path.setText(str(self.cwd))
         self.upd()
 
@@ -6253,15 +6275,26 @@ class OpenDialog(QDialog):
         k, q = it.data(Qt.UserRole)
         if k == "d":
             self.goto(q)
+        elif k == "x":
+            self.choice = ("doc", Path(q), False)
+            self.accept()
         else:
             self.choice = ("files", [Path(q)], self.sw_add.isChecked())
             self.accept()
 
-    def upd(self):
+    def _docs(self):
         sel = self._sel()
+        docs = [q for k, q in sel if k == "x"]
+        return docs if docs and len(docs) == len(sel) else []     # документ открывается, только если выделены одни документы
+
+    def upd(self):
+        sel = [x for x in self._sel() if x[0] != "x"]
         act = pc.OpenDialog.decide(sel, self.cwd, self.n_files)
         rec = self.app.s["recursive"]
-        if act is None:
+        docs = self._docs()
+        if docs:
+            text, ok = trf("Открыть документ «{name}»", name=docs[0].name), True
+        elif act is None:
             text, ok = tr("Открыть"), False
         elif act[0] == "files":
             text, ok = trf("Открыть выбранные фото ({n})", n=len(act[1])), True
@@ -6275,7 +6308,12 @@ class OpenDialog(QDialog):
         self.l_hint.setText(trf("В папке фото: {n}", n=self.n_files))
 
     def accept_choice(self):
-        act = pc.OpenDialog.decide(self._sel(), self.cwd, self.n_files)
+        docs = self._docs()
+        if docs:
+            self.choice = ("doc", docs[0], False)
+            self.accept()
+            return
+        act = pc.OpenDialog.decide([x for x in self._sel() if x[0] != "x"], self.cwd, self.n_files)
         if act is None:
             return
         self.choice = (act[0], act[1], self.sw_add.isChecked())
@@ -6897,11 +6935,11 @@ pc.EN.update({
     "У вас последняя версия:": "You have the latest version:",
     "Не удалось проверить обновления. Проверьте подключение к интернету.": "Could not check for updates. Check your internet connection.",
 })
-pc.EN_FMT.update({"Страниц: {n}": "Pages: {n}"})
+pc.EN_FMT.update({"Страниц: {n}": "Pages: {n}", "Открыть документ «{name}»": "Open document “{name}”"})
 pc.EN.update({"Бумага: фото, листов": "Paper: photos, sheets", "Бумага: документы, листов": "Paper: documents, sheets", "Тип": "Type"})
 pc.EN.update({
     "Документ": "Document", "PDF, Word, Excel, PowerPoint и другие офисные файлы": "PDF, Word, Excel, PowerPoint and other office files",
-    "Открыть документ…": "Open document…", "Открыть документ": "Open document", "Документ не открыт": "No document open",
+    "Открыть документ…": "Open document…", "Открыть документ": "Open document", "Открыть фото, документ или папку": "Open photos, a document or a folder", "Документ не открыт": "No document open",
     "Редактировать PDF": "Edit PDF", "Распознать текст": "Recognise text",
     "Откроется в программе «КопиТехник Конвертор»": "Opens in KopiTehnik Converter", "Распознавание в «КопиТехник Конвертор»": "Recognition in KopiTehnik Converter",
     "Печать документа": "Document printing", "Как страница ложится на лист": "How the page sits on the sheet", "По листу": "Fit to sheet",
@@ -7161,6 +7199,17 @@ def selftest(app):
         d.grab().save(str(out / "selftest_open.png"))
         d.close()
     step("окно «Открыть»", open_dlg)
+
+    def drop_doc():
+        from PIL import Image
+        pdf = tmp / "бросили.pdf"
+        Image.new("RGB", (300, 400), (240, 240, 240)).save(pdf)
+        win.drop_paths([str(pdf)])
+        app.processEvents()
+        if win.app_mode != "doc" or win.pages.currentIndex() != 4:
+            raise RuntimeError("документ не открыл раздел «Документ»")
+        win.set_app_mode("photo")
+    step("документ, брошенный в окно, открывает раздел «Документ»", drop_doc)
     step("вкладка «Принтер»", lambda: (win.show_page(2), shot("printer"), win.show_page(0)))
     step("параметры сохранения", lambda: win.options() or (_ for _ in ()).throw(RuntimeError("options() вернул пусто")))
     text = "PhotoCrop Qt selftest  %s\nPySide6 %s, Python %s\n\n%s\n" % (
