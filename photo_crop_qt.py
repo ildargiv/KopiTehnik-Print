@@ -4074,8 +4074,9 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         self.pages.addWidget(self._page_print())
         self.pages.addWidget(self._page_smart())
         self.pages.addWidget(self._page_doc())
-        self.seg_page = Segmented([("Фото", 0), ("Умная рамка", 3), ("Принтер", 2), ("Документ", 4)], 0)
-        self.seg_page.group.button(3).hide()                 # вкладка «Документ» видна только в режиме документа
+        self.seg_page = Segmented([("Фото", 0), ("Цвет", 1), ("Умная рамка", 3), ("Принтер", 2), ("Документ", 4)], 0)
+        self.seg_page.group.button(4).hide()                 # вкладка «Документ» видна только в режиме документа
+        self.seg_page.setStyleSheet('QPushButton[kind="seg"]{padding:6px 9px;}')       # пять вкладок должны уместиться в панели
         self.seg_page.changed.connect(self.show_page)
         self.progress = QProgressBar()
         self.progress.setTextVisible(False)
@@ -4473,7 +4474,6 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         photo = card("Кадр", lbl("Ориентация рамки", "muted"), hbox(self.seg_orient, None),
                      lbl("Как фото ложится в рамку", "muted"), hbox(self.seg_mode, None),
                      row("Копий этого фото", cop),
-                     btn("Коррекция цвета", lambda: self.show_page(1), ico="color"),
                      hbox(btn("Сбросить рамку", self.reset_frame, "link"), None, btn("Сбросить все", self.reset_all, "link")))
         # --- лист
         self.l_sheet = lbl("", wrap=True)
@@ -4501,7 +4501,6 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
     def _page_color(self):
         self.adj_lock = True
         self.sliders, self.slider_lbl = {}, {}
-        back = btn("Параметры", lambda: self.show_page(0), "link", ico="back", ico_color=T["muted"])
         self.seg_scope = Segmented([("это фото", "one"), ("все отмеченные", "all")], self.s["adj_scope"])
         self.seg_scope.changed.connect(lambda v: self._set("adj_scope", v, redraw=False))
         self.hist = Histogram()
@@ -4546,7 +4545,7 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
                           ibtn("reset", "Сбросить коррекцию этого фото", lambda: self.adj_reset(False), 32, True, isize=16),
                           ibtn("trash", "Сбросить коррекцию у всех фото", lambda: self.adj_reset(True), 32, True, isize=16), spacing=4),
                      self.l_enh)
-        top = card(None, hbox(back, None, self.seg_scope), self.hist, self.l_hist)
+        top = card(None, hbox(self.seg_scope, None), self.hist, self.l_hist)
         sl = card(None, tabs, stack, lbl("Двойной щелчок по ползунку — сбросить его.", "muted", wrap=True))
         self.adj_lock = False
         return self._scroll(top, quick, sl)
@@ -4585,10 +4584,10 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
     def show_page(self, i):
         if i == 1 and not self.files:
             info(self, "Сначала откройте фото.")
+            self.seg_page.set(self.pages.currentIndex())
             return
         self.pages.setCurrentIndex(i)
-        if i != 1:
-            self.seg_page.set(i)
+        self.seg_page.set(i)
         if i == 1:
             self.sync_adj()
         elif i == 3:
@@ -4795,9 +4794,8 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
             self.mode_switch.set(mode)
         if hasattr(self, "left_w"):
             self.left_w.setVisible(not doc)
-            btns = self.seg_page.group.buttons()
-            for i, b in enumerate(btns):                     # кнопки вкладок: 0 Фото, 1 Умная рамка, 2 Принтер, 3 Документ
-                b.setVisible((i >= 2) if doc else (i < 3))
+            for i, b in enumerate(self.seg_page.group.buttons()):   # кнопки вкладок: Фото, Цвет, Умная рамка, Принтер, Документ
+                b.setVisible((i >= 3) if doc else (i < 4))
             self.b_save.setVisible(not doc)
             for w in self._photo_only:
                 w.setVisible(not doc and not (self.compact and w in self._caps))
