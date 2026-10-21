@@ -4591,10 +4591,6 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         self.sync_adj()
 
     def show_page(self, i):
-        if i == 1 and not self.files:
-            info(self, "Сначала откройте фото.")
-            self.seg_page.set(self.pages.currentIndex())
-            return
         self.pages.setCurrentIndex(i)
         self.seg_page.set(i)
         if i == 1:
@@ -7195,6 +7191,14 @@ def selftest(app):
         win.grab().save(str(p))
         shots.append(str(p))
 
+    def color_tab_empty():
+        win.show_page(1)                                     # без фото вкладка «Цвет» открывается: пресеты видны сразу
+        app.processEvents()
+        if win.pages.currentIndex() != 1 or not win.b_pre[1].isVisible():
+            raise RuntimeError("вкладка «Цвет» без фото не открылась или нет кнопок пресетов")
+        win.preset_pick(1)
+        win.show_page(0)
+    step("вкладка «Цвет» открывается без фото", color_tab_empty)
     step("открыть папку", lambda: win.load_folder(tmp))
     step("снимок окна", lambda: shot("main"))
     step("следующее фото", lambda: win.go(1))
