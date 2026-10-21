@@ -4128,7 +4128,8 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
                             ibtn("reset", "Обновить список принтеров", self.reload_printers, 34, True), spacing=6),
                        self.l_drv,
                        row("Профиль принтера", self.sw_cm2), self.l_icc2,
-                       btn("Выбрать профиль…", self.open_cm_dialog, ico="profile"))
+                       btn("Выбрать профиль…", self.open_cm_dialog, ico="profile"),
+                       row("Имитация печати на экране", self.sw_proof), row("Показать цвета вне охвата", self.sw_gamut))
         self.cb_ppi = QComboBox()
         shrinkable_combo(self.cb_ppi, 80, 140)
         self.cb_ppi.addItems(pc.PPI_CHOICES)
@@ -4494,9 +4495,8 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         self.sw_gamut.toggled.connect(lambda on: self._cm_set("gamut", on))
         self.l_icc = lbl("", "muted", wrap=True)
         self.l_icc.hide()
-        color = card("Цвет", row("Имитация печати на экране", self.sw_proof), row("Показать цвета вне охвата", self.sw_gamut))
         self._icc_info()
-        return self._scroll(photo, sheet, color)
+        return self._scroll(photo, sheet)
 
     # ---------- страница «Коррекция цвета» (вместо отдельного окна)
     ADJ_FMT_SIGNED = ("bright", "contrast", "shadows", "highlights", "sat", "vib", "temp", "tint", "r", "g", "b")
