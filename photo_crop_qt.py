@@ -6244,9 +6244,10 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
                     probe = type("S", (), {"adj": {**{k: v for k, v in self.states[cur].adj.items() if k not in pc.ENHANCE_KEYS}, **mapping[cur]}})()
                     test = pc.adjust_tile(self.raw, pc.merge_adj({}, probe), 100, preview=True)
                     pct = pc.gamut_preview(test, self.icc, cm)[1]
-                    if pct <= 3.0 or not (mapping[cur].get("vib") or mapping[cur].get("sat")):
+                    if pct <= 3.0 or not (mapping[cur].get("vib") or mapping[cur].get("sat") or any(k.startswith("sc_") and k.endswith("_s") and v > 0 for k, v in mapping[cur].items())):
                         break
-                    mapping[cur] = pc.clean_adj({**mapping[cur], "vib": mapping[cur].get("vib", 0) / 2, "sat": 0})
+                    halved = {k: v / 2 for k, v in mapping[cur].items() if k.startswith("sc_") and k.endswith("_s") and v > 0}
+                    mapping[cur] = pc.clean_adj({**mapping[cur], **halved, "vib": mapping[cur].get("vib", 0) / 2, "sat": 0})
                     notes.append(tr("красочность уменьшена: принтер не передаёт часть цветов"))
             except Exception:
                 pass
