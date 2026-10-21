@@ -6,9 +6,23 @@
 
 ## Как подключить
 
-**1. Claude Desktop (MCP) — рекомендуется.** Запустите `mcp_config.bat` (или `python photo_crop.py mcp-config`),
-вставьте выведенный блок `mcpServers` в `%APPDATA%\Claude\claude_desktop_config.json`, перезапустите Claude Desktop.
-Для готового exe: `PhotoCropAgent.exe mcp` (собирается `build_exe.bat`; оконный PhotoCrop.exe stdio не имеет).
+**1. Claude Desktop (MCP) — рекомендуется. Агент работает с самим окном программы.**
+Установщик `KopiTehnikPrint-Setup-<версия>.exe` предлагает пункт «Подключить ИИ-агента (MCP) к Claude Desktop» (отмечен по умолчанию):
+он записывает сервер `photocrop` в `%APPDATA%\Claude\claude_desktop_config.json` (рядом остаётся копия `.bak`) и включает приём
+подключений в окне. Перезапустите Claude Desktop. Всё то же можно сделать позже: Настройки → «ИИ-агент (MCP)» → «Подключить к Claude Desktop».
+Для другого клиента MCP: кнопка «Скопировать настройку MCP» или `PhotoCropQt.exe mcp-config`; запуск сервера: `PhotoCropQt.exe mcp`.
+
+Как это устроено: окно программы поднимает сервер на `127.0.0.1` (только этот компьютер, ключ в `%APPDATA%\PhotoCrop\agent_endpoint.json`), а
+`PhotoCropQt.exe mcp` пересылает в него запросы клиента. Агент видит и меняет то же, что человек: открытые фото, рамки, коррекцию, формат,
+раскладку листа, принтер, документ. Изменения видны в окне сразу, Ctrl+Z их отменяет, вверху виден значок «ИИ-агент работает».
+Если окно не запущено, `PhotoCropQt.exe mcp` работает само по себе, без окна, со своим состоянием (`agent_state.json`), как раньше.
+Права агента задаёт человек в Настройках: печатать или нет, максимум листов за одну печать, спрашивать ли подтверждение перед печатью.
+По умолчанию права полные.
+
+Инструменты окна (сверх команд движка): `app_state`, `app_guide`, `open_files`, `check_photos`, `remove_unchecked`, `enhance`
+(«Улучшить» и «Супер»), `auto_levels`, `color_presets` / `color_preset_save` / `color_preset_apply`, `copy_adjust` / `paste_adjust`,
+`set_layout`, `set_view`, `set_app_mode`, `add_edge_test`, `print_photos` / `print_status`, `doc_open` / `doc_info` / `doc_set` /
+`doc_print` / `doc_convert`, `app_settings`, `print_stats`, `check_update`. Справка для самого агента: `app_guide` и ресурс `photocrop://guide`.
 
 **2. Командная строка / любой агент с доступом к shell:**
 

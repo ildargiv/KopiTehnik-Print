@@ -122,3 +122,36 @@ class HandleTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class InstallTest(unittest.TestCase):
+    def run_cli(self, *args, appdata):
+        env = dict(os.environ, APPDATA=appdata, PYTHONIOENCODING="utf-8")
+        return subprocess.run([sys.executable, str(ROOT / "photo_crop.py"), *args], capture_output=True, text=True, env=env, timeout=60)
+
+    def test_install_enables_agent_and_uninstall_removes_only_ours(self):
+        tmp = tempfile.mkdtemp(prefix="pc_inst_")
+        cfg = Path(tmp) / "Claude" / "claude_desktop_config.json"
+        cfg.parent.mkdir(parents=True)
+        cfg.write_text(json.dumps({"mcpServers": {"other": {"command": "x"}}, "theme": "dark"}), encoding="utf-8")
+        r = self.run_cli("mcp-install", appdata=tmp)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        d = json.loads(cfg.read_text(encoding="utf-8"))
+        self.assertIn("photocrop", d["mcpServers"])
+        self.assertEqual(d["mcpServers"]["photocrop"]["args"][-1], "mcp")
+        self.assertIn("other", d["mcpServers"])
+        self.assertTrue(cfg.with_name(cfg.name + ".bak").is_file())
+        st = json.loads((Path(tmp) / "PhotoCrop" / "settings.json").read_text(encoding="utf-8"))
+        self.assertTrue(st.get("agent_enabled"))
+        r = self.run_cli("mcp-uninstall", appdata=tmp)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        d = json.loads(cfg.read_text(encoding="utf-8"))
+        self.assertNotIn("photocrop", d["mcpServers"])
+        self.assertIn("other", d["mcpServers"])
+        self.assertEqual(d["theme"], "dark")
+
+    def test_no_enable_flag_leaves_settings_alone(self):
+        tmp = tempfile.mkdtemp(prefix="pc_inst_")
+        r = self.run_cli("mcp-install", "--no-enable", appdata=tmp)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertFalse((Path(tmp) / "PhotoCrop" / "settings.json").exists())

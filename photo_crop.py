@@ -4413,10 +4413,38 @@ def mcp_install(args):
     return 0
 
 
+def mcp_uninstall(args):
+    """Убирает сервер photocrop из claude_desktop_config.json (остальные серверы не трогает)."""
+    if "--path" in args:
+        path = Path(args[args.index("--path") + 1])
+    else:
+        path = Path(os.environ.get("APPDATA") or str(Path.home() / "AppData" / "Roaming")) / "Claude" / "claude_desktop_config.json"
+    try:
+        cfg = json.loads(path.read_text(encoding="utf-8") or "{}")
+        servers = cfg.get("mcpServers")
+        if not isinstance(servers, dict) or "photocrop" not in servers:
+            return 0
+    except (OSError, ValueError):
+        return 0
+    shutil.copyfile(path, path.with_name(path.name + ".bak"))
+    del servers["photocrop"]
+    write_json_atomic(path, cfg)
+    print(f"Сервер photocrop убран из {path}")
+    return 0
+
+
 def agent_main(argv):
     """photo_crop.py agent …  /  photo_crop.py mcp  /  photo_crop.py mcp-config"""
     import warnings
     warnings.simplefilter("ignore")      # предупреждения библиотек не должны засорять вывод агента
+    if sys.stdin is None or sys.stdout is None:          # оконный exe: каналы клиента берём по дескрипторам Windows
+        import agent_bridge as ab
+        i_, o_ = ab.open_stdio()
+        sys.stdin, sys.stdout = i_ or sys.stdin, o_ or sys.stdout
+    if sys.stdout is None:
+        sys.stdout = open(os.devnull, "w", encoding="utf-8")
+    if sys.stderr is None:
+        sys.stderr = open(os.devnull, "w", encoding="utf-8")
     _stdio_utf8()
     dump = lambda o, pretty=False: json.dumps(o, ensure_ascii=False, default=_jsonable, indent=1 if pretty else None)
     if argv and argv[0] == "mcp-config":
@@ -4424,6 +4452,8 @@ def agent_main(argv):
         return 0
     if argv and argv[0] == "mcp-install":
         return mcp_install(argv[1:])
+    if argv and argv[0] == "mcp-uninstall":
+        return mcp_uninstall(argv[1:])
     if argv and argv[0] == "mcp":
         import agent_bridge as ab
         stdin, out = ab.open_stdio()           # в оконном exe каналы клиента берём по дескрипторам Windows
@@ -7851,7 +7881,7 @@ class PrintDialog:
 
 
 def main():
-    if len(sys.argv) > 1 and sys.argv[1] in ("agent", "mcp", "mcp-config", "mcp-install"):
+    if len(sys.argv) > 1 and sys.argv[1] in ("agent", "mcp", "mcp-config", "mcp-install", "mcp-uninstall"):
         sys.exit(agent_main(sys.argv[1:]))
     if tk is None:
         sys.stderr.write("PhotoCrop: нет tkinter. Окно недоступно; режим агента: photo_crop.py agent --list\n")

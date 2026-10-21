@@ -30,7 +30,7 @@ import color_tools as ct                                   # noqa: E402  (уро
 import gui_agent as ga                                     # noqa: E402  (ИИ-агент внутри окна)
 import i18n                                                # noqa: E402  (переводы интерфейса)
 
-if len(sys.argv) > 1 and sys.argv[1] in ("agent", "mcp", "mcp-config", "mcp-install", "--print-project"):
+if len(sys.argv) > 1 and sys.argv[1] in ("agent", "mcp", "mcp-config", "mcp-install", "mcp-uninstall", "--print-project"):
     pc.main()                                              # режим агента и окно печати — как в прежней программе
     sys.exit(0)
 
@@ -4164,6 +4164,9 @@ class SmartMixin:
 APP_VERSION = "1.1.0"
 RELEASES_API = "https://api.github.com/repos/ildargiv/KopiTehnik-Print/releases/latest"
 RELEASES_PAGE = "https://github.com/ildargiv/KopiTehnik-Print/releases/latest"
+GITHUB_URL = "https://github.com/ildargiv/KopiTehnik-Print"
+AUTHOR = "Ildar Gaisin (Гайсин Ильдар)"
+LICENSE_TEXT = "Лицензия: не выбрана, все права защищены."
 
 
 def _ver(tag):
@@ -7712,7 +7715,12 @@ class SettingsDialog(QDialog):
                     lbl("Ctrl при перетаскивании — временно отключает прилипание.", "muted"))
         sw_upd = Switch(st.get("check_updates", True))
         sw_upd.toggled.connect(lambda on: st.__setitem__("check_updates", bool(on)))
-        upd_card = card("Обновление", row("Версия программы", lbl(APP_VERSION)),
+        import webbrowser
+        link = lambda text, url: btn(text, lambda: webbrowser.open(url), "link")
+        upd_card = card("О программе", lbl("КопиТехник Принт (PhotoCrop)"), row("Версия", lbl(APP_VERSION)), row("Автор", lbl(AUTHOR)),
+                        lbl(LICENSE_TEXT, "muted", wrap=True),
+                        hbox(link("Страница проекта на GitHub", GITHUB_URL), link("Все выпуски", GITHUB_URL + "/releases"),
+                             link("Сообщить об ошибке", GITHUB_URL + "/issues"), None, spacing=6),
                         row("Проверять обновления при запуске", sw_upd),
                         hbox(None, btn("Проверить обновления", lambda: app.check_updates(True), ico="sparkle")))
         about = lbl(tr("Настройки хранятся в файле") + ": " + str(pc.SETTINGS_PATH), "muted", wrap=True)
@@ -7924,6 +7932,9 @@ pc.EN.update({
     "Выбрать файл профиля": "Choose a profile file", "Способ рендеринга": "Rendering intent",
     "Применять профиль принтера при сохранении": "Apply the printer profile when saving", "Цветовой профиль принтера": "Printer colour profile",
     "Анимация отправки на печать и сохранения": "Animate sending to print and saving", "Язык интерфейса": "Interface language",
+    "О программе": "About", "Автор": "Author", "Версия": "Version", "Лицензия: не выбрана, все права защищены.": "Licence: none chosen, all rights reserved.",
+    "Страница проекта на GitHub": "Project page on GitHub", "Все выпуски": "All releases", "Сообщить об ошибке": "Report a problem",
+    "КопиТехник Принт (PhotoCrop)": "KopiTehnik Print (PhotoCrop)",
     "Спрашивать подтверждение обычных действий (сброс, применение ко всем, печать)": "Ask for confirmation of everyday actions (reset, apply to all, print)",
     "Папка, с которой начинается «Открыть»": "Folder that “Open” starts in", "Последняя использованная": "Last used",
     "Кадрирование": "Cropping", "Сила прилипания, пикселей экрана": "Snap strength, screen pixels", "Общие": "General",

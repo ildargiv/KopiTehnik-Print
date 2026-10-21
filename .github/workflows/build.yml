@@ -24,10 +24,18 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Build PhotoCropQt.exe and PhotoCropAgent.exe
+      - name: Build PhotoCropQt.exe
+        run: pyinstaller --noconfirm PhotoCropQt.spec
+
+      - name: Build the installer (Inno Setup)
+        shell: pwsh
         run: |
-          pyinstaller --noconfirm PhotoCropQt.spec
-          pyinstaller --noconfirm PhotoCropAgent.spec
+          $ver = (python installer/app_version.py).Trim()
+          Write-Host "Version $ver"
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) { choco install innosetup -y --no-progress }
+          & $iscc "/DAppVersion=$ver" installer\PhotoCrop.iss
+          if ($LASTEXITCODE -ne 0) { throw "ISCC failed" }
 
       - name: Check build output
         run: dir dist
@@ -37,7 +45,7 @@ jobs:
           name: PhotoCrop-windows
           path: |
             dist/PhotoCropQt.exe
-            dist/PhotoCropAgent.exe
+            dist/KopiTehnikPrint-Setup-*.exe
 
       - name: Publish GitHub Release
         if: startsWith(github.ref, 'refs/tags/v')
@@ -45,5 +53,5 @@ jobs:
         with:
           files: |
             dist/PhotoCropQt.exe
-            dist/PhotoCropAgent.exe
+            dist/KopiTehnikPrint-Setup-*.exe
           body_path: RELEASE_NOTES.md
