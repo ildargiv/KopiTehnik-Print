@@ -1814,7 +1814,7 @@ class CurveEditor(QWidget):
     def _hit(self, pos):
         for i, (x, y) in enumerate(self.cur()):
             q = self._to_px(x, y)
-            if abs(q.x() - pos.x()) <= 9 and abs(q.y() - pos.y()) <= 9:
+            if abs(q.x() - pos.x()) <= 12 and abs(q.y() - pos.y()) <= 12:
                 return i
         return None
 
@@ -1836,7 +1836,10 @@ class CurveEditor(QWidget):
         if i is None:
             x, _y = self._from_px(pos)
             x = int(round(x))
-            if any(abs(px - x) < 2 for px, _ in pts):
+            near = [k for k, (px, _) in enumerate(pts) if abs(px - x) < 2]
+            if near:                                       # рядом по горизонтали уже есть точка — берём её, а не молчим
+                self.drag = near[0]
+                self.update()
                 return
             tab = ct.curve_lut(pts)
             pts.append((x, tab[x]))
