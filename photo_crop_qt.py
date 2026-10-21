@@ -4145,6 +4145,7 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         e_shrink.setFixedWidth(60)
         e_shrink.setToolTip(tr("Насколько уменьшить лист, чтобы принтер не срезал края при печати без полей. 0 — не менять."))
         e_shrink.textEdited.connect(lambda v: pr.__setitem__("shrink", v))
+        screen = card("Цвет на экране", row("Имитация печати на экране", self.sw_proof), row("Показать цвета вне охвата", self.sw_gamut))
         proc = card("Обработка", row("Разрешение печати, ppi", self.cb_ppi),
                     hbox(lbl("Резкость"), sl, l_sh), row("Метки реза", sw_marks),
                     row("Уменьшить лист, %", e_shrink), row("Цвет Windows (ICM) отключён", sw_icm))
@@ -4159,7 +4160,7 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         self.l_queue = lbl("Нажмите «Обновить», чтобы увидеть очередь.", "muted", wrap=True)
         queue = card("Очередь печати", self.l_queue,
                      hbox(btn("Обновить", self.queue_refresh), btn("Очистить", self.queue_clear), spacing=6))
-        return self._scroll(printer, proc, bleed, job, queue, btn("Старое окно печати…", self.open_print, "link"))
+        return self._scroll(printer, screen, proc, bleed, job, queue, btn("Старое окно печати…", self.open_print, "link"))
 
     def reload_printers(self):
         self.printers = pc.list_printers()
@@ -4491,9 +4492,8 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         self.sw_gamut.toggled.connect(lambda on: self._cm_set("gamut", on))
         self.l_icc = lbl("", "muted", wrap=True)
         self.l_icc.hide()
-        color = card("Цвет", row("Имитация печати на экране", self.sw_proof), row("Показать цвета вне охвата", self.sw_gamut))
         self._icc_info()
-        return self._scroll(photo, sheet, color)
+        return self._scroll(photo, sheet)
 
     # ---------- страница «Коррекция цвета» (вместо отдельного окна)
     ADJ_FMT_SIGNED = ("bright", "contrast", "shadows", "highlights", "sat", "vib", "temp", "tint", "r", "g", "b")
@@ -6839,7 +6839,7 @@ pc.EN.update({
     "В другую папку": "To another folder", "Папка не выбрана": "No folder chosen", "Выбрать папку": "Choose folder",
     "Разрешение, dpi": "Resolution, dpi", "Тип файла": "File type", "Качество JPEG": "JPEG quality",
     "Точный размер печати": "Exact print size", "Подпапка по формату": "Subfolder per format", "Число копий в имени файла": "Copies count in file name",
-    "Цвет": "Colour", "Профиль принтера": "Printer profile", "Выбрать профиль…": "Choose profile…",
+    "Цвет": "Colour", "Цвет на экране": "Colour on screen", "Профиль принтера": "Printer profile", "Выбрать профиль…": "Choose profile…",
     "Имитация печати на экране": "Simulate print on screen", "Показать цвета вне охвата": "Show out-of-gamut colours",
     "Параметры": "Settings", "это фото": "this photo", "все отмеченные": "all checked", "Менять": "Apply to",
     "Татарская": "Tatar", "Марийская": "Mari", "Основное": "Basic", "Детали": "Detail", "нет": "off", "контраст": "contrast", "цвет": "colour", "Ч/Б": "B/W", "Авто-уровни": "Auto levels",
