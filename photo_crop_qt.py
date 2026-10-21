@@ -1577,6 +1577,10 @@ class LevelsWidget(QWidget):
         if self.app.idx < 0:
             p.setPen(QColor(T["muted"]))
             p.drawText(QRectF(0, 0, w, y1), Qt.AlignCenter, tr("Откройте фото, чтобы менять уровни"))
+        else:
+            ib, g, iw = self._vals()
+            p.setPen(QColor(T["text"]))
+            p.drawText(QRectF(14, 6, w - 28, 16), Qt.AlignLeft, "%d  ·  %.2f  ·  %d" % (ib, g, iw))
         p.end()
 
     def _hit(self, x):
@@ -1770,23 +1774,89 @@ class CurveWidget(QWidget):
         self.update()
 
 
-class CurveDialog(QDialog):
-    """Кривые на большом экране: тот же редактор, но крупнее; изменения сразу видны в основном окне."""
+class PhotoPane(QWidget):
+    """Правка фото на большом экране: справа — снимок с текущей коррекцией. Кнопка «Оригинал» (держать) показывает его без правок."""
 
     def __init__(self, app):
-        super().__init__(app)
+        super().__init__()
         self.app = app
-        self.setWindowTitle(tr("Кривые"))
-        self.resize(640, 700)
-        self.seg = Segmented([("RGB", "m"), ("R", "r"), ("G", "g"), ("B", "b")], app.curve_ch)
-        self.seg.changed.connect(app.set_curve_channel)
-        self.w = CurveWidget(app, big=True)
-        reset = btn("Сбросить кривую", app.curve_reset, "link")
-        hint = lbl("Щёлкните по линии, чтобы добавить точку и потянуть. Двойной щелчок или правая кнопка — убрать точку. "
-                   "Цвета фото в основном окне меняются сразу.", "muted", wrap=True)
-        self.setLayout(vbox(hbox(self.seg, None, reset), self.w, hint, spacing=10, margins=(14, 14, 14, 14)))
-        app.adj_views.append(self.w)
-        self.finished.connect(lambda _=0: app.adj_views.remove(self.w) if self.w in app.adj_views else None)
+        self.orig = False
+        self.setMinimumSize(420, 300)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self._pm_key = None
+        self._pm = None
+
+    def set_original(self, on):
+        self.orig = on
+        super().update()
+
+    def _pixmap(self):
+        im = self.app.raw if self.orig else (self.app.adj_img if self.app.adj_img is not None else self.app.raw)
+        if im is None:
+            return None
+        key = (id(im), self.width(), self.height())
+        if key != self._pm_key:
+            self._pm_key = key
+            self._pm = QPixmap.fromImage(pil_to_qimage(im)).scaled(self.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation)
+        return self._pm
+
+    def update(self):
+        self._pm_key = None
+        super().update()
+
+    def paintEvent(self, e):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+        p.setPen(QPen(QColor(T["border"]), 1))
+        p.setBrush(QColor(T["canvas"]))
+        p.drawRoundedRect(QRectF(0.5, 0.5, self.width() - 1, self.height() - 1), 8, 8)
+        pm = self._pixmap()
+        if pm is None:
+            p.setPen(QColor(T["muted"]))
+            p.drawText(self.rect(), Qt.AlignCenter, tr("Откройте фото"))
+        else:
+            p.drawPixmap((self.width() - pm.width()) // 2, (self.height() - pm.height()) // 2, pm)
+            p.setPen(QColor("#ffffff"))
+            p.setBrush(QColor(0, 0, 0, 150))
+            p.drawRoundedRect(QRectF(10, 10, 92, 24), 6, 6)
+            p.drawText(QRectF(10, 10, 92, 24), Qt.AlignCenter, tr("Оригинал") if self.orig else tr("С правками"))
+        p.end()
+
+
+class AdjustScreen(QDialog):
+    """Кривые или уровни на большом экране: слева редактор, справа тот же снимок с изменениями в реальном времени."""
+
+    def __init__(self, app, kind):
+        super().__init__(app)
+        self.app, self.kind = app, kind
+        self.setWindowTitle(tr("Кривые") if kind == "curves" else tr("Уровни"))
+        self.resize(1280, 760)
+        self.seg = Segmented([("RGB", "m"), ("R", "r"), ("G", "g"), ("B", "b")], app.curve_ch if kind == "curves" else app.lv_ch)
+        self.seg.changed.connect(app.set_curve_channel if kind == "curves" else app.set_levels_channel)
+        if kind == "curves":
+            self.w = CurveWidget(app, big=True)
+            reset = btn("Сбросить кривую", app.curve_reset, "link")
+            hint = lbl("Щёлкните по линии — появится точка, потяните её. Двойной щелчок или правая кнопка — убрать точку.", "muted", wrap=True)
+        else:
+            self.w = LevelsWidget(app)
+            self.w.setFixedHeight(200)
+            auto = btn("Авто", app.levels_auto, ico="sparkle")
+            reset = btn("Сбросить уровни", app.levels_reset, "link")
+            hint = lbl("Бегунки под гистограммой: чёрная точка, середина (гамма) и белая точка.", "muted", wrap=True)
+        self.pane = PhotoPane(app)
+        b_orig = btn("Оригинал (держать)", None, ico="eye")
+        b_orig.pressed.connect(lambda: self.pane.set_original(True))
+        b_orig.released.connect(lambda: self.pane.set_original(False))
+        left = vbox(hbox(self.seg, None), self.w, hbox(*([auto] if kind == "levels" else []), reset, None), hint, *([None] if kind == "levels" else []), spacing=10)
+        lw = QWidget()
+        lw.setLayout(left)
+        lw.setMinimumWidth(360)
+        lw.setMaximumWidth(520 if kind == "curves" else 440)
+        right = vbox(self.pane, hbox(b_orig, None), spacing=8)
+        self.setLayout(hbox(lw, right, spacing=14, margins=(14, 14, 14, 14)))
+        self.setStyleSheet(app.styleSheet())
+        app.adj_views.extend([self.w, self.pane])
+        self.finished.connect(lambda _=0: [app.adj_views.remove(x) for x in (self.w, self.pane) if x in app.adj_views])
 
 
 class SendOverlay(QWidget):
@@ -4861,8 +4931,8 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         self.lv_ch = "m"
         self.lv_widget = LevelsWidget(self)
         self.adj_views.append(self.lv_widget)
-        seg = Segmented([("RGB", "m"), ("R", "r"), ("G", "g"), ("B", "b")], "m")
-        stack = QStackedWidget()
+        seg = self.lv_seg = Segmented([("RGB", "m"), ("R", "r"), ("G", "g"), ("B", "b")], "m")
+        stack = self.lv_stack = QStackedWidget()
         for ch in pc.LV_CHANNELS:
             pg = QWidget()
             l = vbox(spacing=2)
@@ -4873,15 +4943,34 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
             pg.setLayout(l)
             stack.addWidget(pg)
 
-        def pick(v):
-            self.lv_ch = v
-            stack.setCurrentIndex(pc.LV_CHANNELS.index(v))
-            self.lv_widget.update()
-        seg.changed.connect(pick)
+        seg.changed.connect(self.set_levels_channel)
         auto = btn("Авто", self.levels_auto, ico="sparkle", tip="Растянуть уровни выбранного канала по гистограмме")
         reset = btn("Сбросить уровни", self.levels_reset, "link")
-        page.setLayout(vbox(hbox(seg, None), self.lv_widget, stack, hbox(auto, None, reset), spacing=6))
+        big = btn("На весь экран", self.levels_screen, ico="grid", tip="Уровни в большом окне, рядом фото")
+        page.setLayout(vbox(hbox(seg, None, big), self.lv_widget, stack, hbox(auto, None, reset), spacing=6))
         return page
+
+    def set_levels_channel(self, v):
+        self.lv_ch = v
+        self.lv_seg.set(v)
+        self.lv_stack.setCurrentIndex(pc.LV_CHANNELS.index(v))
+        for w in list(self.adj_views):
+            w.update()
+        dlg = getattr(self, "_screen_dlg", None)
+        if dlg is not None and dlg.kind == "levels":
+            dlg.seg.set(v)
+
+    def levels_screen(self):
+        self._open_screen("levels")
+
+    def _open_screen(self, kind):
+        old = getattr(self, "_screen_dlg", None)
+        if old is not None:
+            old.close()
+        dlg = AdjustScreen(self, kind)
+        dlg.show()
+        self._screen_dlg = dlg
+        self.sync_adj()
 
     def levels_reset(self):
         self.adj_set({"lv_%s_%s" % (ch, p): n for ch in pc.LV_CHANNELS for p, n, _l in pc.LV_PARTS})
@@ -4919,7 +5008,7 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         self.curve_seg = Segmented([("RGB", "m"), ("R", "r"), ("G", "g"), ("B", "b")], "m")
         self.curve_seg.changed.connect(self.set_curve_channel)
         reset = btn("Сбросить кривую", self.curve_reset, "link")
-        big = btn("На весь экран", self.curve_screen, ico="grid", tip="Кривые в большом окне")
+        big = btn("На весь экран", self.curve_screen, ico="grid", tip="Кривые в большом окне, рядом фото")
         hint = lbl("Щёлкните по линии — появится точка, потяните её. Двойной щелчок или правая кнопка — убрать точку.", "muted", wrap=True)
         page.setLayout(vbox(hbox(self.curve_seg, None), self.curve_widget, hbox(big, None, reset), hint, spacing=6))
         return page
@@ -4927,8 +5016,8 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
     def set_curve_channel(self, v):
         self.curve_ch = v
         self.curve_seg.set(v)
-        dlg = getattr(self, "_curve_dlg", None)
-        if dlg is not None:
+        dlg = getattr(self, "_screen_dlg", None)
+        if dlg is not None and dlg.kind == "curves":
             dlg.seg.set(v)
         for w in list(self.adj_views):
             w.update()
@@ -4938,10 +5027,7 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         self.sync_adj()
 
     def curve_screen(self):
-        dlg = CurveDialog(self)
-        dlg.setStyleSheet(self.styleSheet())
-        dlg.show()
-        self._curve_dlg = dlg
+        self._open_screen("curves")
 
     SC_NAMES = (("Красный", "r"), ("Жёлтый", "y"), ("Зелёный", "g"), ("Голубой", "c"), ("Синий", "b"), ("Пурпурный", "m"), ("Нейтральный (серые)", "n"))
 
@@ -7349,7 +7435,7 @@ pc.EN.update({
     "Сохранить проект (рамки и настройки)": "Save project (frames and settings)",
 })
 pc.EN.update({
-    "Бумага": "Paper", "Фото на листе": "Photos per sheet", "Поля": "Borders", "Откройте фото, чтобы менять уровни": "Open a photo to change the levels", "Откройте фото, чтобы менять кривые": "Open a photo to change the curves", "Пресет 1": "Preset 1", "Пресет 2": "Preset 2", "Сохранить": "Save", "Запомнить текущие ползунки в «Пресет %s»; прежний пресет заменится": "Remember the current sliders in Preset %s; the old preset is replaced", "Применить «Пресет %s» к выбранным фото": "Apply Preset %s to the selected photos", "Пока пуст: настройте ползунки и нажмите «Сохранить» под кнопкой": "Empty for now: set the sliders and press Save under the button", "Заменить сохранённый «Пресет %s» текущими настройками?": "Replace the saved Preset %s with the current settings?", "«Пресет %s» сохранён": "Preset %s saved", "Пресет пока пуст: настройте ползунки и нажмите «Сохранить» под кнопкой пресета.": "The preset is empty: set the sliders and press Save under the preset button.", "Открыть фото, папку или документ": "Open photos, a folder or a document", "Документ…": "Document…", "PDF, Word, Excel, PowerPoint: откроется раздел «Документ»": "PDF, Word, Excel, PowerPoint: opens the Document section", "Поля: белая рамка по краю и между фото": "Borders: white margin at the edge and between photos", "мм": "mm", "Кадр": "Crop", "Лист": "Sheet",
+    "Бумага": "Paper", "Фото на листе": "Photos per sheet", "Поля": "Borders", "Оригинал": "Original", "С правками": "Edited", "Оригинал (держать)": "Original (hold)", "Откройте фото": "Open a photo", "Уровни": "Levels", "Кривые": "Curves", "Бегунки под гистограммой: чёрная точка, середина (гамма) и белая точка.": "Handles under the histogram: black point, midtones (gamma) and white point.", "Откройте фото, чтобы менять уровни": "Open a photo to change the levels", "Откройте фото, чтобы менять кривые": "Open a photo to change the curves", "Пресет 1": "Preset 1", "Пресет 2": "Preset 2", "Сохранить": "Save", "Запомнить текущие ползунки в «Пресет %s»; прежний пресет заменится": "Remember the current sliders in Preset %s; the old preset is replaced", "Применить «Пресет %s» к выбранным фото": "Apply Preset %s to the selected photos", "Пока пуст: настройте ползунки и нажмите «Сохранить» под кнопкой": "Empty for now: set the sliders and press Save under the button", "Заменить сохранённый «Пресет %s» текущими настройками?": "Replace the saved Preset %s with the current settings?", "«Пресет %s» сохранён": "Preset %s saved", "Пресет пока пуст: настройте ползунки и нажмите «Сохранить» под кнопкой пресета.": "The preset is empty: set the sliders and press Save under the preset button.", "Открыть фото, папку или документ": "Open photos, a folder or a document", "Документ…": "Document…", "PDF, Word, Excel, PowerPoint: откроется раздел «Документ»": "PDF, Word, Excel, PowerPoint: opens the Document section", "Поля: белая рамка по краю и между фото": "Borders: white margin at the edge and between photos", "мм": "mm", "Кадр": "Crop", "Лист": "Sheet",
     "Сколько фото печатать на одном листе": "How many photos to print on one sheet",
     "Выключено — печать без полей, фото вплотную. Включено — белое поле по краю листа и между фото.": "Off — borderless, photos edge to edge. On — a white margin at the sheet edge and between photos.",
     "Поле по краю листа и расстояние между фото, мм": "Sheet margin and distance between photos, mm",
