@@ -953,6 +953,14 @@ def ask(parent, text, title="PhotoCrop"):
     return QMessageBox.question(parent, title, tr(text), QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes) == QMessageBox.Yes
 
 
+SOFT = [False]        # переключатель в настройках: спрашивать ли подтверждение у обычных действий
+
+
+def ask_soft(parent, text, title="PhotoCrop"):
+    """Подтверждение действия, которое можно отменить (Ctrl+Z) или повторить: по умолчанию не спрашивает."""
+    return True if not SOFT[0] else ask(parent, text, title)
+
+
 def info(parent, text, title="PhotoCrop"):
     QMessageBox.information(parent, title, tr(text))
 
@@ -4393,7 +4401,7 @@ class DocMixin:
                                                        tr("копий"), d["copies"], tr("Листов к печати"), total)
         if cm:
             text += "\n%s: %s" % (tr("Профиль принтера"), cm["name"])
-        if not ask(self, text + "\n\n" + tr("Начать печать?")):
+        if SOFT[0] and not ask(self, text + "\n\n" + tr("Начать печать?")):
             return
         name, src = self.doc["src"].name, self.doc["src"]
         self.cancel.clear()
@@ -4463,6 +4471,7 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         super().__init__()
         st = self.settings = pc.load_settings()
         pc.set_language(st.get("language") or i18n.detect_language(pc.LANGS))      # первый запуск: язык по локали системы
+        SOFT[0] = bool(st.get("confirm_actions", False))
         T.clear()
         T.update(THEMES.get(st.get("theme"), THEMES[DEFAULT_THEME]))
         self.theme_name = st.get("theme") if st.get("theme") in THEMES else DEFAULT_THEME
@@ -5040,7 +5049,7 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         if abs(min(gw, gh) - L["PW"]) > 2 or abs(max(gw, gh) - L["PH"]) > 2:
             text += "\n\n⚠ " + trf("Лист в программе {a}×{b} мм, а в драйвере другая бумага. Изображение будет растянуто на бумагу драйвера.",
                                     a="%g" % L["PW"], b="%g" % L["PH"])
-        if not ask(self, text + "\n\n" + tr("Начать печать?")):
+        if (SOFT[0] or "⚠" in text) and not ask(self, text + "\n\n" + tr("Начать печать?")):       # без предупреждений печать идёт сразу
             return
         c = {"kind": "print", "printer": pr["printer"], "blob": blob, "title": "PhotoCrop", "o": o, "idxs": list(range(len(plan["sheets"]))),
              "plan": plan, "photos": photos, "ppi": pc.resolve_ppi(o, geom), "mode": self.mode(), "cm": cm}
@@ -5988,7 +5997,7 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
             return
         if len(keep) == len(self.files):
             return
-        if not ask(self, "Убрать из списка %d неотмеченных фото?\nФайлы на диске не удаляются." % (len(self.files) - len(keep))):
+        if not ask_soft(self, "Убрать из списка %d неотмеченных фото?\nФайлы на диске не удаляются." % (len(self.files) - len(keep))):
             return
         cur = self.files[self.idx] if self.idx >= 0 else None
         self.files = keep
@@ -6218,7 +6227,7 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         self.redraw()
 
     def reset_all(self):
-        if not self.files or not ask(self, "Сбросить рамки, повороты, число копий и цветокоррекцию у всех фотографий?"):
+        if not self.files or not ask_soft(self, "Сбросить рамки, повороты, число копий и цветокоррекцию у всех фотографий?"):
             return
         self.push_undo(self.files)
         self.states = {f: pc.CropState() for f in self.files}
@@ -6530,7 +6539,7 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         if not files or getattr(self, "_enh_busy", False):
             return
         name = tr("Супер улучшения") if level >= 2 else tr("Улучшения для Epson")
-        if len(files) > 1 and not ask(self, tr("Применить «%s» к %d фото?") % (name, len(files)) + "\n" + tr(
+        if len(files) > 1 and not ask_soft(self, tr("Применить «%s» к %d фото?") % (name, len(files)) + "\n" + tr(
                 "Для каждого фото параметры подберутся отдельно, прежняя коррекция будет сброшена. Отменить можно Ctrl+Z.")):
             return
         self._enh_busy = True
@@ -6581,7 +6590,7 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
     def adj_apply_all(self):
         if self.idx < 0:
             return
-        if len(self.files) > 1 and not ask(self, "Применить настройки этого фото ко всем фотографиям?\n"
+        if len(self.files) > 1 and not ask_soft(self, "Применить настройки этого фото ко всем фотографиям?\n"
                                                  "Их собственная коррекция будет заменена. Отменить можно Ctrl+Z."):
             return
         self.adj_replace(self.cur_adj(), list(self.files))
@@ -6636,7 +6645,7 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
     def adj_reset(self, all_files):
         if self.idx < 0:
             return
-        if all_files and not ask(self, "Сбросить цветокоррекцию у всех фотографий?"):
+        if all_files and not ask_soft(self, "Сбросить цветокоррекцию у всех фотографий?"):
             return
         self.adj_replace({}, list(self.files) if all_files else [self.files[self.idx]])
         self.sync_adj()
@@ -6875,7 +6884,7 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         s = self.s
         self._bleed_flush()
         fresh = pc.load_settings()                    # окно печати пишет свои разделы в тот же файл — не затираем их
-        for k in ("last_dir", "start_dir_mode", "snap_px", "anim", "icc_dir", "trim_l", "trim_t", "trim_r", "trim_b", "check_updates", "skip_update", "doc_paper", "doc_fit", "doc_margin", "doc_cm_on", "doc_icc", "converter_path", "adj_presets"):
+        for k in ("last_dir", "start_dir_mode", "snap_px", "anim", "icc_dir", "trim_l", "trim_t", "trim_r", "trim_b", "check_updates", "skip_update", "doc_paper", "doc_fit", "doc_margin", "doc_cm_on", "doc_icc", "converter_path", "adj_presets", "confirm_actions"):
             if k in self.settings:
                 fresh[k] = self.settings[k]
         fresh.update(format=s["format"], orient=s["orient"], mode=s["mode"], recursive=s["recursive"], subfolder=s["subfolder"],
@@ -7592,7 +7601,10 @@ class SettingsDialog(QDialog):
         seg_dir = Segmented([("Рабочий стол", "desktop"), ("Последняя использованная", "last")],
                             "last" if st.get("start_dir_mode") == "last" else "desktop")
         seg_dir.changed.connect(lambda v: st.__setitem__("start_dir_mode", v))
-        general = card("Общие", row("Язык интерфейса", seg_lang), row("Папка, с которой начинается «Открыть»", seg_dir))
+        sw_conf = Switch(SOFT[0])
+        sw_conf.toggled.connect(lambda on: (st.__setitem__("confirm_actions", bool(on)), SOFT.__setitem__(0, bool(on))))
+        general = card("Общие", row("Язык интерфейса", seg_lang), row("Папка, с которой начинается «Открыть»", seg_dir),
+                       row("Спрашивать подтверждение обычных действий (сброс, применение ко всем, печать)", sw_conf))
         sw_snap = Switch(app.s["snap"])
         sw_snap.toggled.connect(lambda on: app.s.__setitem__("snap", bool(on)))
         sl = QSlider(Qt.Horizontal)
@@ -7774,6 +7786,7 @@ pc.EN.update({
     "Выбрать файл профиля": "Choose a profile file", "Способ рендеринга": "Rendering intent",
     "Применять профиль принтера при сохранении": "Apply the printer profile when saving", "Цветовой профиль принтера": "Printer colour profile",
     "Анимация отправки на печать и сохранения": "Animate sending to print and saving", "Язык интерфейса": "Interface language",
+    "Спрашивать подтверждение обычных действий (сброс, применение ко всем, печать)": "Ask for confirmation of everyday actions (reset, apply to all, print)",
     "Папка, с которой начинается «Открыть»": "Folder that “Open” starts in", "Последняя использованная": "Last used",
     "Кадрирование": "Cropping", "Сила прилипания, пикселей экрана": "Snap strength, screen pixels", "Общие": "General",
     "Настройки хранятся в файле": "Settings are stored in", "Оформление": "Appearance",
