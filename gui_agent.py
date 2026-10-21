@@ -35,9 +35,9 @@ GUI_SPEC = {
                 [("level", "integer", "1 = Enhance, 2 = Super (default 1)."),
                  ("photo", "any", "Photo ref, list of refs, \"all\" or \"checked\". Default: the current photo.")]),
     "auto_levels": ("«Auto» in the levels editor: stretch levels of the current photo to the edges of its histogram.", []),
-    "color_presets": ("The two colour presets («Preset 1/2» buttons): which are saved and what they contain.", []),
-    "color_preset_save": ("Remember the current photo's colour correction in preset n until it is replaced.", [("n", "integer", "1 or 2.")]),
-    "color_preset_apply": ("Apply colour preset n.", [("n", "integer", "1 or 2."),
+    "color_presets": ("The three colour presets («Preset 1/2/3» buttons): which are saved and what they contain.", []),
+    "color_preset_save": ("Remember the current photo's colour correction in preset n until it is replaced.", [("n", "integer", "1, 2 or 3.")]),
+    "color_preset_apply": ("Apply colour preset n.", [("n", "integer", "1, 2 or 3."),
                                                      ("photo", "any", "Photo ref, list, \"all\" or \"checked\". Default: the current photo.")]),
     "copy_adjust": ("Copy the colour correction of the current photo.", []),
     "paste_adjust": ("Paste the copied colour correction.", [("photo", "any", "Photo ref, list, \"all\" or \"checked\". Default: the current photo.")]),
@@ -372,21 +372,22 @@ class GuiAgent:
         return {"levels": pc._jsonable(w.cur_adj().get("levels"))}
 
     def c_color_presets(self, req):
-        return {"presets": pc._jsonable(self.win.settings.get("adj_presets", {}))}
+        return {"presets": pc._jsonable(self.win.settings.get("adj_presets", {})),
+                "names": {str(n): self.win.preset_name(n) for n in (1, 2, 3)}}
 
     def c_preset_save(self, req):
         w = self.win
         n = int(req.get("n") or 0)
-        if n not in (1, 2):
-            raise pc.AgentError("n: 1 или 2", "bad_value")
+        if n not in (1, 2, 3):
+            raise pc.AgentError("n: 1, 2 или 3", "bad_value")
         w.preset_save(n)
         return {"saved": n in [int(k) for k in w.settings.get("adj_presets", {})]}
 
     def c_preset_apply(self, req):
         w = self.win
         n = int(req.get("n") or 0)
-        if n not in (1, 2):
-            raise pc.AgentError("n: 1 или 2", "bad_value")
+        if n not in (1, 2, 3):
+            raise pc.AgentError("n: 1, 2 или 3", "bad_value")
         if str(n) not in w.settings.get("adj_presets", {}):
             raise pc.AgentError(f"Пресет {n} пуст.", "preset_empty")
         files = self.files_of(req)

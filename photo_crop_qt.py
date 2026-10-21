@@ -44,7 +44,7 @@ try:
                                    QVBoxLayout, QGridLayout, QComboBox, QLineEdit, QSlider, QRadioButton, QButtonGroup,
                                    QListView, QStyledItemDelegate, QStyle, QScrollArea, QStackedWidget, QDialog, QFileDialog,
                                    QMessageBox, QProgressBar, QAbstractItemView, QGraphicsDropShadowEffect, QListWidget,
-                                   QListWidgetItem, QMenu, QSizePolicy, QAbstractButton, QTableWidget, QTableWidgetItem, QTabWidget)
+                                   QListWidgetItem, QMenu, QInputDialog, QSizePolicy, QAbstractButton, QTableWidget, QTableWidgetItem, QTabWidget)
     from PySide6.QtSvg import QSvgRenderer
 except ImportError:
     sys.stderr.write("PhotoCrop: не установлена библиотека PySide6.\nВыполните в командной строке:  pip install PySide6\n")
@@ -111,6 +111,7 @@ ICONS = {
     "check_none": '<rect x="3.5" y="3.5" width="17" height="17" rx="4"/>',
     "trash": '<path d="M4.5 7h15M9.5 7V4.8h5V7M6.5 7l.9 12.2h9.2L17.5 7M10 10.5v5.5M14 10.5v5.5"/>',
     "print": '<path d="M7 8V3.8h10V8"/><rect x="3.5" y="8" width="17" height="8.5" rx="2"/><path d="M7 13.5h10v6.7H7z"/>',
+    "edit": '<path d="M4 20h4L19.2 8.8a1.9 1.9 0 0 0 0-2.7l-1.3-1.3a1.9 1.9 0 0 0-2.7 0L4 16z"/><path d="M13.5 6.5l4 4"/>',
     "save": '<path d="M5 3.8h11l3.2 3.2V19a1.2 1.2 0 0 1-1.2 1.2H5A1.2 1.2 0 0 1 3.8 19V5A1.2 1.2 0 0 1 5 3.8z"/><path d="M8 3.8v5h7v-5M7.5 20v-6.5h9V20"/>',
     "doc": '<path d="M6 3.8h8l4 4v12.4H6z"/><path d="M14 3.8V8h4M9 12h6M9 15.5h6"/>',
     "plus": '<path d="M12 5.5v13M5.5 12h13"/>',
@@ -389,6 +390,9 @@ def app_icon():
     for n in (16, 20, 24, 32, 40, 48, 64, 128, 256):
         ic.addPixmap(brand_icon_pixmap(n))
     return ic
+
+
+PRESETS = (1, 2, 3)                                   # кнопки быстрых пресетов цвета
 
 
 class LogoMark(QWidget):
@@ -5360,15 +5364,18 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         b_orig.released.connect(lambda: self.adj_show_original(False))
         b_enh = btn("Улучшить", lambda: self.enhance(1), ico="sparkle", tip="Улучшение для печати на Epson: светлее, чуть контрастнее и резче. Подбирается под каждый снимок. Прежняя коррекция сбрасывается.")
         b_sup = btn("Супер", lambda: self.enhance(2), ico="sparkle", tip="Более сильное улучшение: ярче, сочнее, резче")
-        self.b_pre, self.b_pre_save = {}, {}
-        for n in (1, 2):
+        self.b_pre, self.b_pre_save, self.b_pre_name = {}, {}, {}
+        for n in PRESETS:
             b = btn("Пресет %d" % n, lambda k=n: self.preset_pick(k))
             b.setProperty("kind", "chip")
+            b.setMinimumWidth(0)
             self.b_pre[n] = b
-            self.b_pre_save[n] = btn("Сохранить", lambda k=n: self.preset_save(k), ico="save",
-                                     tip="Запомнить текущие настройки ползунков в этот пресет. Он хранится, пока вы не сохраните в него другие.")
+            self.b_pre_save[n] = ibtn("save", "Запомнить текущие настройки ползунков в этот пресет. Он хранится, пока вы не сохраните в него другие.",
+                                      lambda k=n: self.preset_save(k), 26, True, isize=14)
+            self.b_pre_name[n] = ibtn("edit", "Переименовать пресет", lambda k=n: self.preset_rename(k), 26, True, isize=14)
         quick = card(None, hbox(b_enh, b_sup, b_orig, spacing=6),
-                     hbox(vbox(self.b_pre[1], self.b_pre_save[1], spacing=4), vbox(self.b_pre[2], self.b_pre_save[2], spacing=4), spacing=6),
+                     hbox(*[vbox(self.b_pre[n], hbox(None, self.b_pre_save[n], self.b_pre_name[n], None, spacing=4), spacing=4) for n in PRESETS],
+                          spacing=6),
                      hbox(ibtn("sun", "Авто-яркость", self.auto_bright, 32, True, isize=16),
                           ibtn("copy", "Копировать настройки этого фото", self.adj_copy, 32, True, isize=16),
                           ibtn("paste", "Вставить настройки в это фото", lambda: self.adj_paste(False), 32, True, isize=16),
@@ -6695,10 +6702,38 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         self.adj_replace(self.adj_clipboard, list(self.files) if to_all else [self.files[self.idx]])
         self.sync_adj()
 
+    def preset_name(self, n):
+        return str(self.settings.get("adj_preset_names", {}).get(str(n)) or "").strip() or trf("Пресет {n}", n=n)
+
     def _preset_tips(self):
         for n, b in self.b_pre.items():
-            b.setToolTip(tr("Сохранённые настройки: нажмите, чтобы применить") if str(n) in self.settings.get("adj_presets", {})
-                         else tr("Пресет пуст: настройте ползунки и нажмите «Сохранить» под ним"))
+            full = self.preset_name(n)
+            fm = QFontMetrics(b.font())
+            b.setText(fm.elidedText(full, Qt.ElideRight, 70))
+            saved = str(n) in self.settings.get("adj_presets", {})
+            b.setToolTip(full + ": " + (tr("Сохранённые настройки: нажмите, чтобы применить") if saved
+                                        else tr("Пресет пуст: настройте ползунки и нажмите «Сохранить» под ним")))
+
+    def preset_rename(self, n, name=None):
+        """Своё имя пресета (до 20 символов). Пустое имя возвращает «Пресет n»."""
+        if name is None:
+            dlg = QInputDialog(self)
+            dlg.setWindowTitle(tr("Переименовать пресет"))
+            dlg.setLabelText(trf("Название пресета {n}", n=n))
+            dlg.setTextValue(self.preset_name(n) if str(n) in self.settings.get("adj_preset_names", {}) else "")
+            dlg.setOkButtonText(tr("Готово"))
+            dlg.setCancelButtonText(tr("Отмена"))
+            if not dlg.exec():
+                return
+            name = dlg.textValue()
+        names = self.settings.setdefault("adj_preset_names", {})
+        name = " ".join(str(name).split())[:20]
+        if name:
+            names[str(n)] = name
+        else:
+            names.pop(str(n), None)
+        self.persist()
+        self._preset_tips()
 
     def preset_pick(self, n):
         """Применяет сохранённый пресет к фото (или к отмеченным, как задано переключателем выше)."""
@@ -6969,7 +7004,7 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         s = self.s
         self._bleed_flush()
         fresh = pc.load_settings()                    # окно печати пишет свои разделы в тот же файл — не затираем их
-        for k in ("last_dir", "start_dir_mode", "snap_px", "anim", "icc_dir", "check_updates", "skip_update", "doc_paper", "doc_fit", "doc_margin", "doc_cm_on", "doc_icc", "converter_path", "adj_presets", "confirm_actions", "agent_enabled", "agent_token", "agent_port", "agent_allow_print", "agent_max_sheets", "agent_confirm_print"):
+        for k in ("last_dir", "start_dir_mode", "snap_px", "anim", "icc_dir", "check_updates", "skip_update", "doc_paper", "doc_fit", "doc_margin", "doc_cm_on", "doc_icc", "converter_path", "adj_presets", "adj_preset_names", "confirm_actions", "agent_enabled", "agent_token", "agent_port", "agent_allow_print", "agent_max_sheets", "agent_confirm_print"):
             if k in self.settings:
                 fresh[k] = self.settings[k]
         fresh.update(format=s["format"], orient=s["orient"], mode=s["mode"], recursive=s["recursive"], subfolder=s["subfolder"],
@@ -7901,7 +7936,7 @@ pc.EN.update({
     "Красный": "Red", "Жёлтый": "Yellow", "Зелёный": "Green", "Голубой": "Cyan", "Синий": "Blue", "Пурпурный": "Magenta",
     "Оттенок": "Hue", "Насыщенность": "Saturation", "Яркость": "Brightness",
     "Серые и нейтральные цвета не затрагиваются.": "Greys and neutral colours are left alone.",
-    "Пресет 1": "Preset 1", "Пресет 2": "Preset 2", "Сохранить": "Save", "Сохранённые настройки: нажмите, чтобы применить": "Saved settings: click to apply", "Пресет пуст: настройте ползунки и нажмите «Сохранить» под ним": "Preset is empty: set the sliders and press Save under it", "Запомнить текущие настройки ползунков в этот пресет. Он хранится, пока вы не сохраните в него другие.": "Store the current slider values in this preset. It stays until you save other values into it.", "Цвет на экране": "Colour on screen", "Профиль принтера": "Printer profile", "Выбрать профиль…": "Choose profile…",
+    "Пресет 1": "Preset 1", "Пресет 2": "Preset 2", "Пресет 3": "Preset 3", "Переименовать пресет": "Rename preset", "Сохранить": "Save", "Сохранённые настройки: нажмите, чтобы применить": "Saved settings: click to apply", "Пресет пуст: настройте ползунки и нажмите «Сохранить» под ним": "Preset is empty: set the sliders and press Save under it", "Запомнить текущие настройки ползунков в этот пресет. Он хранится, пока вы не сохраните в него другие.": "Store the current slider values in this preset. It stays until you save other values into it.", "Цвет на экране": "Colour on screen", "Профиль принтера": "Printer profile", "Выбрать профиль…": "Choose profile…",
     "Имитация печати на экране": "Simulate print on screen", "Показать цвета вне охвата": "Show out-of-gamut colours",
     "Параметры": "Settings", "это фото": "this photo", "все отмеченные": "all checked", "Менять": "Apply to",
     "Татарская": "Tatar", "Марийская": "Mari", "Основное": "Basic", "Детали": "Detail", "нет": "off", "контраст": "contrast", "цвет": "colour", "Ч/Б": "B/W", "Авто-уровни": "Auto levels",
@@ -7963,7 +7998,7 @@ pc.EN.update({
     "У вас последняя версия:": "You have the latest version:",
     "Не удалось проверить обновления. Проверьте подключение к интернету.": "Could not check for updates. Check your internet connection.",
 })
-pc.EN_FMT.update({"Вход {a} → выход {b}": "Input {a} → output {b}", "Пресет {n} пока пуст. Настройте ползунки и нажмите «Сохранить» под ним.": "Preset {n} is empty. Set the sliders and press Save under it.", "Заменить сохранённый пресет {n} текущими настройками?": "Replace saved preset {n} with the current settings?", "Применён пресет {n}": "Preset {n} applied", "Пресет {n} сохранён": "Preset {n} saved", "Страниц: {n}": "Pages: {n}", "Открыть документ «{name}»": "Open document “{name}”"})
+pc.EN_FMT.update({"Пресет {n}": "Preset {n}", "Название пресета {n}": "Name of preset {n}", "Вход {a} → выход {b}": "Input {a} → output {b}", "Пресет {n} пока пуст. Настройте ползунки и нажмите «Сохранить» под ним.": "Preset {n} is empty. Set the sliders and press Save under it.", "Заменить сохранённый пресет {n} текущими настройками?": "Replace saved preset {n} with the current settings?", "Применён пресет {n}": "Preset {n} applied", "Пресет {n} сохранён": "Preset {n} saved", "Страниц: {n}": "Pages: {n}", "Открыть документ «{name}»": "Open document “{name}”"})
 pc.EN.update({"Бумага: фото, листов": "Paper: photos, sheets", "Бумага: документы, листов": "Paper: documents, sheets", "Тип": "Type"})
 pc.EN.update({
     "Документ": "Document", "PDF, Word, Excel, PowerPoint и другие офисные файлы": "PDF, Word, Excel, PowerPoint and other office files",
@@ -8229,6 +8264,14 @@ def selftest(app):
         win.preset_pick(1)
         if win.cur_adj().get("bright") != 17.0 or pc.load_settings().get("adj_presets", {}).get("2", {}).get("bright") != -5.0:
             raise RuntimeError("пресеты перепутались или не сохранились в файл")
+        win.adj_set({"bright": 3.0})
+        win.preset_save(3)
+        win.preset_rename(3, "  Тёплый   тон ")
+        if win.preset_name(3) != "Тёплый тон" or not win.b_pre[3].text().startswith("Тёпл") or pc.load_settings().get("adj_preset_names", {}).get("3") != "Тёплый тон":
+            raise RuntimeError("пресет 3 не переименовался")
+        win.preset_rename(3, "")
+        if win.b_pre[3].text() != win.preset_name(3) or "Тёпл" in win.b_pre[3].text():
+            raise RuntimeError("пустое имя должно вернуть «Пресет 3»")
         win.adj_replace({}, [win.files[win.idx]])
         win.sync_adj()
     step("пресеты коррекции: сохранить и применить", presets_flow)
