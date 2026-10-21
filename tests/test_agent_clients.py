@@ -79,8 +79,8 @@ class ClientsTest(unittest.TestCase):
         fake = lambda cmd, **kw: (calls.append(cmd), types.SimpleNamespace(returncode=0, stdout="ok", stderr=""))[1]
         bindir = tempfile.mkdtemp(prefix="pc_bin_")
         for exe in ("openclaw", "claude"):
-            f = Path(bindir) / exe
-            f.write_text("#!/bin/sh\n")
+            f = Path(bindir) / (exe + ".bat" if os.name == "nt" else exe)      # на Windows PATHEXT находит только .bat/.exe
+            f.write_text("@echo off\n" if os.name == "nt" else "#!/bin/sh\n")
             f.chmod(0o755)
         old = os.environ["PATH"]
         os.environ["PATH"] = bindir + os.pathsep + old
