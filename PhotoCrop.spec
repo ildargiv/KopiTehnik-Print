@@ -3,7 +3,7 @@ from PyInstaller.utils.hooks import collect_all
 
 datas = []
 binaries = []
-hiddenimports = ['smart_crop', 'i18n', 'i18n_more']
+hiddenimports = ['smart_crop', 'i18n', 'i18n_more', 'color_tools']
 tmp_ret = collect_all('onnxruntime')
 datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
 

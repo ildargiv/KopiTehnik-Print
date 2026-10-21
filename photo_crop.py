@@ -38,6 +38,8 @@ import threading
 import time
 from pathlib import Path
 
+import color_tools
+
 try:
     import tkinter as tk
     from tkinter import ttk, filedialog, messagebox, simpledialog
@@ -535,11 +537,12 @@ def render(img, paper, st, mode, dpi, resize):
 
 
 ADJ_KEYS = ("bright", "contrast", "gamma", "shadows", "highlights", "sat", "vib", "temp", "tint", "r", "g", "b",
-            "auto", "bw", "sepia", "denoise", "sharp", "sharp_radius", "sharp_thr")
+            "auto", "bw", "sepia", "denoise", "sharp", "sharp_radius", "sharp_thr", "levels", "curves", "selcol")
 NEUTRAL_ADJ = {"bright": 0.0, "contrast": 0.0, "gamma": 1.0, "shadows": 0.0, "highlights": 0.0,
                "sat": 0.0, "vib": 0.0, "temp": 0.0, "tint": 0.0, "r": 0.0, "g": 0.0, "b": 0.0,
                "auto": "", "bw": False, "sepia": False, "denoise": 0.0,
-               "sharp": 0.0, "sharp_radius": 1.0, "sharp_thr": 2}
+               "sharp": 0.0, "sharp_radius": 1.0, "sharp_thr": 2,
+               "levels": (), "curves": (), "selcol": ()}          # уровни, кривые, выборочный цвет: см. color_tools.py
 ADJ_LIMITS = {"bright": (-100, 100), "contrast": (-100, 100), "gamma": (0.2, 5), "shadows": (-100, 100),
               "highlights": (-100, 100), "sat": (-100, 100), "vib": (-100, 100), "temp": (-100, 100),
               "tint": (-100, 100), "r": (-100, 100), "g": (-100, 100), "b": (-100, 100), "denoise": (0, 100),
@@ -563,7 +566,9 @@ def clean_adj(a):
         if k not in NEUTRAL_ADJ:
             continue
         n = NEUTRAL_ADJ[k]
-        if isinstance(n, bool):
+        if k in color_tools.NORMALIZE:
+            v = color_tools.NORMALIZE[k](v)
+        elif isinstance(n, bool):
             v = bool(v)
         elif k == "auto":
             v = v if v in AUTO_MODES else ""
@@ -637,6 +642,7 @@ def build_luts(a, bounds=None):
     inv = 1.0 / max(0.05, a["gamma"])
     sh, hl = 0.25 * a["shadows"] / 100.0, 0.25 * a["highlights"] / 100.0
     luts = []
+    extra = color_tools.extra_luts(a)                  # уровни и кривые идут после основных ползунков
     for c in range(3):
         lo, hi = (bounds[0][c], bounds[1][c]) if bounds else (0, 255)
         tab = []
@@ -653,7 +659,7 @@ def build_luts(a, bounds=None):
                 x += sh * (1 - x) ** 2 * _smooth(x / 0.12) + hl * x * x * _smooth((1 - x) / 0.12)
             v = int(round(255 * min(1.0, max(0.0, x))))
             tab.append(max(v, tab[-1]) if tab else v)   # таблица не убывает (при больших значениях яркости)
-        luts.append(tab)
+        luts.append([extra[c][v] for v in tab] if extra else tab)
     return luts
 
 
@@ -1371,14 +1377,38 @@ def sheet_capacity(size, area, gap, rotate_fit):
     return max(1, len(res[0])) if res else 1
 
 
-def make_edge_test(w_mm, h_mm, ppi=300):
-    """Шкала краёв: чёрточки через 0,5 мм от края фото, цифры в мм. После печати без полей последняя различимая цифра
-    у каждого края = сколько мм срезал принтер."""
+EDGE_TEXT = {      # подпись тестового листа: (заголовок, подсказка)
+    "ru": ("Шкала краёв: цифра = мм от края фото", "Последняя видимая цифра у края = сколько мм срезал принтер"),
+    "en": ("Edge scale: number = mm from the photo edge", "Last visible number at an edge = mm the printer cut off"),
+    "de": ("Randskala: Zahl = mm vom Fotorand", "Letzte sichtbare Zahl am Rand = vom Drucker abgeschnittene mm"),
+    "es": ("Escala de bordes: número = mm desde el borde", "Último número visible = mm que recortó la impresora"),
+    "tr": ("Kenar skalası: sayı = fotoğraf kenarından mm", "Kenarda görünen son sayı = yazıcının kestiği mm"),
+}
+
+
+def _font_bold(px):
+    key = ("b", px)
+    if key not in _FONTS:
+        f = None
+        for name in ("arialbd.ttf", "segoeuib.ttf", "DejaVuSans-Bold.ttf", "LiberationSans-Bold.ttf"):
+            try:
+                f = ImageFont.truetype(name, px)
+                break
+            except Exception:
+                continue
+        _FONTS[key] = f or _font(px)
+    return _FONTS[key]
+
+
+def make_edge_test(w_mm, h_mm, ppi=300, lang=None):
+    """Шкала краёв: чёрточки через 0,5 мм от края фото, крупные жирные цифры в мм. После печати без полей последняя различимая
+    цифра у каждого края = сколько мм срезал принтер. Подпись на 5 языках: язык интерфейса — крупнее и первым."""
     W, H = max(1, round(w_mm / 25.4 * ppi)), max(1, round(h_mm / 25.4 * ppi))
     im = Image.new("RGB", (W, H), "white")
     d = ImageDraw.Draw(im)
     px = ppi / 25.4
-    f = _font(max(10, round(px * 2.2)))
+    f = _font_bold(max(12, round(px * 3.8)))          # цифры ~3,8 мм высотой: читаются без лупы
+    halo = max(1, round(px * 0.35))                    # белая окантовка: цифра не сливается с чёрточками
     d.rectangle((0, 0, W - 1, H - 1), outline="black", width=max(1, round(px * 0.15)))
     for k in range(0, 21):                            # 0 … 10 мм через 0,5
         mm = k / 2.0
@@ -1391,16 +1421,47 @@ def make_edge_test(w_mm, h_mm, ppi=300):
             d.line((xs, H - 1 - o_, xs, H - 1 - o_ - ln), fill="black", width=wd)  # низ
             d.line((o_, ys, o_ + ln, ys), fill="black", width=wd)                 # лево
             d.line((W - 1 - o_, ys, W - 1 - o_ - ln, ys), fill="black", width=wd)  # право
-        if k % 2 == 0 and k > 0:
-            t = str(k // 2)
-            d.text((W * 0.5 + px * 1.0, o_ + px * 0.2), t, fill="black", font=f)
-            d.text((W * 0.5 + px * 1.0, H - o_ - px * 2.8), t, fill="black", font=f)
-            d.text((o_ + px * 0.4, H * 0.5 - px * 4.0), t, fill="black", font=f)
-            d.text((W - o_ - px * 2.2, H * 0.5 - px * 4.0), t, fill="black", font=f)
+    kw = dict(fill="black", font=f, stroke_width=halo, stroke_fill="white")
+    lw = max(1, round(px * 0.18))
+    for m in range(1, 11):                             # цифры лесенкой: каждая стоит под своей линией глубиной m мм, друг на друга не налезают
+        o_, t = m * px, str(m)
+        bw = d.textbbox((0, 0), t, font=f)
+        tw, th = bw[2] - bw[0], bw[3] - bw[1]
+        fx, fy = 0.14 + 0.72 * (m - 1) / 9, 0.14 + 0.72 * (m - 1) / 9
+        half = max(tw, px * 3) / 2 + px * 0.6
+        x, y = W * fx, H * fy
+        d.line((x - half, o_, x + half, o_), fill="black", width=lw)                        # верх: линия m мм от края, цифра под ней
+        d.text((x - tw / 2 - bw[0], o_ + px * 0.5 - bw[1]), t, **kw)
+        d.line((x - half, H - 1 - o_, x + half, H - 1 - o_), fill="black", width=lw)        # низ: цифра над линией
+        d.text((x - tw / 2 - bw[0], H - 1 - o_ - px * 0.5 - th - bw[1]), t, **kw)
+        half = max(th, px * 3) / 2 + px * 0.6
+        d.line((o_, y - half, o_, y + half), fill="black", width=lw)                        # лево: цифра правее линии
+        d.text((o_ + px * 0.5 - bw[0], y - th / 2 - bw[1]), t, **kw)
+        d.line((W - 1 - o_, y - half, W - 1 - o_, y + half), fill="black", width=lw)        # право: цифра левее линии
+        d.text((W - 1 - o_ - px * 0.5 - tw - bw[0], y - th / 2 - bw[1]), t, **kw)
     c = (W // 2, H // 2)
     d.line((c[0] - px * 8, c[1], c[0] + px * 8, c[1]), fill="red", width=max(1, round(px * 0.15)))
     d.line((c[0], c[1] - px * 8, c[0], c[1] + px * 8), fill="red", width=max(1, round(px * 0.15)))
-    d.text((c[0] - px * 18, c[1] + px * 10), "Шкала краёв: цифра = мм от края фото", fill="black", font=f)
+    first = lang if lang in EDGE_TEXT else (get_language() if get_language() in EDGE_TEXT else "en")
+    order = [first] + [x for x in EDGE_TEXT if x != first]
+    lines = [(EDGE_TEXT[first][0], 3.4, True), (EDGE_TEXT[first][1], 2.6, False)] + [(EDGE_TEXT[x][0], 2.6, False) for x in order[1:]]
+    maxw, items = W * 0.64, []
+    for text, mm_, bold in lines:                      # каждую строку сжимаем, чтобы она влезла по ширине листа
+        size = max(8, round(px * mm_))
+        while size > 8:
+            ft = (_font_bold if bold else _font)(size)
+            if d.textlength(text, font=ft) <= maxw:
+                break
+            size -= 1
+        items.append((text, (_font_bold if bold else _font)(size), size))
+    gap = px * 0.8
+    total = sum(sz for _, _, sz in items) + gap * (len(items) - 1)
+    y = min(H - total - px * 12, c[1] + px * 10)
+    box = (W * 0.18 - px, y - px, W * 0.82 + px, y + total + px)
+    d.rectangle(box, fill="white", outline="black", width=max(1, round(px * 0.1)))
+    for text, ft, sz in items:
+        d.text((W / 2, y), text, fill="black", font=ft, anchor="ma")
+        y += sz + gap
     return im
 
 
@@ -1580,6 +1641,8 @@ def adjust_color(img, o, ref=None):
         else:          # приглушаем в основном самые насыщенные
             dull = ImageEnhance.Color(img).enhance(max(0.0, 1 + 1.5 * v))
             img = Image.composite(dull, img, s_ch)
+    if a["selcol"]:
+        img = color_tools.selective_color(img, a["selcol"])
     if a["bw"] or a["sepia"] or bw_auto:
         g = img.convert("L")
         if bw_auto:                                   # авто ч/б: мягкая S-кривая — снимок «оживает», белый и чёрный на месте
@@ -2143,7 +2206,7 @@ def run_sheets_job(c, progress, cancel):
             pw, ph = geom.get("paper", (0, 0))
             names = [Path(c["photos"][pl["photo"]]["path"]).name for pl in c["plan"]["sheets"][k]]
             print_stats.record(c["printer"], len(names), "%gx%g" % (round(pw, 1), round(ph, 1)), c.get("mode", ""),
-                               c.get("source", "app"), copies, names)
+                               c.get("source", "app"), copies, names, kind="photo")
         except Exception:
             pass
 
@@ -2480,6 +2543,21 @@ def spooler_pause_printer(name, pause):
 
 # ---- анализ изображения (числа вместо глаз)
 
+def _hue_shares(im):
+    """Доли кадра: тона кожи, неба (голубой–синий) и зелени. HSV по PIL: оттенок 0..255 (красный 0, жёлтый 43, зелёный 85, голубой 128, синий 170)."""
+    try:
+        import numpy as np
+        a = np.asarray(im.convert("HSV"))
+        h, sa, v = a[..., 0].astype(np.int16), a[..., 1], a[..., 2]
+        n = float(h.size) or 1.0
+        skin = ((h >= 4) & (h <= 24) & (sa >= 50) & (sa <= 190) & (v >= 80)).sum() / n
+        sky = ((h >= 118) & (h <= 185) & (sa >= 40) & (v >= 90)).sum() / n
+        green = ((h >= 45) & (h <= 112) & (sa >= 45) & (v >= 50)).sum() / n
+        return round(float(skin), 3), round(float(sky), 3), round(float(green), 3)
+    except Exception:
+        return 0.0, 0.0, 0.0
+
+
 def analyze_image(img):
     from PIL import ImageStat
     im = to_rgb(img).copy()                          # не трогаем чужую картинку (предпросмотр на экране)
@@ -2506,8 +2584,10 @@ def analyze_image(img):
     wsum = sum(v * v for v in px) or 1.0
     fx = sum((i % 48 + 0.5) / 48 * v * v for i, v in enumerate(px)) / wsum
     fy = sum((i // 48 + 0.5) / 48 * v * v for i, v in enumerate(px)) / wsum
+    shares = _hue_shares(im)
     return {"size": list(img.size), "mean_luma": round(st.mean[0], 1), "contrast_std": round(st.stddev[0], 1),
-            "p1": pct(0.01), "p50": pct(0.5), "p99": pct(0.99),
+            "p1": pct(0.01), "p50": pct(0.5), "p99": pct(0.99), "p01": pct(0.001), "p999": pct(0.999),
+            "skin_share": shares[0], "sky_share": shares[1], "green_share": shares[2],
             "shadow_clip_pct": round(sum(hist[:6]) / n * 100, 2), "highlight_clip_pct": round(sum(hist[250:]) / n * 100, 2),
             "saturation": round(sat, 3), "mean_rgb": [round(v, 1) for v in rgb], "warmth_r_minus_b": round(rgb[0] - rgb[2], 1),
             "sharpness": round(sharp, 2), "focus_point": [round(fx, 3), round(fy, 3)],
@@ -2525,45 +2605,89 @@ def suggest_adjust(an, strength=1.0):
     return {"bright": round(bright * strength, 1), "contrast": round(max(0.0, contrast) * strength, 1)}
 
 
-ENHANCE_KEYS = ("bright", "contrast", "shadows", "highlights", "sat", "vib", "auto", "denoise", "sharp", "sharp_radius", "sharp_thr")
+ENHANCE_KEYS = ("bright", "contrast", "shadows", "highlights", "sat", "vib", "auto", "denoise", "sharp", "sharp_radius", "sharp_thr",
+                "levels", "curves", "selcol")
+
+
+def halve_selcol_sat(sel):
+    """Вдвое уменьшает положительную насыщенность выборочного цвета (цвета выходят за охват принтера)."""
+    return tuple((h, s / 2 if s > 0 else s, l) for h, s, l in color_tools.selcol_full(sel))
 
 
 def enhance_adj(an, level=1):
     """Улучшение под фотопечать на струйном принтере Epson (шестицветные водные чернила, например L8050) с
-    индивидуальным ICC-профилем. Профиль уже отвечает за точность цвета, поэтому здесь правятся только то, что
-    профиль не исправляет: общая светлота (отпечаток темнее экрана), детали в тенях и светах, мягкая красочность
-    и резкость под размер печати. level 1 — осторожно, level 2 — сильнее и подстраивается под снимок."""
+    индивидуальным ICC-профилем. Профиль отвечает за точность цвета, поэтому правится то, что он не исправляет:
+    светлота (отпечаток темнее экрана), детали в тенях и светах, красочность, резкость под размер печати.
+    Инструменты: уровни (точки чёрного и белого по краям гистограммы и гамма вместо сдвига яркости), мягкая S-кривая
+    вместо контраста, выборочный цвет (небо и зелень насыщеннее, кожа бережно), красочность и резкость.
+    level 1 — осторожно, level 2 — сильнее и подстраивается под снимок. Прежняя коррекция фото сбрасывается целиком."""
     lvl = 2 if level >= 2 else 1
     mean0 = mean = max(1.0, an["mean_luma"])
     rng = max(1.0, an["p99"] - an["p1"])
+    lo_pt = an.get("p01", an["p1"])                  # края гистограммы без пыли (0,1 %)
+    hi_pt = an.get("p999", an["p99"])
+    std = an.get("contrast_std", 55.0)
     target = 126.0 if lvl == 2 else 122.0
-    cap = 24.0 if lvl == 2 else 14.0
-    # растягиваем уровни только у плоских снимков средней светлоты: у светлых (high-key) растяжение ставит
-    # «чёрную точку» и затемняет весь кадр, у тёмных (ночь) — ломает настроение
+    out = {}
+    # --- уровни: точки чёрного и белого. Растягиваем только плоские снимки средней светлоты: у светлых (high-key) растяжение
+    # ставит «чёрную точку» и затемняет кадр, у тёмных (ночь) — ломает настроение. Точки не заходят в данные дальше 0,1 % пикселей.
+    ib, iw = 0, 255
     stretch = 120 <= rng < (200 if lvl == 1 else 225) and 80 <= mean0 <= 150
-    if stretch:                                      # яркость считаем уже после растяжения уровней
-        mean = max(1.0, min(254.0, (mean - an["p1"]) / rng * 255.0))
-    # улучшение для печати никогда не затемняет: отпечаток и так темнее экрана
-    bright = max(0.0, (target - mean) / target * 100.0 * (0.55 if lvl == 2 else 0.4))
-    if mean0 < 170:
-        bright += 5.0 if lvl == 2 else 3.0           # запас на то, что бумага темнее светящегося экрана
-    if mean0 < 75:                                   # тёмный (night/low-key): оставляем настроение кадра
-        bright = min(bright, 14.0 if lvl == 2 else 8.0)
-    bright = min(cap, bright)
+    if stretch:
+        k = 0.7 if lvl == 1 else 0.9
+        ib = int(min(40, max(0, lo_pt)) * k)
+        iw = int(255 - min(40, max(0, 255 - hi_pt)) * k)
+        if iw - ib < 120:
+            ib, iw = 0, 255
+        if ib <= 2:
+            ib = 0
+        if iw >= 253:
+            iw = 255
+        mean = max(1.0, min(254.0, (mean - ib) / float(max(1, iw - ib)) * 255.0))
+    # --- светлота: гамма уровней вместо сдвига яркости. Улучшение для печати никогда не затемняет: отпечаток и так темнее экрана
+    want = target + (5.0 if mean0 < 170 else 0.0) * (1.0 if lvl == 2 else 0.6)
+    if mean0 < 75:                                   # тёмный кадр (night/low-key): оставляем настроение
+        want = min(want, mean + (12.0 if lvl == 2 else 7.0))
+    g_cap = 1.38 if lvl == 2 else 1.22
+    gamma = 1.0
+    if mean < want:
+        gamma = math.log(min(0.95, mean / 255.0)) / math.log(min(0.95, want / 255.0)) if mean > 1 else 1.0
+        gamma = min(g_cap, max(1.0, 1.0 + (gamma - 1.0) * (0.85 if lvl == 2 else 0.7)))
+    gamma = round(gamma, 2) if gamma > 1.01 else 1.0
+    if ib or iw < 255 or gamma != 1.0:
+        out["levels"] = [(ib, gamma, iw, 0, 255)]
     shadows = (10.0 if lvl == 1 else 16.0) + min(12.0, an["shadow_clip_pct"] * 1.5)
     if mean0 > 150 or mean0 < 75:                    # светлый снимок: тени и так открыты; ночной: не высветляем черноту
         shadows *= 0.5
     clip = an["highlight_clip_pct"]                  # света приглушаем, только когда они действительно выбиты
     highlights = -min(10.0 if lvl == 1 else 14.0, max(0.0, clip - 0.5) * (1.5 if lvl == 1 else 2.0))
-    out = {"bright": bright, "shadows": shadows, "highlights": highlights,
-           "contrast": 5.0 if lvl == 1 else 10.0}
-    if mean0 < 90:                                   # тёмный кадр: контраст вокруг середины только вдавит тени в чёрное
-        out["contrast"] = 0.0
-    if stretch:                                      # плоский снимок: растянуть уровни
-        out["auto"] = "contrast"
-        out["contrast"] = out["contrast"] * 0.5
+    out["shadows"], out["highlights"] = shadows, highlights
+    # --- кривая: мягкая S вместо контраста. Чем контрастнее снимок сам, тем слабее; тёмный кадр S-образно не давим
+    if mean0 >= 90:
+        amp = (3.0 if lvl == 1 else 6.0) * (1.0 - min(1.0, max(0.0, (std - 45.0) / 40.0)))
+        if amp >= 1.0:
+            out["curves"] = [[(0, 0), (64, round(64 - amp)), (192, round(192 + amp)), (255, 255)]]
+    # --- красочность и выборочный цвет
+    skin, sky, green = an.get("skin_share", 0.0), an.get("sky_share", 0.0), an.get("green_share", 0.0)
     dull = an["saturation"] < 0.22
-    out["vib"] = (8.0 if lvl == 1 else 18.0) + (6.0 if dull and lvl == 2 else 0.0)
+    vib = (8.0 if lvl == 1 else 18.0) + (6.0 if dull and lvl == 2 else 0.0)
+    if skin > 0.04:                                  # люди: общую красочность уменьшаем, кожа не должна «гореть»
+        vib *= 0.6 if skin < 0.12 else 0.4
+    out["vib"] = vib
+    f = 1.0 if lvl == 1 else 1.7                     # во сколько раз сильнее выборочный цвет на втором уровне
+    sel = {}
+    if sky > 0.08:                                   # небо: синее и чуть глубже
+        k = min(1.0, sky / 0.25)
+        sel["B"] = (0, 8 * f * k, -3 * f * k)
+        sel["C"] = (0, 5 * f * k, 0)
+    if green > 0.08:                                 # зелень: сочнее
+        k = min(1.0, green / 0.25)
+        sel["G"] = (0, 7 * f * k, 0)
+        sel["Y"] = (0, 3 * f * k, 0)
+    if skin > 0.04:                                  # кожа: красные и оранжевые не насыщаем, чуть светлее
+        sel["R"] = (0, -3 * f, 2.0 if lvl == 2 else 0)
+    if sel:
+        out["selcol"] = [sel.get(c, color_tools.SEL_NEUTRAL) for c in color_tools.SEL_COLORS]
     if lvl == 2:
         out["sat"] = 4.0 if dull else 0.0
         if mean < 80:
@@ -3597,6 +3721,11 @@ class AgentSession:
                         v = "" if v in ("", "off", "none", "false", "0") else v
                         if v not in AUTO_MODES:
                             raise AgentError("auto: contrast | color | bw | off", "bad_value")
+                    elif k in color_tools.NORMALIZE:      # levels / curves / selcol: JSON-строка или список
+                        try:
+                            v = json.loads(v) if isinstance(v, str) else v
+                        except ValueError:
+                            raise AgentError(f"{k}: нужен JSON-список, см. AGENT.md", "bad_value")
                     elif isinstance(NEUTRAL_ADJ[k], bool):
                         v = _truthy(v)
                     else:

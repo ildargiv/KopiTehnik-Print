@@ -22,8 +22,11 @@ import traceback
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+if "--selftest" in sys.argv:                                # самопроверка пишет настройки, пресеты и журнал: только во временную папку,
+    os.environ["APPDATA"] = tempfile.mkdtemp(prefix="photocrop_selftest_")      # настоящие настройки пользователя не трогаем
 import print_stats as ps                                  # noqa: E402  (счётчик печати)
 import photo_crop as pc                                    # noqa: E402  (движок программы)
+import color_tools as ct                                   # noqa: E402  (уровни, кривые, выборочный цвет)
 import i18n                                                # noqa: E402  (переводы интерфейса)
 
 if len(sys.argv) > 1 and sys.argv[1] in ("agent", "mcp", "mcp-config", "--print-project"):
@@ -32,8 +35,9 @@ if len(sys.argv) > 1 and sys.argv[1] in ("agent", "mcp", "mcp-config", "--print-
 
 try:
     from PySide6.QtCore import (Qt, QSize, QRect, QRectF, QPointF, QTimer, Signal, QObject, QThreadPool, QRunnable,
-                                QAbstractListModel, QModelIndex, QEvent, QPropertyAnimation, QEasingCurve, Property, QByteArray)
-    from PySide6.QtGui import (QPainter, QColor, QPen, QBrush, QPixmap, QImage, QIcon, QPolygonF, QPainterPath, QFont,
+                                QAbstractListModel, QModelIndex, QEvent, QPropertyAnimation, QEasingCurve, Property, QByteArray,
+                                QVariantAnimation)
+    from PySide6.QtGui import (QPainter, QColor, QPen, QBrush, QPixmap, QImage, QIcon, QPolygonF, QPainterPath, QFont, QIntValidator, QLinearGradient, QRadialGradient, QFontMetricsF,
                                QKeySequence, QShortcut, QFontMetrics, QTransform)
     from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QFrame, QLabel, QPushButton, QToolButton, QHBoxLayout,
                                    QVBoxLayout, QGridLayout, QComboBox, QLineEdit, QSlider, QRadioButton, QButtonGroup,
@@ -107,6 +111,7 @@ ICONS = {
     "trash": '<path d="M4.5 7h15M9.5 7V4.8h5V7M6.5 7l.9 12.2h9.2L17.5 7M10 10.5v5.5M14 10.5v5.5"/>',
     "print": '<path d="M7 8V3.8h10V8"/><rect x="3.5" y="8" width="17" height="8.5" rx="2"/><path d="M7 13.5h10v6.7H7z"/>',
     "save": '<path d="M5 3.8h11l3.2 3.2V19a1.2 1.2 0 0 1-1.2 1.2H5A1.2 1.2 0 0 1 3.8 19V5A1.2 1.2 0 0 1 5 3.8z"/><path d="M8 3.8v5h7v-5M7.5 20v-6.5h9V20"/>',
+    "doc": '<path d="M6 3.8h8l4 4v12.4H6z"/><path d="M14 3.8V8h4M9 12h6M9 15.5h6"/>',
     "plus": '<path d="M12 5.5v13M5.5 12h13"/>',
     "minus": '<path d="M5.5 12h13"/>',
     "check": '<path d="M5.5 12.5l4.2 4.2 8.8-9.2"/>',
@@ -241,17 +246,19 @@ def build_qss(t):
     #copies QToolButton:hover {{ background: rgba(0,0,0,0.18); }}
     #copies QToolButton:pressed {{ background: rgba(0,0,0,0.30); }}
     #sep {{ background: {t['border']}; }}
-    QPushButton {{ background: {t['raised']}; border: 1px solid {t['border']}; border-radius: 9px; padding: 7px 14px; font-weight: 500; }}
+    QPushButton {{ background: {t['raised']}; border: 1px solid {t['border']}; border-radius: 9px; padding: 9px 16px; min-height: 18px; font-size: 13px; font-weight: 500; }}
     QPushButton:hover {{ background: {t['hover']}; }}
     QPushButton:pressed {{ background: {t['border']}; }}
     QPushButton:disabled {{ color: {t['muted']}; }}
     QPushButton[kind="primary"] {{ background: {t['accent']}; border-color: {t['accent']}; color: {t['accent_text']}; font-weight: 600; }}
     QPushButton[kind="primary"]:hover {{ background: {acc_hi}; border-color: {acc_hi}; }}
     QPushButton[kind="primary"]:disabled {{ background: {t['raised']}; border-color: {t['border']}; color: {t['muted']}; }}
-    QPushButton[big="true"] {{ padding: 11px 14px; border-radius: 11px; font-size: 14px; }}
-    QPushButton[kind="seg"] {{ background: transparent; border: 1px solid transparent; border-radius: 7px; padding: 5px 12px; color: {t['muted']}; font-weight: 400; }}
+    QPushButton[big="true"] {{ padding: 13px 16px; border-radius: 11px; font-size: 14px; }}
+    QPushButton[kind="seg"] {{ background: transparent; border: 1px solid transparent; border-radius: 7px; padding: 6px 13px; color: {t['muted']}; font-weight: 400; }}
     QPushButton[kind="seg"]:hover {{ color: {t['text']}; }}
     QPushButton[kind="seg"]:checked {{ background: {t['surface']}; border-color: {t['border']}; color: {t['text']}; }}
+    QPushButton[kind="chip"] {{ background: {t['raised']}; border: 1px solid {t['border']}; border-radius: 8px; padding: 6px 4px; min-width: 34px; font-weight: 500; }}
+    QPushButton[kind="chip"]:checked {{ background: {t['accent']}; border-color: {t['accent']}; color: {t['accent_text']}; font-weight: 700; }}
     QPushButton[kind="link"] {{ background: transparent; border: none; color: {t['muted']}; padding: 4px 6px; }}
     QPushButton[kind="link"]:hover {{ color: {t['text']}; }}
     QPushButton[kind="place"] {{ background: transparent; border: none; text-align: left; padding: 8px 10px; border-radius: 8px; }}
@@ -306,6 +313,13 @@ def lbl(text, role=None, wrap=False):
     return w
 
 
+def hint(text):
+    """Мелкая пояснительная подпись с переносом по словам, без лишней высоты."""
+    w = lbl(text, "muted", wrap=True)
+    w.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Maximum)
+    return w
+
+
 class WrapLabel(QLabel):
     """Подпись в строке «подпись — элемент»: когда места хватает — одна строка, когда тесно — переносится по словам,
     а не раздувает панель (обычный QLabel с переносом просит узкую колонку и переносится без нужды)."""
@@ -323,8 +337,397 @@ class WrapLabel(QLabel):
         return QSize(48, self.fontMetrics().height() + 2)
 
 
+BRAND_FONT = "Bahnschrift SemiBold"            # на Windows; иначе подставится ближайший шрифт
+
+
+class LogoMark(QWidget):
+    """Знак компании, как в конвертере: плитка с текучим градиентом, мягкое свечение, пробегающий блик
+    и «прыжок» при наведении курсора."""
+    SIZE = 44
+
+    def __init__(self, letter="К"):
+        super().__init__()
+        self.letter = letter
+        self.setFixedSize(self.SIZE, self.SIZE)
+        self._flow, self._shine, self._pop = 0.0, -1.0, 0.0
+        self.setCursor(Qt.PointingHandCursor)
+        self._flow_anim = QVariantAnimation(self, duration=7000, startValue=0.0, endValue=1.0, loopCount=-1)
+        self._flow_anim.valueChanged.connect(self._on_flow)
+        self._shine_anim = QVariantAnimation(self, duration=1100, startValue=-0.5, endValue=1.5)
+        self._shine_anim.setEasingCurve(QEasingCurve.InOutQuad)
+        self._shine_anim.valueChanged.connect(self._on_shine)
+        self._shine_anim.finished.connect(lambda: self._on_shine(-1.0))
+        self._shine_timer = QTimer(self)
+        self._shine_timer.setInterval(5200)
+        self._shine_timer.timeout.connect(self._shine_anim.start)
+        self._pop_anim = QVariantAnimation(self, duration=420)
+        self._pop_anim.valueChanged.connect(self._on_pop)
+
+    def _on_flow(self, v):
+        self._flow = float(v)
+        self.update()
+
+    def _on_shine(self, v):
+        self._shine = float(v)
+        self.update()
+
+    def _on_pop(self, v):
+        self._pop = float(v)
+        self.update()
+
+    def showEvent(self, e):
+        super().showEvent(e)
+        self._flow_anim.start()
+        self._shine_timer.start()
+        QTimer.singleShot(700, self._shine_anim.start)
+
+    def hideEvent(self, e):
+        super().hideEvent(e)
+        self._flow_anim.stop()
+        self._shine_timer.stop()
+
+    def _pop_to(self, end, curve):
+        self._pop_anim.stop()
+        self._pop_anim.setStartValue(self._pop)
+        self._pop_anim.setEndValue(end)
+        self._pop_anim.setEasingCurve(curve)
+        self._pop_anim.start()
+
+    def enterEvent(self, e):
+        super().enterEvent(e)
+        self._pop_to(1.0, QEasingCurve.OutBack)
+        if self._shine_anim.state() != QVariantAnimation.Running:
+            self._shine_anim.start()
+
+    def leaveEvent(self, e):
+        super().leaveEvent(e)
+        self._pop_to(0.0, QEasingCurve.OutCubic)
+
+    def paintEvent(self, _):
+        import math
+        s = self.SIZE
+        a1, a2 = QColor(T["accent"]), QColor(mix(T["accent"], "#ffd21f", 0.75))
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+        p.setRenderHint(QPainter.TextAntialiasing)
+        c = QPointF(s / 2, s / 2)
+        breathe = 0.5 + 0.5 * math.sin(self._flow * 2 * math.pi)
+        halo = QRadialGradient(c, s * 0.62)
+        halo.setColorAt(0.55, QColor(a1.red(), a1.green(), a1.blue(), max(0, min(255, int(60 + 50 * breathe + 60 * self._pop)))))
+        halo.setColorAt(1, QColor(a1.red(), a1.green(), a1.blue(), 0))
+        p.fillRect(self.rect(), halo)
+        p.translate(c)
+        k = 1.0 + 0.12 * self._pop
+        p.scale(k, k)
+        p.rotate(-7 * self._pop)
+        p.translate(-c)
+        tile = QRectF(6, 6, s - 12, s - 12)
+        ang = self._flow * 2 * math.pi
+        dx, dy = math.cos(ang) * tile.width() * 0.75, math.sin(ang) * tile.height() * 0.75
+        g = QLinearGradient(c.x() - dx, c.y() - dy, c.x() + dx, c.y() + dy)
+        g.setColorAt(0, a1)
+        g.setColorAt(0.5, a2)
+        g.setColorAt(1, a1)
+        path = QPainterPath()
+        path.addRoundedRect(tile, 11, 11)
+        p.fillPath(path, QBrush(g))
+        p.save()
+        p.setClipPath(path)
+        gloss = QLinearGradient(0, tile.top(), 0, tile.bottom())
+        gloss.setColorAt(0, QColor(255, 255, 255, 70))
+        gloss.setColorAt(0.5, QColor(255, 255, 255, 0))
+        p.fillRect(tile, QBrush(gloss))
+        if self._shine > -0.9:
+            x = tile.left() + self._shine * tile.width()
+            band = QLinearGradient(x - 9, tile.top(), x + 9, tile.bottom())
+            band.setColorAt(0, QColor(255, 255, 255, 0))
+            band.setColorAt(0.5, QColor(255, 255, 255, 120))
+            band.setColorAt(1, QColor(255, 255, 255, 0))
+            p.fillRect(tile, QBrush(band))
+        p.restore()
+        font = QFont(BRAND_FONT)
+        font.setPixelSize(26)
+        font.setBold(True)
+        text = QPainterPath()
+        text.addText(0, 0, font, self.letter)
+        br = text.boundingRect()
+        text.translate(tile.center().x() - br.center().x(), tile.center().y() - br.center().y())
+        p.fillPath(text.translated(0, 1.5), QColor(0, 0, 0, 60))
+        p.fillPath(text, QColor(255, 255, 255))
+        p.end()
+
+
+class BrandTitle(QWidget):
+    """Название компании, как в конвертере: буквы один раз «падают» при открытии окна, потом по ним плывёт цвет.
+    Часть после первого слова показана тихо рядом."""
+
+    def __init__(self):
+        super().__init__()
+        self.brand = self.tail = ""
+        self._flow, self._intro, self._intro_done = 0.0, 0.0, False
+        self._flow_anim = QVariantAnimation(self, duration=5200, startValue=0.0, endValue=1.0, loopCount=-1)
+        self._flow_anim.valueChanged.connect(self._on_flow)
+        self._intro_anim = QVariantAnimation(self, duration=1100, startValue=0.0, endValue=1.0)
+        self._intro_anim.setEasingCurve(QEasingCurve.OutCubic)
+        self._intro_anim.valueChanged.connect(self._on_intro)
+        self._intro_anim.finished.connect(self._intro_finished)
+        self.setSizePolicy(QSizePolicy.Minimum, QSizePolicy.Fixed)
+
+    def _intro_finished(self):
+        self._intro_done, self._intro = True, 1.0
+        self.update()
+
+    def setText(self, text):
+        self.brand, _, self.tail = text.partition(" ")
+        self.updateGeometry()
+        self.update()
+
+    @staticmethod
+    def _fonts():
+        f1 = QFont(BRAND_FONT)
+        f1.setPixelSize(21)
+        f1.setBold(True)
+        f1.setLetterSpacing(QFont.AbsoluteSpacing, 0.6)
+        f2 = QFont("Bahnschrift Light")
+        f2.setPixelSize(14)
+        return f1, f2
+
+    def sizeHint(self):
+        f1, f2 = self._fonts()
+        w = QFontMetricsF(f1).horizontalAdvance(self.brand)
+        if self.tail:
+            w += 10 + QFontMetricsF(f2).horizontalAdvance(self.tail)
+        return QSize(int(w) + 8, 34)
+
+    def minimumSizeHint(self):
+        return self.sizeHint()
+
+    def _on_flow(self, v):
+        self._flow = float(v)
+        self.update()
+
+    def _on_intro(self, v):
+        self._intro = float(v)
+        self.update()
+
+    def showEvent(self, e):
+        super().showEvent(e)
+        self._flow_anim.start()
+        if not self._intro_done and self._intro_anim.state() != QVariantAnimation.Running:
+            self._intro_anim.start()
+
+    def hideEvent(self, e):
+        super().hideEvent(e)
+        self._flow_anim.stop()
+
+    def paintEvent(self, _):
+        f1, f2 = self._fonts()
+        fm1 = QFontMetricsF(f1)
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+        p.setRenderHint(QPainter.TextAntialiasing)
+        base = self.height() / 2 + (fm1.ascent() - fm1.descent()) / 2
+        width = max(1.0, fm1.horizontalAdvance(self.brand))
+        shift = self._flow * width * 2
+        g = QLinearGradient(-shift, 0, width - shift, 0)
+        for pos, col in ((0, T["accent"]), (0.35, "#ffd21f"), (0.7, T["text"]), (1, T["accent"])):
+            g.setColorAt(pos, QColor(col))
+        g.setSpread(QLinearGradient.RepeatSpread)
+        p.setFont(f1)
+        p.setPen(QPen(QBrush(g), 1))
+        n = max(1, len(self.brand))
+        x = 3.0
+        for i, ch in enumerate(self.brand):
+            k = min(1.0, max(0.0, (self._intro * (n + 5) - i) / 5))
+            p.setOpacity(k)
+            p.drawText(QPointF(x, base + (1 - k) * 12), ch)
+            x += fm1.horizontalAdvance(ch)
+        if self.tail:
+            p.setOpacity(min(1.0, max(0.0, (self._intro - 0.6) / 0.4)))
+            p.setFont(f2)
+            p.setPen(QColor(T["muted"]))
+            p.drawText(QPointF(x + 10, base - 1), self.tail)
+        p.end()
+
+
+class ModeSwitch(QWidget):
+    """Переключатель режимов ФОТО / ДОКУМЕНТ: бегунок плавно переезжает с лёгким «пружинным» отскоком, значок подсвечивается."""
+    changed = Signal(str)
+    ITEMS = (("photo", "ФОТО", "image"), ("doc", "ДОКУМЕНТ", "doc"))
+
+    def __init__(self, value="photo"):
+        super().__init__()
+        self.value, self._x, self._hover = value, (0.0 if value == "photo" else 1.0), -1
+        self.setFixedSize(236, 40)
+        self.setMouseTracking(True)
+        self.setCursor(Qt.PointingHandCursor)
+        self._anim = QPropertyAnimation(self, b"knobx", self)
+        self._anim.setDuration(380)
+        self._anim.setEasingCurve(QEasingCurve.OutBack)
+
+    def getKx(self):
+        return self._x
+
+    def setKx(self, v):
+        self._x = float(v)
+        self.update()
+
+    knobx = Property(float, getKx, setKx)       # не «x»: так уже называется положение виджета
+
+    def set(self, value, animate=True):
+        if value == self.value:
+            return
+        self.value = value
+        end = 0.0 if value == "photo" else 1.0
+        if animate:
+            self._anim.stop()
+            self._anim.setStartValue(self._x)
+            self._anim.setEndValue(end)
+            self._anim.start()
+        else:
+            self._x = end
+            self.update()
+
+    def _idx(self, pos):
+        return 0 if pos.x() < self.width() / 2 else 1
+
+    def mouseMoveEvent(self, e):
+        self._hover = self._idx(e.position())
+        self.update()
+
+    def leaveEvent(self, e):
+        self._hover = -1
+        self.update()
+
+    def mousePressEvent(self, e):
+        if e.button() == Qt.LeftButton:
+            v = self.ITEMS[self._idx(e.position())][0]
+            if v != self.value:
+                self.set(v)
+                self.changed.emit(v)
+
+    def paintEvent(self, e):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+        W, H, pad = self.width(), self.height(), 3
+        track = QRectF(0.5, 0.5, W - 1, H - 1)
+        p.setPen(QPen(QColor(T["border"]), 1))
+        p.setBrush(QColor(T["raised"]))
+        p.drawRoundedRect(track, H / 2, H / 2)
+        cw = (W - 2 * pad) / 2
+        x = pad + cw * self._x
+        thumb = QRectF(x, pad, cw, H - 2 * pad)
+        glow = QColor(T["accent"])                                   # мягкое свечение под бегунком
+        for i, a in enumerate((16, 30, 46)):
+            glow.setAlpha(a)
+            p.setPen(Qt.NoPen)
+            p.setBrush(glow)
+            p.drawRoundedRect(thumb.adjusted(-(3 - i), -(3 - i) / 2, 3 - i, (3 - i) / 2), (H - 2 * pad) / 2 + 2, (H - 2 * pad) / 2 + 2)
+        grad = QLinearGradient(thumb.topLeft(), thumb.bottomLeft())
+        grad.setColorAt(0, QColor(mix(T["accent"], "#ffffff", 0.18)))
+        grad.setColorAt(1, QColor(T["accent"]))
+        p.setBrush(QBrush(grad))
+        p.drawRoundedRect(thumb, (H - 2 * pad) / 2, (H - 2 * pad) / 2)
+        f = QFont(p.font())
+        f.setPixelSize(12)
+        f.setBold(True)
+        f.setLetterSpacing(QFont.AbsoluteSpacing, 0.8)
+        p.setFont(f)
+        for i, (key, text, ico) in enumerate(self.ITEMS):
+            cell = QRectF(pad + cw * i, pad, cw, H - 2 * pad)
+            near = max(0.0, 1.0 - abs(self._x - i))                  # 1 — бегунок под этим пунктом
+            col = QColor(mix(T["muted"] if self._hover != i else T["text"], T["accent_text"], near))
+            pm = pix(ico, col.name(), 18)
+            fm = QFontMetrics(f)
+            tw = fm.horizontalAdvance(text)
+            total = 18 + 7 + tw
+            lift = -1.0 * near
+            x0 = cell.center().x() - total / 2
+            p.drawPixmap(QPointF(x0, cell.center().y() - 9 + lift), pm)
+            p.setPen(col)
+            p.drawText(QRectF(x0 + 25, cell.top() + lift, tw + 4, cell.height()), Qt.AlignVCenter | Qt.AlignLeft, text)
+        p.end()
+
+
+class MotionButton(QPushButton):
+    """Кнопка с живым откликом: плавная подсветка при наведении и волна от места нажатия."""
+
+    def __init__(self, text=""):
+        super().__init__(text)
+        self._hv, self._rp, self._pt = 0.0, 1.0, QPointF()
+        self._ah = QPropertyAnimation(self, b"hv", self)
+        self._ah.setDuration(160)
+        self._ah.setEasingCurve(QEasingCurve.OutCubic)
+        self._ar = QPropertyAnimation(self, b"rp", self)
+        self._ar.setDuration(420)
+        self._ar.setEasingCurve(QEasingCurve.OutQuad)
+        self._ar.setStartValue(0.0)
+        self._ar.setEndValue(1.0)
+
+    def getHv(self):
+        return self._hv
+
+    def setHv(self, v):
+        self._hv = float(v)
+        self.update()
+
+    def getRp(self):
+        return self._rp
+
+    def setRp(self, v):
+        self._rp = float(v)
+        self.update()
+
+    hv = Property(float, getHv, setHv)
+    rp = Property(float, getRp, setRp)
+
+    def _fade(self, to):
+        self._ah.stop()
+        self._ah.setStartValue(self._hv)
+        self._ah.setEndValue(to)
+        self._ah.start()
+
+    def enterEvent(self, e):
+        self._fade(1.0)
+        super().enterEvent(e)
+
+    def leaveEvent(self, e):
+        self._fade(0.0)
+        super().leaveEvent(e)
+
+    def mousePressEvent(self, e):
+        if e.button() == Qt.LeftButton and self.isEnabled():
+            self._pt = e.position()
+            self._ar.stop()
+            self._ar.start()
+        super().mousePressEvent(e)
+
+    def paintEvent(self, e):
+        super().paintEvent(e)
+        if not self.isEnabled() or (self._hv <= 0.001 and self._rp >= 1.0):
+            return
+        primary = self.property("kind") == "primary"
+        base = QColor(T["accent_text"] if primary else T["accent"])
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+        path = QPainterPath()
+        path.addRoundedRect(QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5), 9, 9)
+        p.setClipPath(path)
+        c = QColor(base)
+        c.setAlphaF((0.20 if primary else 0.10) * self._hv)
+        p.fillPath(path, c)
+        if self._rp < 1.0:
+            r = max(self.width(), self.height()) * 1.1 * self._rp
+            c2 = QColor(base)
+            c2.setAlphaF(0.30 * (1.0 - self._rp))
+            p.setPen(Qt.NoPen)
+            p.setBrush(c2)
+            p.drawEllipse(self._pt, r, r)
+        p.end()
+
+
 def btn(text, slot=None, kind=None, big=False, ico=None, ico_color=None, tip=None):
-    b = QPushButton(tr(text))
+    b = MotionButton(tr(text))
     if kind:
         b.setProperty("kind", kind)
     if big:
@@ -448,6 +851,47 @@ class Segmented(QFrame):
     def value(self):
         i = self.group.checkedId()
         return self.values[i] if i >= 0 else None
+
+    def clear(self):
+        """Снимает выбор со всех кнопок (для двух рядов вкладок, где активна одна кнопка из обоих рядов)."""
+        self.group.setExclusive(False)
+        for b in self.group.buttons():
+            b.setChecked(False)
+        self.group.setExclusive(True)
+
+
+class PageStack(QWidget):
+    """Как QStackedWidget, но высота равна высоте только видимой страницы (у обычного — самой высокой из всех)."""
+    currentChanged = Signal(int)
+
+    def __init__(self):
+        super().__init__()
+        self._lay = vbox()
+        self.setLayout(self._lay)
+        self._pages, self._cur = [], -1
+
+    def addWidget(self, w):
+        self._pages.append(w)
+        self._lay.addWidget(w)
+        w.setVisible(not self._pages[:-1])
+        if len(self._pages) == 1:
+            self._cur = 0
+
+    def count(self):
+        return len(self._pages)
+
+    def widget(self, i):
+        return self._pages[i]
+
+    def currentIndex(self):
+        return self._cur
+
+    def setCurrentIndex(self, i):
+        for k, w in enumerate(self._pages):
+            w.setVisible(k == i)
+        self._cur = i
+        self.updateGeometry()
+        self.currentChanged.emit(i)
 
 
 class Switch(QAbstractButton):
@@ -751,7 +1195,7 @@ class CropCanvas(QWidget):
     HANDLE = 10
     ROT_OFFSET = 30
     CORNERS = ("nw", "ne", "se", "sw")
-    PILL_ZONE = 66                       # место внизу под плавающую панель инструментов
+    PILL_ZONE = 58                       # место внизу под плавающую панель инструментов
 
     def __init__(self, app):
         super().__init__()
@@ -761,6 +1205,13 @@ class CropCanvas(QWidget):
         self.guides = []
         self.pill = None
         self.pbtn = None                 # кнопка «Печать фото» в верхнем углу
+        self.cbtn = None                 # кнопка «До / После» левее неё
+        self.cmp = False                 # режим сравнения: слева от линии снимок без правок, справа — с правками
+        self.cmp_x = 0.5                 # положение линии: доля ширины снимка
+        self.cmp_drag = False
+        self.img_rect = None             # где снимок лежит на экране (x, y, w, h)
+        self._orig_key = None
+        self._orig_pm = None
         self._pb_pending = False
         self.setMouseTracking(True)
         self.setFocusPolicy(Qt.ClickFocus)
@@ -803,6 +1254,94 @@ class CropCanvas(QWidget):
             b.setVisible(show)
         if show:
             b.raise_()
+        c = self.cbtn
+        if c is not None:
+            c.adjustSize()
+            cx = max(8, b.x() - c.width() - 8)
+            if c.x() != cx or c.y() != y:
+                c.move(cx, y)
+            c.setEnabled(b.isEnabled())
+            if c.isVisible() != show:
+                c.setVisible(show)
+            if show:
+                c.raise_()
+
+    # ---- сравнение «до / после»
+    def set_compare(self, on):
+        self.cmp = bool(on)
+        self.cmp_drag = False
+        self.setCursor(Qt.SplitHCursor if self.cmp else Qt.ArrowCursor)
+        self.update()
+
+    def _orig_pixmap(self):
+        raw = self.app.raw
+        if raw is None:
+            return None
+        if self._orig_key is not id(raw):
+            self._orig_key = id(raw)
+            self._orig_pm = QPixmap.fromImage(pil_to_qimage(raw))
+        return self._orig_pm
+
+    def _cmp_under(self, p, rect):
+        """Левая от линии часть снимка — без правок (рисуется поверх снимка с правками)."""
+        self.img_rect = rect
+        if not self.cmp:
+            return
+        pm = self._orig_pixmap()
+        if pm is None:
+            return
+        x, y, w, h = rect
+        sx = x + w * self.cmp_x
+        p.save()
+        p.setClipRect(QRectF(x, y, sx - x, h), Qt.IntersectClip)
+        p.drawPixmap(QRectF(x, y, w, h), pm, QRectF(pm.rect()))
+        p.restore()
+
+    def _cmp_over(self, p):
+        """Линия-разделитель, ручка и подписи «До» / «После»."""
+        if not self.cmp or not self.img_rect:
+            return
+        x, y, w, h = self.img_rect
+        sx = x + w * self.cmp_x
+        p.save()
+        p.setPen(QPen(QColor(0, 0, 0, 140), 4))
+        p.drawLine(QPointF(sx, y), QPointF(sx, y + h))
+        p.setPen(QPen(QColor("#ffffff"), 2))
+        p.drawLine(QPointF(sx, y), QPointF(sx, y + h))
+        cy = y + h / 2
+        p.setPen(QPen(QColor(0, 0, 0, 160), 1))
+        p.setBrush(QColor("#ffffff"))
+        p.drawEllipse(QPointF(sx, cy), 14, 14)
+        p.setPen(QPen(QColor("#222222"), 2))
+        for d in (-1, 1):
+            p.drawLine(QPointF(sx + d * 9, cy), QPointF(sx + d * 4, cy - 5))
+            p.drawLine(QPointF(sx + d * 9, cy), QPointF(sx + d * 4, cy + 5))
+        fnt = QFont(p.font())
+        fnt.setPixelSize(12)
+        fnt.setBold(True)
+        p.setFont(fnt)
+        for text, tx, al in ((tr("До"), x + 8, Qt.AlignLeft), (tr("После"), x + w - 78, Qt.AlignRight)):
+            r = QRectF(tx, y + 8, 70, 22)
+            if (al == Qt.AlignLeft and tx + 30 < sx) or (al == Qt.AlignRight and tx + 30 > sx):
+                p.setPen(Qt.NoPen)
+                p.setBrush(QColor(0, 0, 0, 150))
+                p.drawRoundedRect(r, 6, 6)
+                p.setPen(QColor("#ffffff"))
+                p.drawText(r, Qt.AlignCenter, text)
+        p.restore()
+
+    def _cmp_mouse(self, e, kind):
+        if not self.img_rect:
+            return
+        x, y, w, h = self.img_rect
+        if kind == "press" and e.button() == Qt.LeftButton:
+            self.cmp_drag = True
+        if kind == "release":
+            self.cmp_drag = False
+            return
+        if self.cmp_drag:
+            self.cmp_x = min(1.0, max(0.0, (e.position().x() - x) / max(1.0, w)))
+            self.update()
 
     def paintEvent(self, e):
         self._paint(e)
@@ -827,6 +1366,7 @@ class CropCanvas(QWidget):
         cur = app.cur()
         if not cur or app.preview_pm is None:
             self.geom = None
+            self.img_rect = None
             fnt = QFont(p.font())
             fnt.setPixelSize(15)
             p.setFont(fnt)
@@ -840,7 +1380,7 @@ class CropCanvas(QWidget):
         pm = app.preview_pm
         uh = ch - self.PILL_ZONE
         if app.mode() == "fit":
-            pad = 28
+            pad = 18
             k = min((cw - 2 * pad) / paper[0], (uh - 2 * pad) / paper[1])
             PW, PH = paper[0] * k, paper[1] * k
             px, py = (cw - PW) / 2, (uh - PH) / 2
@@ -849,15 +1389,17 @@ class CropCanvas(QWidget):
             kk = min(PW / W, PH / H)
             dw, dh = W * kk, H * kk
             p.drawPixmap(QRectF(px + (PW - dw) / 2, py + (PH - dh) / 2, dw, dh), pm, QRectF(pm.rect()))
+            self._cmp_under(p, (px + (PW - dw) / 2, py + (PH - dh) / 2, dw, dh))
             self._bleed(p, [(px, py), (px + PW, py), (px + PW, py + PH), (px, py + PH)], paper[0])
             self._trim(p, [(px, py), (px + PW, py), (px + PW, py + PH), (px, py + PH)], paper)
             self.geom = None
+            self._cmp_over(p)
             p.end()
             return
-        pad = max(46, int(0.09 * min(cw, uh)))
-        k = min((cw - 2 * pad) / W, (uh - 2 * pad) / H)
+        padx, pad_top, pad_bot = 20, self.ROT_OFFSET + 14, 18       # поля минимальные: сверху — место под ручку поворота
+        k = min((cw - 2 * padx) / W, (uh - pad_top - pad_bot) / H)
         dw, dh = max(1.0, W * k), max(1.0, H * k)
-        ox, oy = (cw - dw) / 2, (uh - dh) / 2
+        ox, oy = (cw - dw) / 2, pad_top + (uh - pad_top - pad_bot - dh) / 2
         g = pc.frame_geom(W, H, paper, st)
         P = [(ox + x * k, oy + y * k) for x, y in pc.frame_corners(*g)]
         poly = QPolygonF([QPointF(x, y) for x, y in P])
@@ -865,6 +1407,7 @@ class CropCanvas(QWidget):
         p.setBrush(QColor("#ffffff"))
         p.drawPolygon(poly)                                           # «бумага»: видна там, где рамка вышла за фото
         p.drawPixmap(QRectF(ox, oy, dw, dh), pm, QRectF(pm.rect()))
+        self._cmp_under(p, (ox, oy, dw, dh))
         shade = QPainterPath()
         shade.setFillRule(Qt.OddEvenFill)
         shade.addRect(QRectF(0, 0, cw, ch))
@@ -905,6 +1448,7 @@ class CropCanvas(QWidget):
         for hx, hy in P:
             p.drawRoundedRect(QRectF(hx - 5.5, hy - 5.5, 11, 11), 3, 3)
         self.geom = (ox, oy, k, P, rh)
+        self._cmp_over(p)
         app.smart_banner(p, cw, f)
         p.end()
 
@@ -987,6 +1531,9 @@ class CropCanvas(QWidget):
         return (ex - rx) ** 2 + (ey - ry) ** 2 <= 12 ** 2
 
     def mousePressEvent(self, e):
+        if self.cmp:                                          # режим «до / после»: рамку не двигаем, тянем линию
+            self._cmp_mouse(e, "press")
+            return
         if e.button() != Qt.LeftButton:
             return
         self.setFocus()
@@ -1018,6 +1565,9 @@ class CropCanvas(QWidget):
         app.redraw()
 
     def mouseMoveEvent(self, e):
+        if self.cmp:
+            self._cmp_mouse(e, "move")
+            return
         ex, ey = e.position().x(), e.position().y()
         app = self.app
         cur = app.cur()
@@ -1055,6 +1605,9 @@ class CropCanvas(QWidget):
         app.redraw()
 
     def mouseReleaseEvent(self, e):
+        if self.cmp:
+            self._cmp_mouse(e, "release")
+            return
         if self.guides:
             self.guides = []
             self.update()
@@ -1119,6 +1672,539 @@ class Histogram(QWidget):
                 p.setBrush(Qt.NoBrush)
                 p.drawPath(path)
         p.end()
+
+
+# ---------------------------------------------------------------- уровни, кривые и выборочный цвет (вкладка «Цвет»)
+
+CH_NAMES = (("RGB", "rgb"), ("R", "r"), ("G", "g"), ("B", "b"))
+CH_COLORS = {"rgb": "#d6d8dd", "r": "#ff5a5a", "g": "#4fd06a", "b": "#5a8cff"}
+
+
+def hist_channel(h, ch):
+    """256 значений гистограммы канала ("rgb" — сумма трёх) из 768-значной pc.hist_rgb."""
+    if not h:
+        return None
+    if ch == "rgb":
+        return [h[i] + h[256 + i] + h[512 + i] for i in range(256)]
+    k = {"r": 0, "g": 1, "b": 2}[ch]
+    return list(h[k * 256:(k + 1) * 256])
+
+
+def paint_hist_fill(p, rect, hv, color):
+    """Залитая гистограмма в прямоугольнике rect; «пики» чёрного и белого отсекаются, чтобы не прижимать остальное."""
+    if not hv:
+        return
+    cap = sorted(hv[2:254])[-6] or 1
+    path = QPainterPath()
+    path.moveTo(rect.left(), rect.bottom())
+    for j in range(256):
+        path.lineTo(rect.left() + j * rect.width() / 255.0, rect.bottom() - min(1.0, hv[j] / cap) * rect.height())
+    path.lineTo(rect.right(), rect.bottom())
+    path.closeSubpath()
+    c = QColor(color)
+    c.setAlpha(110)
+    p.setPen(Qt.NoPen)
+    p.setBrush(c)
+    p.drawPath(path)
+
+
+class ChannelBar(Segmented):
+    """Выбор канала RGB / R / G / B."""
+
+    def __init__(self):
+        super().__init__([(n, c) for n, c in CH_NAMES], "rgb")
+        self.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Fixed)
+        for b, (_, c) in zip(self.group.buttons(), CH_NAMES):
+            b.setToolTip(tr({"rgb": "Все каналы сразу", "r": "Красный канал", "g": "Зелёный канал", "b": "Синий канал"}[c]))
+
+
+class _LevelsCanvas(QWidget):
+    """Гистограмма с тремя бегунками: чёрная точка, гамма (середина), белая точка."""
+
+    def __init__(self, ed):
+        super().__init__()
+        self.ed, self.drag = ed, None
+        self.setFixedHeight(132)
+        self.setMouseTracking(True)
+
+    def _plot(self):
+        return QRectF(10, 6, self.width() - 20, self.height() - 34)
+
+    def _marks(self):
+        b, g, w = self.ed.row()[:3]
+        r = self._plot()
+        xb, xw = r.left() + b / 255.0 * r.width(), r.left() + w / 255.0 * r.width()
+        return {"b": xb, "g": xb + (xw - xb) * 0.5 ** g, "w": xw}
+
+    def _pick(self, x):
+        m = self._marks()
+        best = min(m, key=lambda k: abs(m[k] - x))
+        return best if abs(m[best] - x) <= 12 else None
+
+    def mousePressEvent(self, e):
+        if e.button() == Qt.LeftButton:
+            self.drag = self._pick(e.position().x())
+
+    def mouseMoveEvent(self, e):
+        if self.drag is None:
+            self.setCursor(Qt.SizeHorCursor if self._pick(e.position().x()) else Qt.ArrowCursor)
+            return
+        r = self._plot()
+        v = min(255.0, max(0.0, (e.position().x() - r.left()) / r.width() * 255.0))
+        self.ed.drag_to(self.drag, v)
+
+    def mouseReleaseEvent(self, e):
+        self.drag = None
+
+    def mouseDoubleClickEvent(self, e):
+        k = self._pick(e.position().x())
+        if k:
+            self.ed.reset_mark(k)
+
+    def paintEvent(self, e):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+        r = self._plot()
+        p.setPen(QPen(QColor(T["border"]), 1))
+        p.setBrush(QColor(T["canvas"]))
+        p.drawRoundedRect(r.adjusted(-2, -2, 2, 2), 6, 6)
+        ch = self.ed.channel()
+        paint_hist_fill(p, r, hist_channel(self.ed.hist, ch), CH_COLORS[ch])
+        for k, x in self._marks().items():
+            y = r.bottom() + 8
+            tri = QPolygonF([QPointF(x, y), QPointF(x - 7, y + 14), QPointF(x + 7, y + 14)])
+            p.setPen(QPen(QColor(T["border"]), 1))
+            p.setBrush(QColor({"b": "#000000", "g": "#9a9a9a", "w": "#ffffff"}[k]))
+            p.drawPolygon(tri)
+        p.end()
+
+
+class LevelsEditor(QWidget):
+    """Уровни: канал, гистограмма с бегунками, числа входа/выхода, «Авто» и «Сбросить»."""
+    changed = Signal(object)
+    auto_requested = Signal()
+
+    def __init__(self):
+        super().__init__()
+        self.rows = [list(ct.LEVELS_NEUTRAL) for _ in range(4)]
+        self.hist = None
+        self.bar = ChannelBar()
+        self.bar.changed.connect(lambda _c: self._refresh())
+        self.canvas = _LevelsCanvas(self)
+        self.f = []
+        for i, tip in enumerate(("Чёрная точка (вход)", "Гамма (середина)", "Белая точка (вход)", "Выход: чёрный", "Выход: белый")):
+            e = QLineEdit()
+            e.setAlignment(Qt.AlignCenter)
+            e.setToolTip(tr(tip))
+            e.editingFinished.connect(lambda i=i: self._typed(i))
+            self.f.append(e)
+        self.f[0].setMinimumWidth(40)
+        grid = QGridLayout()
+        grid.setSpacing(4)
+        for c, t in enumerate(("Вход: чёрный", "гамма", "белый")):
+            grid.addWidget(lbl(t, "muted"), 0, c)
+            grid.addWidget(self.f[c], 1, c)
+        grid.addWidget(lbl("Выход: чёрный", "muted"), 2, 0)
+        grid.addWidget(lbl("белый", "muted"), 2, 2)
+        grid.addWidget(self.f[3], 3, 0)
+        grid.addWidget(self.f[4], 3, 2)
+        self.setLayout(vbox(hbox(self.bar, None), self.canvas, grid,
+                            hbox(btn("Авто", lambda: self.auto_requested.emit(), ico="sparkle"),
+                                 btn("Сбросить", self.reset_all, "link"), None),
+                            hint("Двойной щелчок по бегунку — сбросить его."), spacing=8))
+        self._refresh()
+
+    def channel(self):
+        return self.bar.value()
+
+    def row(self):
+        return self.rows[ct.CHANNELS.index(self.channel())]
+
+    def set_value(self, levels):
+        self.rows = [list(r) for r in ct.levels_full(levels)]
+        self._refresh()
+
+    def set_hist(self, h):
+        self.hist = h
+        self.canvas.update()
+
+    def _refresh(self):
+        b, g, w, ob, ow = self.row()
+        for e, v in zip(self.f, (b, g, w, ob, ow)):
+            e.setText(("%.2f" % v) if e is self.f[1] else ("%d" % round(v)))
+        self.canvas.update()
+
+    def _emit(self):
+        self._refresh()
+        self.changed.emit(ct.norm_levels(self.rows))
+
+    def _set_row(self, b, g, w, ob, ow):
+        self.rows[ct.CHANNELS.index(self.channel())] = list(ct.norm_levels_row((b, g, w, ob, ow)))
+
+    def drag_to(self, mark, v):
+        b, g, w, ob, ow = self.row()
+        if mark == "b":
+            b = min(v, w - 1)
+        elif mark == "w":
+            w = max(v, b + 1)
+        else:
+            x = min(0.98, max(0.02, (v - b) / max(1.0, w - b)))
+            g = min(10.0, max(0.1, math.log(0.5) / math.log(x)))
+        self._set_row(b, g, w, ob, ow)
+        self._emit()
+
+    def reset_mark(self, mark):
+        b, g, w, ob, ow = self.row()
+        if mark == "b":
+            b = 0.0
+        elif mark == "w":
+            w = 255.0
+        else:
+            g = 1.0
+        self._set_row(b, g, w, ob, ow)
+        self._emit()
+
+    def _typed(self, i):
+        vals = list(self.row())
+        try:
+            vals[i] = float(self.f[i].text().replace(",", "."))
+        except ValueError:
+            self._refresh()
+            return
+        self._set_row(*vals)
+        self._emit()
+
+    def reset_all(self):
+        self.rows = [list(ct.LEVELS_NEUTRAL) for _ in range(4)]
+        self._emit()
+
+
+class CurveEditor(QWidget):
+    """Кривая: точки двигаются мышью, щелчок по пустому месту добавляет точку, двойной щелчок или правая кнопка удаляют."""
+    changed = Signal(object)                       # tuple из четырёх списков точек (как curves)
+    hovered = Signal(str)
+
+    def __init__(self, size=260):
+        super().__init__()
+        self.pts = [list(ct.CURVE_NEUTRAL) for _ in range(4)]
+        self.ch = "rgb"
+        self.hist = None
+        self.drag = None
+        self.setMinimumSize(size, size)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self.setMouseTracking(True)
+
+    def heightForWidth(self, w):
+        return w
+
+    def set_value(self, curves):
+        self.pts = [list(map(tuple, c)) for c in ct.curves_full(curves)]
+        self.update()
+
+    def set_channel(self, ch):
+        self.ch = ch
+        self.update()
+
+    def cur(self):
+        return self.pts[ct.CHANNELS.index(self.ch)]
+
+    def _box(self):
+        m = 12
+        s = min(self.width(), self.height()) - 2 * m
+        return QRectF((self.width() - s) / 2.0, (self.height() - s) / 2.0, s, s)
+
+    def _to_px(self, x, y):
+        r = self._box()
+        return QPointF(r.left() + x / 255.0 * r.width(), r.bottom() - y / 255.0 * r.height())
+
+    def _from_px(self, pos):
+        r = self._box()
+        return (min(255.0, max(0.0, (pos.x() - r.left()) / r.width() * 255.0)),
+                min(255.0, max(0.0, (r.bottom() - pos.y()) / r.height() * 255.0)))
+
+    def _hit(self, pos):
+        for i, (x, y) in enumerate(self.cur()):
+            q = self._to_px(x, y)
+            if abs(q.x() - pos.x()) <= 12 and abs(q.y() - pos.y()) <= 12:
+                return i
+        return None
+
+    def _emit(self):
+        self.changed.emit(tuple(tuple(c) for c in self.pts))
+
+    def mousePressEvent(self, e):
+        pos = e.position()
+        i = self._hit(pos)
+        pts = self.cur()
+        if e.button() == Qt.RightButton:
+            if i is not None and 0 < i < len(pts) - 1:
+                del pts[i]
+                self._emit()
+                self.update()
+            return
+        if e.button() != Qt.LeftButton:
+            return
+        if i is None:
+            x, _y = self._from_px(pos)
+            x = int(round(x))
+            near = [k for k, (px, _) in enumerate(pts) if abs(px - x) < 2]
+            if near:                                       # рядом по горизонтали уже есть точка — берём её, а не молчим
+                self.drag = near[0]
+                self.update()
+                return
+            tab = ct.curve_lut(pts)
+            pts.append((x, tab[x]))
+            pts.sort()
+            i = [p[0] for p in pts].index(x)
+            self._emit()
+        self.drag = i
+        self.update()
+
+    def mouseDoubleClickEvent(self, e):
+        i = self._hit(e.position())
+        pts = self.cur()
+        if i is not None and 0 < i < len(pts) - 1:
+            del pts[i]
+            self.drag = None
+            self._emit()
+            self.update()
+
+    def mouseMoveEvent(self, e):
+        x, y = self._from_px(e.position())
+        pts = self.cur()
+        if self.drag is not None and self.drag < len(pts):
+            i = self.drag
+            nx = pts[i][0]
+            if 0 < i < len(pts) - 1:
+                nx = int(round(min(pts[i + 1][0] - 1, max(pts[i - 1][0] + 1, x))))
+            pts[i] = (nx, int(round(y)))
+            self._emit()
+            self.update()
+        else:
+            self.setCursor(Qt.PointingHandCursor if self._hit(e.position()) is not None else Qt.CrossCursor)
+        tab = ct.curve_lut(pts)
+        xi = int(round(x))
+        self.hovered.emit(trf("Вход {a} → выход {b}", a=xi, b=tab[xi]))
+
+    def mouseReleaseEvent(self, e):
+        self.drag = None
+
+    def leaveEvent(self, e):
+        self.hovered.emit("")
+
+    def paintEvent(self, e):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+        r = self._box()
+        p.setPen(QPen(QColor(T["border"]), 1))
+        p.setBrush(QColor(T["canvas"]))
+        p.drawRoundedRect(r.adjusted(-3, -3, 3, 3), 6, 6)
+        paint_hist_fill(p, r, hist_channel(self.hist, self.ch), CH_COLORS[self.ch])
+        p.setPen(QPen(QColor(T["border"]), 1))
+        for k in range(1, 4):
+            f = k / 4.0
+            p.drawLine(QPointF(r.left() + f * r.width(), r.top()), QPointF(r.left() + f * r.width(), r.bottom()))
+            p.drawLine(QPointF(r.left(), r.top() + f * r.height()), QPointF(r.right(), r.top() + f * r.height()))
+        p.setPen(QPen(QColor(T["muted"]), 1, Qt.DashLine))
+        p.drawLine(r.bottomLeft(), r.topRight())
+        pts = self.cur()
+        tab = ct.curve_lut(pts)
+        path = QPainterPath()
+        for i in range(256):
+            q = self._to_px(i, tab[i])
+            path.lineTo(q) if i else path.moveTo(q)
+        p.setPen(QPen(QColor(CH_COLORS[self.ch]), 2))
+        p.setBrush(Qt.NoBrush)
+        p.drawPath(path)
+        for i, (x, y) in enumerate(pts):
+            q = self._to_px(x, y)
+            p.setPen(QPen(QColor("#111111"), 1.5))
+            p.setBrush(QColor("#ffffff") if i == self.drag else QColor(CH_COLORS[self.ch]))
+            p.drawEllipse(q, 5.5, 5.5)
+        p.end()
+
+
+class CurvesPanel(QWidget):
+    """Кривые целиком: канал, поле кривой, быстрые формы и сброс. Используется и во вкладке, и на большом экране."""
+    changed = Signal(object)
+
+    def __init__(self, size=260):
+        super().__init__()
+        self.bar = ChannelBar()
+        self.ed = CurveEditor(size)
+        self.l_read = lbl("", "muted")
+        self.bar.changed.connect(self.ed.set_channel)
+        self.ed.changed.connect(self.changed.emit)
+        self.ed.hovered.connect(self.l_read.setText)
+        shapes = hbox(btn("Контраст S", lambda: self.shape(((0, 0), (64, 48), (192, 208), (255, 255))), tip="Мягкая S-кривая: больше контраста"),
+                      btn("Светлее", lambda: self.shape(((0, 0), (128, 150), (255, 255))), tip="Поднять средние тона"),
+                      btn("Темнее", lambda: self.shape(((0, 0), (128, 108), (255, 255))), tip="Опустить средние тона"), spacing=6)
+        self.setLayout(vbox(hbox(self.bar, None), self.ed, self.l_read, shapes,
+                            hbox(btn("Сбросить канал", self.reset_channel, "link"), btn("Сбросить всё", self.reset_all, "link"), None),
+                            hint("Щелчок по кривой — новая точка, двойной щелчок или правая кнопка — удалить точку."),
+                            spacing=8))
+
+    def set_value(self, curves):
+        self.ed.set_value(curves)
+
+    def set_hist(self, h):
+        self.ed.hist = h
+        self.ed.update()
+
+    def shape(self, pts):
+        self.ed.cur()[:] = list(pts)
+        self.ed._emit()
+        self.ed.update()
+
+    def reset_channel(self):
+        self.shape(ct.CURVE_NEUTRAL)
+
+    def reset_all(self):
+        self.ed.pts = [list(ct.CURVE_NEUTRAL) for _ in range(4)]
+        self.ed._emit()
+        self.ed.update()
+
+
+class PhotoPreview(QWidget):
+    """Редактируемое фото рядом с редактором: как главное окно, с применённой коррекцией."""
+
+    def __init__(self):
+        super().__init__()
+        self.pm = None
+        self.setMinimumSize(360, 300)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+
+    def set_pixmap(self, pm):
+        self.pm = pm
+        self.update()
+
+    def paintEvent(self, e):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.SmoothPixmapTransform)
+        p.setPen(Qt.NoPen)
+        p.setBrush(QColor(T["canvas"]))
+        p.drawRoundedRect(QRectF(self.rect()), 10, 10)
+        if self.pm is None or self.pm.isNull():
+            p.setPen(QColor(T["muted"]))
+            p.drawText(self.rect(), Qt.AlignCenter, tr("Нет фото"))
+        else:
+            r = QRectF(self.rect()).adjusted(8, 8, -8, -8)
+            k = min(r.width() / self.pm.width(), r.height() / self.pm.height())
+            w, h = self.pm.width() * k, self.pm.height() * k
+            p.drawPixmap(QRectF(r.center().x() - w / 2, r.center().y() - h / 2, w, h), self.pm, QRectF(self.pm.rect()))
+        p.end()
+
+
+class ColorWindow(QDialog):
+    """Большой экран уровней и кривых: слева редактор, справа само фото с живой коррекцией."""
+
+    def __init__(self, app):
+        super().__init__(app)
+        self.setWindowTitle(tr("Уровни и кривые"))
+        self.setModal(False)
+        self.setWindowFlags(self.windowFlags() | Qt.WindowMaximizeButtonHint)
+        geo = QApplication.primaryScreen().availableGeometry() if QApplication.primaryScreen() else QRect(0, 0, 1400, 900)
+        self.resize(min(1360, geo.width() - 60), min(880, geo.height() - 80))
+        self.levels = LevelsEditor()
+        self.panel = CurvesPanel(520)
+        self.stack = PageStack()
+        self.stack.addWidget(self.levels)
+        self.stack.addWidget(self.panel)
+        self.seg = Segmented([("Уровни", 0), ("Кривые", 1)], 1)
+        self.seg.changed.connect(self.show_tab)
+        self.preview = PhotoPreview()
+        b_orig = btn("Показать оригинал (удерживайте)", None, ico="eye")
+        b_orig.pressed.connect(lambda: app.adj_show_original(True))
+        b_orig.released.connect(lambda: app.adj_show_original(False))
+        left = vbox(self.seg, self.stack, None, spacing=10)
+        lw = QWidget()
+        lw.setLayout(left)
+        lw.setFixedWidth(560)
+        right = vbox(self.preview, hbox(b_orig, None, btn("Закрыть", self.close, "primary"), spacing=8), spacing=10)
+        self.setLayout(hbox(lw, right, spacing=16, margins=(16, 14, 16, 14)))
+        self.show_tab(1)
+
+    def show_tab(self, i):
+        self.stack.setCurrentIndex(i)
+        self.seg.set(i)
+
+
+class SelColorPanel(QWidget):
+    """Выборочный цвет: для каждого из шести цветов — оттенок, насыщенность и яркость."""
+    changed = Signal(object)
+    NAMES = (("R", "Красный", "#ff5a5a"), ("Y", "Жёлтый", "#ffd21f"), ("G", "Зелёный", "#4fd06a"),
+             ("C", "Голубой", "#3fd0e0"), ("B", "Синий", "#5a8cff"), ("M", "Пурпурный", "#d96bff"))
+
+    def __init__(self):
+        super().__init__()
+        self.vals = [list(ct.SEL_NEUTRAL) for _ in ct.SEL_COLORS]
+        self.cur = 0
+        self.lock = False
+        row = hbox(spacing=4)
+        self.chips = []
+        for i, (k, name, col) in enumerate(self.NAMES):
+            b = MotionButton(k)
+            b.setProperty("kind", "chip")
+            b.setCheckable(True)
+            b.setToolTip(tr(name))
+            b.setStyleSheet("QPushButton{color:%s;font-weight:700;}QPushButton:checked{color:%s;}" % (col, T["accent_text"]))
+            b.clicked.connect(lambda _=False, i=i: self.pick(i))
+            self.chips.append(b)
+            row.addWidget(b)
+        self.sl, self.val = [], []
+        sl_rows = []
+        for j, (name, step) in enumerate((("Оттенок", 1), ("Насыщенность", 1), ("Яркость", 1))):
+            s = _ResetSlider(Qt.Horizontal)
+            s.setRange(-100, 100)
+            s.setValue(0)
+            v = lbl("0", "muted")
+            v.setFixedWidth(34)
+            v.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+            s.valueChanged.connect(lambda x, j=j: self._moved(j, x))
+            s.reset.connect(lambda j=j: self.sl[j].setValue(0))
+            self.sl.append(s)
+            self.val.append(v)
+            sl_rows.append(vbox(hbox(lbl(name), None, v), s, spacing=1, margins=(0, 3, 0, 3)))
+        self.l_name = lbl("", "muted")
+        self.setLayout(vbox(row, self.l_name, *sl_rows, hbox(btn("Сбросить цвет", self.reset_cur, "link"), btn("Сбросить всё", self.reset_all, "link"), None),
+                            hint("Серые и нейтральные цвета не затрагиваются."), spacing=6))
+        self.pick(0)
+
+    def pick(self, i):
+        self.cur = i
+        for k, b in enumerate(self.chips):
+            b.setChecked(k == i)
+        self.l_name.setText(tr(self.NAMES[i][1]))
+        self._show()
+
+    def _show(self):
+        self.lock = True
+        for j, s in enumerate(self.sl):
+            v = int(round(self.vals[self.cur][j]))
+            s.setValue(v)
+            self.val[j].setText("%+d" % v if v else "0")
+        self.lock = False
+
+    def set_value(self, sel):
+        self.vals = [list(r) for r in ct.selcol_full(sel)]
+        self._show()
+
+    def _moved(self, j, x):
+        self.val[j].setText("%+d" % x if x else "0")
+        if self.lock:
+            return
+        self.vals[self.cur][j] = float(x)
+        self.changed.emit(ct.norm_selcol(self.vals))
+
+    def reset_cur(self):
+        self.vals[self.cur] = list(ct.SEL_NEUTRAL)
+        self._show()
+        self.changed.emit(ct.norm_selcol(self.vals))
+
+    def reset_all(self):
+        self.vals = [list(ct.SEL_NEUTRAL) for _ in ct.SEL_COLORS]
+        self._show()
+        self.changed.emit(ct.norm_selcol(self.vals))
 
 
 class SendOverlay(QWidget):
@@ -1343,7 +2429,69 @@ class PrintButton(QPushButton):
 
 # ---------------------------------------------------------------- вид «Лист»: несколько фото на одном листе
 
-NUP = {1: (1, 1), 2: (1, 2), 3: (1, 3), 4: (2, 2), 6: (2, 3), 8: (2, 4), 9: (3, 3)}     # фото на листе -> (столбцов, рядов) на книжном листе
+NUP = {1: (1, 1), 2: (1, 2), 3: (1, 3), 4: (2, 2), 6: (2, 3), 8: (2, 4), 9: (3, 3),
+       12: (3, 4), 16: (4, 4), 24: (4, 6)}                                # быстрый выбор: фото на листе -> (столбцов, рядов) на книжном листе
+NUP_MAX = 30
+
+
+def nup_grid(n):
+    """Сетка (столбцов, рядов) на книжном листе для любого числа фото: ближайшая к квадрату без пустых ячеек
+    (простое число — в один ряд)."""
+    n = max(1, min(NUP_MAX, int(n)))
+    if n in NUP:
+        return NUP[n]
+    c = max(d for d in range(1, int(n ** 0.5) + 1) if n % d == 0)
+    return c, n // c
+
+
+class NupPicker(QFrame):
+    """Сколько фото на листе: быстрые кнопки и ручной ввод числа."""
+    changed = Signal(int)
+
+    def __init__(self, value=1):
+        super().__init__()
+        self.group = QButtonGroup(self)
+        self.group.setExclusive(False)
+        grid = QGridLayout()
+        grid.setSpacing(4)
+        grid.setContentsMargins(0, 0, 0, 0)
+        self.btns = {}
+        for i, n in enumerate(NUP):
+            b = MotionButton(str(n))
+            b.setProperty("kind", "chip")
+            b.setCheckable(True)
+            b.setCursor(Qt.PointingHandCursor)
+            b.clicked.connect(lambda _=False, k=n: self._pick(k))
+            self.btns[n] = b
+            grid.addWidget(b, i // 5, i % 5)
+        self.spin = QLineEdit()
+        self.spin.setValidator(QIntValidator(1, NUP_MAX))
+        self.spin.setFixedWidth(64)
+        self.spin.setAlignment(Qt.AlignCenter)
+        self.spin.setToolTip(tr("Своё число фото на листе"))
+        self.spin.editingFinished.connect(self._typed)
+        self.setLayout(vbox(grid, hbox(lbl("Своё число", "muted"), self.spin, None), spacing=6))
+        self.set(value)
+
+    def _pick(self, n):
+        self.set(n)
+        self.changed.emit(int(n))
+
+    def _typed(self):
+        t = self.spin.text().strip()
+        if t.isdigit() and 1 <= int(t) <= NUP_MAX and int(t) != self.cur:
+            self._pick(int(t))
+        else:
+            self.spin.setText(str(self.cur))
+
+    def set(self, n):
+        self.cur = int(n)
+        for k, b in self.btns.items():
+            b.setChecked(k == n)
+        self.spin.setText(str(self.cur))
+
+    def value(self):
+        return self.cur
 
 
 class Aff:
@@ -1895,6 +3043,7 @@ class SaveSignals(QObject):
     done = Signal(int, list, object, list)
     sheets_ready = Signal(list, str)
     printed = Signal(str, int, str)
+    doc_edited = Signal(str)
     queue = Signal(object, str)
     smart_progress = Signal(int, int, str)
     smart_done = Signal(object, str)
@@ -2969,8 +4118,346 @@ class SmartMixin:
             QTimer.singleShot(250, lambda: self.smart_run(files=files, auto=True))
 
 
-class MainWindow(SmartMixin, QMainWindow):
+# ---------------------------------------------------------------- обновление с GitHub
+APP_VERSION = "1.1.0"
+RELEASES_API = "https://api.github.com/repos/ildargiv/KopiTehnik-Print/releases/latest"
+RELEASES_PAGE = "https://github.com/ildargiv/KopiTehnik-Print/releases/latest"
+
+
+def _ver(tag):
+    import re
+    return tuple(int(x) for x in re.findall(r"\d+", str(tag))[:3]) or (0,)
+
+
+def fetch_latest_release(timeout=8):
+    """(тег, адрес страницы) последнего релиза на GitHub или None, если проверить не удалось."""
+    import urllib.request
+    try:
+        rq = urllib.request.Request(RELEASES_API, headers={"User-Agent": "KopiTehnikPrint", "Accept": "application/vnd.github+json"})
+        with urllib.request.urlopen(rq, timeout=timeout) as r:
+            d = json.loads(r.read().decode("utf-8"))
+        return str(d.get("tag_name", "")), str(d.get("html_url") or RELEASES_PAGE)
+    except Exception:
+        return None
+
+
+def update_available(latest):
+    return bool(latest and latest[0] and _ver(latest[0]) > _ver(APP_VERSION))
+
+
+# ---------------------------------------------------------------- режим «Документ»: PDF и Word, печать с отдельным профилем
+import doc_tools as dt                                          # noqa: E402
+
+DOC_EXTS = {".pdf", ".doc", ".docx", ".docm", ".dot", ".dotx", ".rtf", ".odt", ".wps", ".xls", ".xlsx", ".xlsm", ".ods",
+            ".ppt", ".pptx", ".pptm", ".pps", ".ppsx", ".odp"}
+
+
+class DocView(QWidget):
+    """Окно просмотра документа: пустой экран с кнопкой или постраничный просмотр PDF."""
+
+    def __init__(self, app):
+        super().__init__()
+        from PySide6.QtPdf import QPdfDocument
+        from PySide6.QtPdfWidgets import QPdfView
+        self.app = app
+        self.doc = QPdfDocument(self)
+        self.view = QPdfView(self)
+        self.view.setDocument(self.doc)
+        self.view.setPageMode(QPdfView.PageMode.MultiPage)
+        self.view.setZoomMode(QPdfView.ZoomMode.FitToWidth)
+        self.view.setPageSpacing(12)
+        self.view.setStyleSheet("background: transparent; border: none;")
+        self.empty = QWidget()
+        self.empty.setAttribute(Qt.WA_TranslucentBackground)
+        self.b_open = btn("Открыть документ…", app.doc_open, "primary", big=True, ico="open")
+        el = vbox(None, hbox(None, lbl("Документ", "h1"), None), hbox(None, lbl("PDF, Word, Excel, PowerPoint и другие офисные файлы", "muted"), None),
+                  hbox(None, self.b_open, None), None, spacing=10)
+        self.empty.setLayout(el)
+        self.stack = QStackedWidget()
+        self.stack.addWidget(self.empty)
+        self.stack.addWidget(self.view)
+        self.setLayout(vbox(self.stack))
+        self.setAcceptDrops(True)
+
+    def load(self, pdf):
+        self.doc.load(str(pdf))
+        self.stack.setCurrentIndex(1 if self.doc.pageCount() > 0 else 0)
+        return self.doc.pageCount()
+
+    def clear(self):
+        self.doc.close()
+        self.stack.setCurrentIndex(0)
+
+    def paintEvent(self, e):
+        p = QPainter(self)
+        bg = QPainterPath()
+        bg.addRoundedRect(QRectF(self.rect()), 14, 14)
+        p.fillPath(bg, QColor(T["canvas"]))
+        p.end()
+
+    def dragEnterEvent(self, e):
+        if e.mimeData().hasUrls():
+            e.acceptProposedAction()
+
+    def dropEvent(self, e):
+        for u in e.mimeData().urls():
+            if u.isLocalFile():
+                self.app.doc_load(Path(u.toLocalFile()))
+                break
+
+
+class DocMixin:
+    """Режим «Документ»: открыть PDF/Word, выбрать страницы и бумагу, напечатать со своим профилем принтера.
+    Правка PDF и распознавание текста запускаются в программе «КопиТехник Конвертор»."""
+
+    def _doc_init(self):
+        st = self.settings
+        self.doc = {"src": None, "pdf": None, "pages": 0}
+        self.d = {"paper": st.get("doc_paper") if st.get("doc_paper") in dt.PAPERS else "A4",
+                  "fit": st.get("doc_fit") if st.get("doc_fit") in ("fit", "shrink", "actual") else "fit",
+                  "margin": str(st.get("doc_margin", "5")), "cm_on": bool(st.get("doc_cm_on", False)), "icc": st.get("doc_icc", ""),
+                  "range": "", "copies": 1}
+
+    def _page_doc(self):
+        d = self.d
+        self.l_doc = lbl("Документ не открыт", wrap=True)
+        self.l_doc2 = lbl("", "muted", wrap=True)
+        self.b_doc_edit = btn("Редактировать PDF", lambda: self.doc_convert(False), ico="move", tip="Откроется в программе «КопиТехник Конвертор»")
+        self.b_doc_ocr = btn("Распознать текст", lambda: self.doc_convert(True), ico="sparkle", tip="Распознавание в «КопиТехник Конвертор»")
+        doc = card("Документ", self.l_doc, self.l_doc2, btn("Открыть документ…", self.doc_open, ico="open"),
+                   self.b_doc_edit, self.b_doc_ocr)
+        cb = QComboBox()
+        cb.addItems(list(dt.PAPERS))
+        cb.setCurrentText(d["paper"])
+        cb.activated.connect(lambda _i: (d.__setitem__("paper", cb.currentText()), self.settings.__setitem__("doc_paper", cb.currentText())))
+        seg = QComboBox()
+        for text, val in (("По листу", "fit"), ("Только уменьшить", "shrink"), ("Как есть", "actual")):
+            seg.addItem(tr(text), val)
+        seg.setCurrentIndex(max(0, seg.findData(d["fit"])))
+        seg.activated.connect(lambda i: (d.__setitem__("fit", seg.itemData(i)), self.settings.__setitem__("doc_fit", seg.itemData(i))))
+        e_mar = QLineEdit(d["margin"])
+        e_mar.setFixedWidth(46)
+        e_mar.textEdited.connect(lambda v: (d.__setitem__("margin", v), self.settings.__setitem__("doc_margin", v)))
+        e_rng = QLineEdit()
+        e_rng.setPlaceholderText(tr("все, или 1-3, 5, 8-"))
+        e_rng.textEdited.connect(lambda v: d.__setitem__("range", v))
+        l_cop = lbl("1")
+        l_cop.setFixedWidth(30)
+        l_cop.setAlignment(Qt.AlignCenter)
+
+        def step(k):
+            d["copies"] = max(1, min(99, d["copies"] + k))
+            l_cop.setText(str(d["copies"]))
+        cop = hbox(ibtn("minus", "Меньше копий", lambda: step(-1), 30, True, isize=15), l_cop,
+                   ibtn("plus", "Больше копий", lambda: step(1), 30, True, isize=15), spacing=4)
+        self.l_doc_printer = lbl("", "muted", wrap=True)
+        prn = card("Печать документа", row("Бумага", cb), row("Как страница ложится на лист", seg),
+                   row("Поля, мм", e_mar), row("Страницы", e_rng), row("Копий", cop), self.l_doc_printer)
+        sw = Switch(d["cm_on"])
+        sw.toggled.connect(lambda on: (d.__setitem__("cm_on", bool(on)), self.settings.__setitem__("doc_cm_on", bool(on))))
+        self.l_doc_icc = lbl(self._doc_icc_text(), "muted", wrap=True)
+        prof = card("Профиль для документов", row("Использовать профиль принтера", sw), self.l_doc_icc,
+                    btn("Выбрать профиль…", self.doc_pick_icc, ico="profile"),
+                    lbl("У документов своя бумага и свой профиль, он не связан с профилем фото.", "muted", wrap=True))
+        return self._scroll(doc, prn, prof)
+
+    def _doc_icc_text(self):
+        p = self.d["icc"].strip()
+        return Path(p).name if p else tr("Профиль не выбран")
+
+    def doc_pick_icc(self):
+        p, _ = QFileDialog.getOpenFileName(self, tr("Цветовой профиль принтера"), self.settings.get("icc_dir") or "",
+                                           "ICC (*.icc *.icm);;* (*.*)")
+        if p:
+            self.d["icc"] = p
+            self.settings["doc_icc"] = p
+            self.l_doc_icc.setText(self._doc_icc_text())
+
+    # ---- открыть
+    def doc_open(self):
+        p, _ = QFileDialog.getOpenFileName(self, tr("Открыть документ"), self.start_dir(),
+                                           "%s (%s);;* (*.*)" % (tr("Документы"), " ".join("*" + x for x in sorted(DOC_EXTS))))
+        if p:
+            self.doc_load(Path(p))
+
+    def doc_load(self, path):
+        import office_convert as oc
+        ext = path.suffix.lower()
+        if ext not in DOC_EXTS:
+            warn(self, "Этот тип файла не поддерживается.")
+            return
+        pdf = path
+        if ext != ".pdf":
+            QApplication.setOverrideCursor(Qt.WaitCursor)
+            try:
+                pdf = oc.cached_pdf(path)
+            except Exception as ex:
+                warn(self, tr("Не удалось перевести документ в PDF") + ":\n%s" % ex)
+                return
+            finally:
+                QApplication.restoreOverrideCursor()
+        n = self.doc_view.load(pdf)
+        if n <= 0:
+            warn(self, "Не удалось открыть PDF.")
+            return
+        self.doc.update(src=path, pdf=pdf, pages=n)
+        self.l_doc.setText(path.name)
+        self.l_doc2.setText(trf("Страниц: {n}", n=n) + ("" if ext == ".pdf" else "  ·  " + tr("переведён в PDF")))
+
+    # ---- конвертер: правка PDF и распознавание
+    def doc_convert(self, ocr):
+        src = self.doc["src"]
+        if not src:
+            info(self, "Сначала откройте документ.")
+            return
+        exe = dt.find_converter(self.settings.get("converter_path", ""))
+        if not exe:
+            box = QMessageBox(self)
+            box.setWindowTitle("PhotoCrop")
+            box.setText(tr("Правка PDF и распознавание делаются в программе «КопиТехник Конвертор». Она не найдена на этом компьютере."))
+            go = box.addButton(tr("Скачать конвертер"), QMessageBox.AcceptRole)
+            hand = box.addButton(tr("Указать Converter.exe…"), QMessageBox.ActionRole)
+            box.addButton(tr("Отмена"), QMessageBox.RejectRole)
+            box.exec()
+            if box.clickedButton() is go:
+                import webbrowser
+                webbrowser.open(dt.CONVERTER_RELEASES)
+            elif box.clickedButton() is hand:
+                p, _ = QFileDialog.getOpenFileName(self, "Converter.exe", "", "Converter.exe (*.exe)")
+                if p:
+                    self.settings["converter_path"] = p
+                    self.doc_convert(ocr)
+            return
+        self.l_doc2.setText(tr("Открыт конвертер: закончите правку и сохраните."))
+        QApplication.setOverrideCursor(Qt.WaitCursor)
+
+        def work():
+            try:
+                self.sig.doc_edited.emit(dt.run_edit(exe, src, ocr) or "")
+            except Exception as ex:
+                self.sig.doc_edited.emit("!" + str(ex))
+        threading.Thread(target=work, daemon=True).start()
+
+    def _doc_edited(self, result):
+        QApplication.restoreOverrideCursor()
+        if result.startswith("!"):
+            warn(self, tr("Не удалось запустить конвертер") + ":\n" + result[1:])
+        elif result:
+            self.doc_load(Path(result))
+            self.l_doc2.setText(self.l_doc2.text() + "  ·  " + tr("изменён в конвертере"))
+        else:
+            self.l_doc2.setText(trf("Страниц: {n}", n=self.doc["pages"]))
+
+    # ---- печать
+    def print_doc(self):
+        if self.saving or self.printing:
+            return
+        pdf = self.doc["pdf"]
+        if not pdf or self.doc["pages"] <= 0:
+            info(self, "Сначала откройте документ.")
+            return
+        pr, d = self.pr, self.d
+        if not pr["printer"] or self.blob is None:
+            self.show_page(2)
+            info(self, "Принтер не выбран или недоступен. Выберите принтер на вкладке «Принтер».")
+            return
+        try:
+            pages = dt.parse_range(d["range"], self.doc["pages"])
+        except ValueError as ex:
+            warn(self, tr("Неверный диапазон страниц") + ": %s" % ex)
+            return
+        cm = None
+        if d["cm_on"]:
+            try:
+                cm = pc.cm_build(d["icc"], self.s["intent"], self.s["bpc"], self.s["embed"])
+            except ValueError as ex:
+                warn(self, str(ex))
+                return
+        try:
+            margin = max(0.0, min(30.0, float(str(d["margin"]).replace(",", ".") or 0)))
+        except ValueError:
+            margin = 0.0
+        pw, ph = dt.PAPERS[d["paper"]]
+        try:
+            blob = self.blob
+            code = self._match_paper(pw, ph)
+            blob = pc.devmode_write(blob, {"paper": code} if code is not None else {"paper_mm": [pw, ph]})
+            blob = pc.prepare_blob(pr["printer"], blob, "portrait", {"paper": pc.PAPER_DRIVER, "icm_off": bool(pr["icm_off"])})
+            geom = pc.printer_geometry(pr["printer"], blob, "portrait")
+            ppi = pc.resolve_ppi({"ppi": pr["ppi"]}, geom)
+        except Exception as ex:
+            warn(self, tr("Не удалось подготовить печать") + ":\n%s" % ex)
+            return
+        total = len(pages) * d["copies"]
+        text = "%s\n%s: %s\n%s: %s, %s: %d\n%s: %d" % (self.doc["src"].name, tr("Принтер"), pr["printer"], tr("Бумага"), d["paper"],
+                                                       tr("копий"), d["copies"], tr("Листов к печати"), total)
+        if cm:
+            text += "\n%s: %s" % (tr("Профиль принтера"), cm["name"])
+        if not ask(self, text + "\n\n" + tr("Начать печать?")):
+            return
+        name, src = self.doc["src"].name, self.doc["src"]
+        self.cancel.clear()
+        self.printing = True
+        self._print_files = []
+        self._busy(total, tr("Подготовка…"), [], "print")
+        self.b_print.set_progress(0.0)
+        self.b_cancel.show()
+        job = dict(printer=pr["printer"], blob=blob, geom=geom, ppi=ppi, pages=pages, copies=d["copies"], fit=d["fit"], margin=margin,
+                   cm=cm, pdf=str(pdf), name=name, paper=d["paper"], total=total)
+
+        def work():
+            try:
+                done, sent = self._doc_print_job(job)
+                self.sig.printed.emit("done" if done else "cancelled", sent, "")
+            except Exception as ex:
+                self.sig.printed.emit("error", 0, "%s: %s" % (ex.__class__.__name__, ex))
+        threading.Thread(target=work, daemon=True).start()
+
+    def _doc_print_job(self, j):
+        """В потоке: страницы рендерятся и одним заданием уходят на принтер. В журнал печати идёт только полностью отправленное задание."""
+        from PySide6.QtCore import QSize
+        from PySide6.QtPdf import QPdfDocument
+        doc = QPdfDocument()
+        if doc.load(j["pdf"]) != QPdfDocument.Error.None_:
+            raise OSError("Не удалось открыть PDF для печати.")
+        paper_w, paper_h = j["geom"]["paper"]
+        W, H = round(paper_w / 25.4 * j["ppi"]), round(paper_h / 25.4 * j["ppi"])
+        sent = 0
+        with pc.PrinterJob(j["printer"], j["blob"], j["name"]) as job:
+            for pi in j["pages"]:
+                sz = doc.pagePointSize(pi)
+                pgw, pgh = sz.width() / 72 * 25.4, sz.height() / 72 * 25.4
+                x, y, w, h, rot = dt.place_page(pgw, pgh, paper_w, paper_h, j["fit"], j["margin"])
+                px, py, pw_, ph_ = (round(v / 25.4 * j["ppi"]) for v in (x, y, w, h))
+                rw, rh = (ph_, pw_) if rot else (pw_, ph_)
+                for _ in range(j["copies"]):
+                    if self.cancel.is_set():
+                        job.abort()
+                        return False, 0
+                    qi = doc.render(pi, QSize(max(1, rw), max(1, rh)))
+                    qi = qi.convertToFormat(QImage.Format_RGBA8888)
+                    im = pc.Image.frombuffer("RGBA", (qi.width(), qi.height()), bytes(qi.constBits()), "raw", "RGBA", qi.bytesPerLine(), 1)
+                    if rot:
+                        im = im.transpose(pc.Image.ROTATE_90)
+                    sheet = pc.Image.new("RGB", (W, H), "white")
+                    sheet.paste(im, (px, py), im)
+                    if j["cm"]:
+                        sheet = pc.apply_printer_profile(sheet, None, j["cm"])
+                    job.page(sheet)
+                    sent += 1
+                    self.sig.progress.emit(sent - 1, j["total"], "\x01" + tr("Отправляю в печать страницу") + " %d…" % (pi + 1))
+            job.finish()
+        try:
+            import print_stats
+            print_stats.record(j["printer"], 0, "%gx%g" % dt.PAPERS[j["paper"]], "document", "app", sent, [j["name"]], kind="doc")
+        except Exception:
+            pass
+        return True, sent
+
+
+class MainWindow(SmartMixin, DocMixin, QMainWindow):
     _only = None                         # на время расчёта листа — печатать только это фото
+    update_checked = Signal(object, bool)    # (результат проверки, показать ли ответ «обновлений нет»)
 
     def __init__(self):
         super().__init__()
@@ -2992,7 +4479,7 @@ class MainWindow(SmartMixin, QMainWindow):
             "quality": int(st.get("quality", 95)), "cm_on": bool(st.get("cm_on", False)), "icc": st.get("icc", ""),
             "intent": first(pc.INTENTS, st.get("intent")), "bpc": bool(st.get("bpc", True)), "embed": bool(st.get("embed", True)),
             "proof": False, "gamut": False, "adj_scope": "one",
-            "nup": st.get("nup") if st.get("nup") in NUP else 1, "borders": bool(st.get("borders", False)),
+            "nup": (int(st["nup"]) if str(st.get("nup", "")).isdigit() and 1 <= int(st["nup"]) <= NUP_MAX else 1), "borders": bool(st.get("borders", False)),
             "border_mm": ("%g" % float(st.get("border_mm", 3) or 3)), "fill": bool(st.get("sheet_fill", False)), "free": False,
         }
         self.view = "crop"
@@ -3018,6 +4505,8 @@ class MainWindow(SmartMixin, QMainWindow):
         self.sig.done.connect(self._save_done)
         self.sig.sheets_ready.connect(self._print_sheets_ready)
         self.sig.printed.connect(self._print_done)
+        self.sig.doc_edited.connect(self._doc_edited)
+        self._doc_init()
         self.sig.queue.connect(self._queue_ready)
         self.smart_init()
         pr = self.pr = {"printer": "", "ppi": "Авто", "sharp": 0, "marks": False, "shrink": "0", "icm_off": True, "copies": 1,
@@ -3034,7 +4523,7 @@ class MainWindow(SmartMixin, QMainWindow):
         self._auto_timer.setInterval(pc.AUTOSAVE_SECONDS * 1000)
         self._auto_timer.timeout.connect(self._autosave_tick)
         self._auto_timer.start()
-        self.setWindowTitle(tr("PhotoCrop — кадрирование для фотопечати"))
+        self.setWindowTitle(tr("КопиТехник Принт — кадрирование для фотопечати"))
         self.setAcceptDrops(True)
         self.resize(1400, 880)
         self.build()
@@ -3059,11 +4548,14 @@ class MainWindow(SmartMixin, QMainWindow):
         self.center_stack = QStackedWidget()
         self.center_stack.addWidget(self.canvas)
         self.center_stack.addWidget(self.sheet_view)
+        self.doc_view = DocView(self)
+        self.center_stack.addWidget(self.doc_view)
         self.overlay = SendOverlay(self.center_stack)
         outer = vbox(self._topbar(), spacing=0)
         if T.get("orn"):
             outer.addWidget(OrnBand())
-        main = hbox(self._left(), self._center(), self._right(), spacing=0)
+        self.left_w = self._left()
+        main = hbox(self.left_w, self._center(), self._right(), spacing=0)
         main.setStretch(1, 1)
         outer.addLayout(main, 1)
         root.setLayout(outer)
@@ -3074,6 +4566,39 @@ class MainWindow(SmartMixin, QMainWindow):
         self.upd_counts()
         self.sync_inspector()
         self.redraw()
+        if "--selftest" not in sys.argv and not getattr(self, "_upd_wired", False):
+            self._upd_wired = True
+            self.update_checked.connect(self._update_result)
+            if self.settings.get("check_updates", True):
+                QTimer.singleShot(4000, lambda: self.check_updates(False))
+
+    def check_updates(self, manual=True):
+        """Проверка последнего релиза на GitHub в фоне; manual — ответить и когда обновлений нет."""
+        threading.Thread(target=lambda: self.update_checked.emit(fetch_latest_release(), manual), daemon=True).start()
+
+    def _update_result(self, latest, manual):
+        if latest is None:
+            if manual:
+                warn(self, "Не удалось проверить обновления. Проверьте подключение к интернету.")
+            return
+        if not update_available(latest):
+            if manual:
+                info(self, "%s %s" % (tr("У вас последняя версия:"), APP_VERSION))
+            return
+        if not manual and self.settings.get("skip_update") == latest[0]:
+            return
+        box = QMessageBox(self)
+        box.setWindowTitle(tr("Доступно обновление"))
+        box.setText("%s %s → %s" % (tr("Вышла новая версия:"), APP_VERSION, latest[0]))
+        go = box.addButton(tr("Открыть страницу загрузки"), QMessageBox.AcceptRole)
+        skip = box.addButton(tr("Пропустить эту версию"), QMessageBox.DestructiveRole)
+        box.addButton(tr("Позже"), QMessageBox.RejectRole)
+        box.exec()
+        if box.clickedButton() is go:
+            import webbrowser
+            webbrowser.open(latest[1])
+        elif box.clickedButton() is skip:
+            self.settings["skip_update"] = latest[0]
 
     def copies_chip(self):
         """Копий каждого листа: заметная цветная плашка в плавающей панели над рабочим полем (одна величина на все панели)."""
@@ -3103,15 +4628,19 @@ class MainWindow(SmartMixin, QMainWindow):
         bar = QFrame()
         bar.setObjectName("topbar")
         bar.setFixedHeight(58)
-        logo = QLabel()
-        logo.setPixmap(self._logo())
-        name = lbl("PhotoCrop", "logo")
+        brand = tr("КопиТехник Принт")
+        logo = LogoMark(brand[:1].upper())
+        name = BrandTitle()                                      # название видно и на узком экране
+        name.setText(brand)
         cp = self.compact
-        if cp:
-            name.hide()
+
+        self._caps = []
+        self._photo_only = []                        # элементы верхней панели, нужные только в режиме «Фото»
 
         def cap(text):                               # подпись у элемента; на узком экране скрыта (смысл — в подсказке)
             c_ = lbl(text, "muted")
+            self._photo_only.append(c_)
+            self._caps.append(c_)
             if cp:
                 c_.hide()
             return c_
@@ -3120,7 +4649,9 @@ class MainWindow(SmartMixin, QMainWindow):
         self.cb_format.setCurrentText(self.s["format"])
         self.cb_format.setMinimumWidth(120 if self.compact else 150)
         self.cb_format.currentTextChanged.connect(lambda v: self._layout_set("format", v))
-        self.seg_nup = Segmented([(str(n), n) for n in NUP], self.s["nup"])
+        self.mode_switch = ModeSwitch(getattr(self, "app_mode", "photo"))
+        self.mode_switch.changed.connect(self.set_app_mode)
+        self.seg_nup = NupPicker(self.s["nup"])
         self.seg_nup.setToolTip(tr("Сколько фото печатать на одном листе"))
         self.seg_nup.changed.connect(lambda v: self._layout_set("nup", v))
         self.sw_borders = Switch(self.s["borders"])
@@ -3141,11 +4672,12 @@ class MainWindow(SmartMixin, QMainWindow):
         more.setMenu(menu)
         more.setPopupMode(QToolButton.InstantPopup)
         l = hbox(logo, name, 10, btn("Открыть", self.open_any, "primary", ico="open", tip="Открыть фото или папку (Ctrl+O)"), 10,
-                 cap("Бумага"), self.cb_format, 6, cap("Фото на листе"), self.seg_nup, 6,
-                 cap("Поля"), self.sw_borders, self.e_border, lbl("мм", "muted"), None,
+                 self.mode_switch, 10, cap("Бумага"), self.cb_format, 6,
+                 None,
                  self.seg_view, 6, self.b_grid, more, ibtn("settings", "Настройки", self.open_settings),
                  spacing=8, margins=(16, 0, 12, 0))
         bar.setLayout(l)
+        self._photo_only += [self.cb_format, self.seg_view, self.b_grid]
         return bar
 
     @staticmethod
@@ -3217,6 +4749,12 @@ class MainWindow(SmartMixin, QMainWindow):
         pb.setParent(self.canvas)
         pb.hide()
         self.canvas.pbtn = pb
+        cb = btn("До / После", None, ico="eye", tip="Сравнить: слева снимок без правок, справа с правками. Проведите линию мышью по фото")
+        cb.setCheckable(True)
+        cb.setParent(self.canvas)
+        cb.toggled.connect(self.canvas.set_compare)
+        cb.hide()
+        self.canvas.cbtn = cb
         self.l_dot = QLabel("●")
         self.l_info = lbl("", "muted")
         st = hbox(self.l_dot, self.l_info, None, spacing=8, margins=(6, 8, 6, 0))
@@ -3234,7 +4772,10 @@ class MainWindow(SmartMixin, QMainWindow):
         self.pages.addWidget(self._page_color())
         self.pages.addWidget(self._page_print())
         self.pages.addWidget(self._page_smart())
-        self.seg_page = Segmented([("Фото", 0), ("Умная рамка", 3), ("Принтер", 2)], 0)
+        self.pages.addWidget(self._page_doc())
+        self.seg_page = Segmented([("Фото", 0), ("Цвет", 1), ("Умная рамка", 3), ("Принтер", 2), ("Документ", 4)], 0)
+        self.seg_page.group.button(4).hide()                 # вкладка «Документ» видна только в режиме документа
+        self.seg_page.setStyleSheet('QPushButton[kind="seg"]{padding:6px 9px;}')       # пять вкладок должны уместиться в панели
         self.seg_page.changed.connect(self.show_page)
         self.progress = QProgressBar()
         self.progress.setTextVisible(False)
@@ -3303,6 +4844,7 @@ class MainWindow(SmartMixin, QMainWindow):
         e_shrink.setFixedWidth(60)
         e_shrink.setToolTip(tr("Насколько уменьшить лист, чтобы принтер не срезал края при печати без полей. 0 — не менять."))
         e_shrink.textEdited.connect(lambda v: pr.__setitem__("shrink", v))
+        screen = card("Цвет на экране", row("Имитация печати на экране", self.sw_proof), row("Показать цвета вне охвата", self.sw_gamut))
         proc = card("Обработка", row("Разрешение печати, ppi", self.cb_ppi),
                     hbox(lbl("Резкость"), sl, l_sh), row("Метки реза", sw_marks),
                     row("Уменьшить лист, %", e_shrink), row("Цвет Windows (ICM) отключён", sw_icm))
@@ -3317,7 +4859,7 @@ class MainWindow(SmartMixin, QMainWindow):
         self.l_queue = lbl("Нажмите «Обновить», чтобы увидеть очередь.", "muted", wrap=True)
         queue = card("Очередь печати", self.l_queue,
                      hbox(btn("Обновить", self.queue_refresh), btn("Очистить", self.queue_clear), spacing=6))
-        return self._scroll(printer, proc, bleed, job, queue, btn("Старое окно печати…", self.open_print, "link"))
+        return self._scroll(printer, screen, proc, bleed, job, queue, btn("Старое окно печати…", self.open_print, "link"))
 
     def reload_printers(self):
         self.printers = pc.list_printers()
@@ -3447,6 +4989,8 @@ class MainWindow(SmartMixin, QMainWindow):
     def print_now(self, only=None):
         """Печать прямо из этого окна: листы собираются и уходят на выбранный принтер.
         only — напечатать только это фото (остальные отметки не трогаются)."""
+        if getattr(self, "app_mode", "photo") == "doc":
+            return self.print_doc()
         if self.saving or self.printing:
             return
         files = [only] if only is not None else self.checked_files()
@@ -3630,26 +5174,25 @@ class MainWindow(SmartMixin, QMainWindow):
         photo = card("Кадр", lbl("Ориентация рамки", "muted"), hbox(self.seg_orient, None),
                      lbl("Как фото ложится в рамку", "muted"), hbox(self.seg_mode, None),
                      row("Копий этого фото", cop),
-                     btn("Коррекция цвета", lambda: self.show_page(1), ico="color"),
                      hbox(btn("Сбросить рамку", self.reset_frame, "link"), None, btn("Сбросить все", self.reset_all, "link")))
         # --- лист
         self.l_sheet = lbl("", wrap=True)
         self.l_sheet2 = lbl("", "muted", wrap=True)
         sw_fill = Switch(s["fill"])
         sw_fill.toggled.connect(lambda on: self._layout_set("fill", bool(on)))
-        sheet = card("Лист", self.l_sheet, self.l_sheet2, row("Весь лист — копии одного фото", sw_fill),
+        sheet = card("Лист", lbl("Фото на листе"), self.seg_nup,
+                     row("Рамка и поля", hbox(self.sw_borders, self.e_border, lbl("мм", "muted"), spacing=6)),
+                     self.l_sheet, self.l_sheet2, row("Весь лист — копии одного фото", sw_fill),
                      btn("Показать лист", lambda: self.set_view("sheet"), ico="image"))
-        # --- цвет
+        # --- цвет (профиль принтера выбирается на странице «Принтер»)
         self.sw_cm, self.sw_proof, self.sw_gamut = Switch(s["cm_on"]), Switch(False), Switch(False)
         self.sw_cm.toggled.connect(lambda on: (self._cm_set("cm_on", on), self.sw_cm2.set(on)))
         self.sw_proof.toggled.connect(lambda on: self._cm_set("proof", on))
         self.sw_gamut.toggled.connect(lambda on: self._cm_set("gamut", on))
         self.l_icc = lbl("", "muted", wrap=True)
-        color = card("Цвет", row("Профиль принтера", self.sw_cm), self.l_icc,
-                     btn("Выбрать профиль…", self.open_cm_dialog, ico="profile"),
-                     row("Имитация печати на экране", self.sw_proof), row("Показать цвета вне охвата", self.sw_gamut))
+        self.l_icc.hide()
         self._icc_info()
-        return self._scroll(photo, sheet, color)
+        return self._scroll(photo, sheet)
 
     # ---------- страница «Коррекция цвета» (вместо отдельного окна)
     ADJ_FMT_SIGNED = ("bright", "contrast", "shadows", "highlights", "sat", "vib", "temp", "tint", "r", "g", "b")
@@ -3657,14 +5200,12 @@ class MainWindow(SmartMixin, QMainWindow):
     def _page_color(self):
         self.adj_lock = True
         self.sliders, self.slider_lbl = {}, {}
-        back = btn("Параметры", lambda: self.show_page(0), "link", ico="back", ico_color=T["muted"])
         self.seg_scope = Segmented([("это фото", "one"), ("все отмеченные", "all")], self.s["adj_scope"])
         self.seg_scope.changed.connect(lambda v: self._set("adj_scope", v, redraw=False))
         self.hist = Histogram()
         self.l_hist = lbl("", "muted", wrap=True)
         tabs = Segmented([(t_[0], i) for i, t_ in enumerate(pc.AdjustPanel.TABS)], 0)
-        stack = QStackedWidget()
-        tabs.changed.connect(stack.setCurrentIndex)
+        stack = PageStack()
         for title, rows in pc.AdjustPanel.TABS:
             page = QWidget()
             l = vbox(spacing=4)
@@ -3686,14 +5227,43 @@ class MainWindow(SmartMixin, QMainWindow):
             l.addStretch(1)
             page.setLayout(l)
             stack.addWidget(page)
+        n_tabs = len(pc.AdjustPanel.TABS)                   # дальше: уровни, кривые, выборочный цвет
+        self.levels_ed = LevelsEditor()
+        self.levels_ed.changed.connect(lambda v: self.levels_changed(v, self.levels_ed))
+        self.levels_ed.auto_requested.connect(self.levels_auto)
+        self.curves_panel = CurvesPanel(230)
+        self.curves_panel.changed.connect(lambda v: self.curves_changed(self.curves_panel, v))
+        if getattr(self, "curves_win", None) is not None:      # окно кривых от прежнего построения интерфейса
+            self.curves_win.close()
+            self.curves_win = None
+        curv_page = QWidget()
+        curv_page.setLayout(vbox(self.curves_panel, hbox(btn("На весь экран…", self.open_curves_window, ico="image"), None), spacing=8))
+        self.levels_ed.layout().addLayout(hbox(btn("На весь экран…", lambda: self.open_color_window(0), ico="image"), None))
+        self.sel_panel = SelColorPanel()
+        self.sel_panel.changed.connect(self.selcol_changed)
+        for w_ in (self.levels_ed, curv_page, self.sel_panel):
+            stack.addWidget(w_)
+
+        tabs2 = Segmented([("Уровни", n_tabs), ("Кривые", n_tabs + 1), ("По цветам", n_tabs + 2)], n_tabs)
+        tabs2.clear()
+        tabs.changed.connect(lambda i: (stack.setCurrentIndex(i), tabs2.clear()))
+        tabs2.changed.connect(lambda i: (stack.setCurrentIndex(i), tabs.clear()))
         self.l_enh = lbl("", "muted", wrap=True)
         self.l_enh.hide()
         b_orig = ibtn("eye", "Показать оригинал (удерживайте)", None, 34, True)
         b_orig.pressed.connect(lambda: self.adj_show_original(True))
         b_orig.released.connect(lambda: self.adj_show_original(False))
-        b_enh = btn("Улучшить", lambda: self.enhance(1), ico="sparkle", tip="Улучшение для печати на Epson: светлее, чуть контрастнее и резче. Подбирается под каждый снимок.")
+        b_enh = btn("Улучшить", lambda: self.enhance(1), ico="sparkle", tip="Улучшение для печати на Epson: светлее, чуть контрастнее и резче. Подбирается под каждый снимок. Прежняя коррекция сбрасывается.")
         b_sup = btn("Супер", lambda: self.enhance(2), ico="sparkle", tip="Более сильное улучшение: ярче, сочнее, резче")
+        self.b_pre, self.b_pre_save = {}, {}
+        for n in (1, 2):
+            b = btn("Пресет %d" % n, lambda k=n: self.preset_pick(k))
+            b.setProperty("kind", "chip")
+            self.b_pre[n] = b
+            self.b_pre_save[n] = btn("Сохранить", lambda k=n: self.preset_save(k), ico="save",
+                                     tip="Запомнить текущие настройки ползунков в этот пресет. Он хранится, пока вы не сохраните в него другие.")
         quick = card(None, hbox(b_enh, b_sup, b_orig, spacing=6),
+                     hbox(vbox(self.b_pre[1], self.b_pre_save[1], spacing=4), vbox(self.b_pre[2], self.b_pre_save[2], spacing=4), spacing=6),
                      hbox(ibtn("sun", "Авто-яркость", self.auto_bright, 32, True, isize=16),
                           ibtn("copy", "Копировать настройки этого фото", self.adj_copy, 32, True, isize=16),
                           ibtn("paste", "Вставить настройки в это фото", lambda: self.adj_paste(False), 32, True, isize=16),
@@ -3702,9 +5272,10 @@ class MainWindow(SmartMixin, QMainWindow):
                           ibtn("reset", "Сбросить коррекцию этого фото", lambda: self.adj_reset(False), 32, True, isize=16),
                           ibtn("trash", "Сбросить коррекцию у всех фото", lambda: self.adj_reset(True), 32, True, isize=16), spacing=4),
                      self.l_enh)
-        top = card(None, hbox(back, None, self.seg_scope), self.hist, self.l_hist)
-        sl = card(None, tabs, stack, lbl("Двойной щелчок по ползунку — сбросить его.", "muted", wrap=True))
+        top = card(None, hbox(self.seg_scope, None), self.hist, self.l_hist)
+        sl = card(None, tabs, tabs2, stack, lbl("Двойной щелчок по ползунку — сбросить его.", "muted", wrap=True))
         self.adj_lock = False
+        self._preset_tips()
         return self._scroll(top, quick, sl)
 
     def _slider(self, label, key, lo, hi, step):
@@ -3739,12 +5310,8 @@ class MainWindow(SmartMixin, QMainWindow):
         self.sync_adj()
 
     def show_page(self, i):
-        if i == 1 and not self.files:
-            info(self, "Сначала откройте фото.")
-            return
         self.pages.setCurrentIndex(i)
-        if i != 1:
-            self.seg_page.set(i)
+        self.seg_page.set(i)
         if i == 1:
             self.sync_adj()
         elif i == 3:
@@ -3798,7 +5365,7 @@ class MainWindow(SmartMixin, QMainWindow):
         """Геометрия листа, мм: бумага книжная PW×PH, сетка cols×rows, поле m по краю листа и такое же
         расстояние m между фото (как задано в поле «Рамка, мм»), ячейка cw×ch."""
         short, long_, tag = pc.FORMATS[self.s["format"]]
-        cols, rows = NUP[self.s["nup"]]
+        cols, rows = nup_grid(self.s["nup"])
         m = self.border_mm() if self.s["borders"] else 0.0
         while True:
             g = m
@@ -3942,9 +5509,25 @@ class MainWindow(SmartMixin, QMainWindow):
         copies = [max(1, self.states[f].copies) for f in self.checked_files()]
         return sum(copies) if self.s["fill"] else -(-sum(copies) // n)
 
+    def set_app_mode(self, mode):
+        """ФОТО / ДОКУМЕНТ: в режиме документа слева скрыты миниатюры, справа вместо «Фото» и «Умной рамки» — страница «Документ»."""
+        self.app_mode = mode
+        doc = mode == "doc"
+        self.center_stack.setCurrentIndex(2 if doc else (1 if self.view == "sheet" else 0))
+        if hasattr(self, "mode_switch"):
+            self.mode_switch.set(mode)
+        if hasattr(self, "left_w"):
+            self.left_w.setVisible(not doc)
+            for i, b in enumerate(self.seg_page.group.buttons()):   # кнопки вкладок: Фото, Цвет, Умная рамка, Принтер, Документ
+                b.setVisible((i >= 3) if doc else (i < 4))
+            self.b_save.setVisible(not doc)
+            for w in self._photo_only:
+                w.setVisible(not doc and not (self.compact and w in self._caps))
+            self.show_page(4 if doc else 0)
+
     def set_view(self, v):
         self.view = "sheet" if v == "sheet" else "crop"
-        self.center_stack.setCurrentIndex(1 if self.view == "sheet" else 0)
+        self.center_stack.setCurrentIndex(2 if getattr(self, "app_mode", "photo") == "doc" else (1 if self.view == "sheet" else 0))
         self.seg_view.set(self.view)
         if self.view == "sheet":
             self.sheet_view.refresh()
@@ -4116,10 +5699,18 @@ class MainWindow(SmartMixin, QMainWindow):
         return pc.desktop_dir()
 
     def open_any(self):
+        """Одна кнопка на фото, папки и документы: выбрали документ — открывается раздел «Документ»,
+        выбрали фото или папку — раздел «Фото»."""
         dlg = OpenDialog(self, self.start_dir())
         if not dlg.exec() or not dlg.choice:
             return
         kind, val, add = dlg.choice
+        if kind == "doc":
+            self.set_app_mode("doc")
+            self.doc_load(Path(val))
+            return
+        if getattr(self, "app_mode", "photo") == "doc":
+            self.set_app_mode("photo")
         if kind == "files":
             self.load_files(val, add)
         else:
@@ -4139,6 +5730,11 @@ class MainWindow(SmartMixin, QMainWindow):
     def drop_paths(self, paths, sheet_pos=None):
         """Добавляет брошенные файлы и папки. Если бросили на лист — первое новое фото встаёт в точку, куда бросили."""
         files = []
+        docs = [Path(q) for q in paths if Path(q).suffix.lower() in DOC_EXTS and Path(q).is_file()]
+        if docs and not any(Path(q).suffix.lower() in pc.EXTS or Path(q).is_dir() for q in paths):
+            self.set_app_mode("doc")                       # бросили только документ — открываем раздел «Документ»
+            self.doc_load(docs[0])
+            return
         for q in paths:
             q = Path(q)
             if q.is_dir():
@@ -4788,6 +6384,7 @@ class MainWindow(SmartMixin, QMainWindow):
             return
         self.refresh_proof()
         self.redraw()
+        self._color_win_update()
         self.update_hist()
 
     def adj_show_original(self, on):
@@ -4795,7 +6392,14 @@ class MainWindow(SmartMixin, QMainWindow):
             self.show_orig = on
             self._adj_redraw()
 
+    def _color_editors_enable(self, on):
+        """Без открытого фото уровни, кривые и выбор по цветам недоступны (серые), а не молча не реагируют на мышь."""
+        for w in (self.sel_panel, *self._levels_editors(), *self._curve_panels()):
+            w.setEnabled(on)
+            w.setToolTip("" if on else tr("Сначала откройте фото"))
+
     def sync_adj(self):
+        self._color_editors_enable(self.idx >= 0)
         if self.idx < 0:
             return
         self.adj_lock = True
@@ -4807,9 +6411,95 @@ class MainWindow(SmartMixin, QMainWindow):
             self.sw_bw.set(full["bw"])
             self.sw_sepia.set(full["sepia"])
             self.seg_auto.set(full["auto"])
+            for ed in self._levels_editors():
+                ed.set_value(full["levels"])
+            for pnl in self._curve_panels():
+                pnl.set_value(full["curves"])
+            self.sel_panel.set_value(full["selcol"])
         finally:
             self.adj_lock = False
+        self._color_hist()
+        self._color_win_update()
         self.update_hist()
+
+    def _curve_panels(self):
+        w = getattr(self, "curves_win", None)
+        return [self.curves_panel] + ([w.panel] if w is not None else [])
+
+    def _levels_editors(self):
+        w = getattr(self, "curves_win", None)
+        return [self.levels_ed] + ([w.levels] if w is not None else [])
+
+    def _color_win_update(self):
+        w = getattr(self, "curves_win", None)
+        if w is not None and w.isVisible():
+            w.preview.set_pixmap(self.preview_pm)
+
+    def _color_hist(self):
+        """Гистограмма исходного (ещё не исправленного) кадра — подложка для уровней и кривых."""
+        if self.raw is None:
+            h = None
+        else:
+            if getattr(self, "_hist_img", None) is not self.raw:
+                small = self.raw
+                if max(small.size) > 800:
+                    small = small.copy()
+                    small.thumbnail((800, 800))
+                self._hist_img, self._hist_src = self.raw, pc.hist_rgb(small)[0]
+            h = self._hist_src
+        for ed in self._levels_editors():
+            ed.set_hist(h)
+        for pnl in self._curve_panels():
+            pnl.set_hist(h)
+
+    def levels_changed(self, val, sender=None):
+        self.adj_set({"levels": val}, key=("levels",))
+        for ed in self._levels_editors():
+            if ed is not sender:
+                ed.set_value(val)
+
+    def selcol_changed(self, val):
+        self.adj_set({"selcol": val}, key=("selcol",))
+
+    def curves_changed(self, sender, val):
+        self.adj_set({"curves": val}, key=("curves",))
+        for pnl in self._curve_panels():
+            if pnl is not sender:
+                pnl.set_value(val)
+
+    def open_curves_window(self):
+        self.open_color_window(1)
+
+    def open_color_window(self, tab=1):
+        """Большой экран: уровни (0) или кривые (1) слева, редактируемое фото справа."""
+        w = getattr(self, "curves_win", None)
+        if w is None:
+            w = self.curves_win = ColorWindow(self)
+            w.panel.changed.connect(lambda v: self.curves_changed(w.panel, v))
+            w.levels.changed.connect(lambda v: self.levels_changed(v, w.levels))
+            w.levels.auto_requested.connect(self.levels_auto)
+        full = pc.adj_full(self.cur_adj()) if self.idx >= 0 else pc.adj_full({})
+        w.panel.set_value(full["curves"])
+        w.levels.set_value(full["levels"])
+        w.show_tab(tab)
+        self._color_editors_enable(self.idx >= 0)
+        self._color_hist()
+        w.show()
+        w.preview.set_pixmap(self.preview_pm)
+        w.raise_()
+        w.activateWindow()
+
+    def levels_auto(self):
+        if self.idx < 0 or self.raw is None:
+            return
+        small = self.raw
+        if max(small.size) > 800:
+            small = small.copy()
+            small.thumbnail((800, 800))
+        val = ct.auto_levels_rows(*pc._auto_bounds(small.convert("RGB"), "color"))
+        self.adj_set({"levels": val}, key=("levels",))
+        for ed in self._levels_editors():
+            ed.set_value(val)
 
     def update_hist(self, note=None):
         img = self.adj_img if self.adj_img is not None else self.raw
@@ -4841,7 +6531,7 @@ class MainWindow(SmartMixin, QMainWindow):
             return
         name = tr("Супер улучшения") if level >= 2 else tr("Улучшения для Epson")
         if len(files) > 1 and not ask(self, tr("Применить «%s» к %d фото?") % (name, len(files)) + "\n" + tr(
-                "Для каждого фото параметры подберутся отдельно. Отменить можно Ctrl+Z.")):
+                "Для каждого фото параметры подберутся отдельно, прежняя коррекция будет сброшена. Отменить можно Ctrl+Z.")):
             return
         self._enh_busy = True
         QApplication.setOverrideCursor(Qt.WaitCursor)
@@ -4865,16 +6555,18 @@ class MainWindow(SmartMixin, QMainWindow):
             try:
                 cm = self.cm_build()
                 for _ in range(2):
-                    probe = type("S", (), {"adj": {**{k: v for k, v in self.states[cur].adj.items() if k not in pc.ENHANCE_KEYS}, **mapping[cur]}})()
+                    probe = type("S", (), {"adj": {**{k: v for k, v in self.states[cur].adj.items() if k not in pc.ADJ_KEYS}, **mapping[cur]}})()
                     test = pc.adjust_tile(self.raw, pc.merge_adj({}, probe), 100, preview=True)
                     pct = pc.gamut_preview(test, self.icc, cm)[1]
-                    if pct <= 3.0 or not (mapping[cur].get("vib") or mapping[cur].get("sat")):
+                    boost = any(s > 0 for _h, s, _l in ct.selcol_full(mapping[cur].get("selcol")))
+                    if pct <= 3.0 or not (mapping[cur].get("vib") or mapping[cur].get("sat") or boost):
                         break
-                    mapping[cur] = pc.clean_adj({**mapping[cur], "vib": mapping[cur].get("vib", 0) / 2, "sat": 0})
+                    half = {"selcol": pc.halve_selcol_sat(mapping[cur]["selcol"])} if boost else {}
+                    mapping[cur] = pc.clean_adj({**mapping[cur], **half, "vib": mapping[cur].get("vib", 0) / 2, "sat": 0})
                     notes.append(tr("красочность уменьшена: принтер не передаёт часть цветов"))
             except Exception:
                 pass
-        self.adj_apply_each(mapping, pc.ENHANCE_KEYS)
+        self.adj_apply_each(mapping, pc.ADJ_KEYS)          # прежняя коррекция сбрасывается целиком
         if self.s["dpi"].replace(",", ".").strip() not in ("360", "720"):
             self.s["dpi"] = "360"                                           # родное разрешение печати Epson
             notes.append(tr("разрешение сохранения 360 dpi"))
@@ -4908,6 +6600,38 @@ class MainWindow(SmartMixin, QMainWindow):
             return
         self.adj_replace(self.adj_clipboard, list(self.files) if to_all else [self.files[self.idx]])
         self.sync_adj()
+
+    def _preset_tips(self):
+        for n, b in self.b_pre.items():
+            b.setToolTip(tr("Сохранённые настройки: нажмите, чтобы применить") if str(n) in self.settings.get("adj_presets", {})
+                         else tr("Пресет пуст: настройте ползунки и нажмите «Сохранить» под ним"))
+
+    def preset_pick(self, n):
+        """Применяет сохранённый пресет к фото (или к отмеченным, как задано переключателем выше)."""
+        data = self.settings.get("adj_presets", {}).get(str(n))
+        if data is None:
+            self.update_hist(trf("Пресет {n} пока пуст. Настройте ползунки и нажмите «Сохранить» под ним.", n=n))
+            return
+        if self.idx < 0:
+            return
+        self.adj_replace(data, self.adj_files())
+        self.sync_adj()
+        self.update_hist(trf("Применён пресет {n}", n=n))
+
+    def preset_save(self, n):
+        """Запоминает текущие настройки этого фото в пресет n, пока их не заменят другими."""
+        if self.idx < 0:
+            info(self, "Сначала откройте фото.")
+            return
+        presets = self.settings.setdefault("adj_presets", {})
+        old, new = presets.get(str(n)), dict(self.cur_adj())
+        old = pc.clean_adj(old) if old is not None else None             # из файла настроек списки возвращаются кортежами
+        if old is not None and old != new and not ask(self, trf("Заменить сохранённый пресет {n} текущими настройками?", n=n)):
+            return
+        presets[str(n)] = new
+        self.persist()
+        self._preset_tips()
+        self.update_hist(trf("Пресет {n} сохранён", n=n))
 
     def adj_reset(self, all_files):
         if self.idx < 0:
@@ -5151,7 +6875,7 @@ class MainWindow(SmartMixin, QMainWindow):
         s = self.s
         self._bleed_flush()
         fresh = pc.load_settings()                    # окно печати пишет свои разделы в тот же файл — не затираем их
-        for k in ("last_dir", "start_dir_mode", "snap_px", "anim", "icc_dir", "trim_l", "trim_t", "trim_r", "trim_b"):
+        for k in ("last_dir", "start_dir_mode", "snap_px", "anim", "icc_dir", "trim_l", "trim_t", "trim_r", "trim_b", "check_updates", "skip_update", "doc_paper", "doc_fit", "doc_margin", "doc_cm_on", "doc_icc", "converter_path", "adj_presets"):
             if k in self.settings:
                 fresh[k] = self.settings[k]
         fresh.update(format=s["format"], orient=s["orient"], mode=s["mode"], recursive=s["recursive"], subfolder=s["subfolder"],
@@ -5185,7 +6909,7 @@ class MainWindow(SmartMixin, QMainWindow):
         if lang:
             pc.set_language(lang)
         page = self.pages.currentIndex()
-        self.setWindowTitle(tr("PhotoCrop — кадрирование для фотопечати"))
+        self.setWindowTitle(tr("КопиТехник Принт — кадрирование для фотопечати"))
         self.build()
         self.thumbs_view.model().refresh()
         if self.idx >= 0:
@@ -5234,7 +6958,7 @@ class OpenDialog(QDialog):
         self.app, self.choice = app, None
         self.cwd = Path(start) if start and Path(start).is_dir() else Path(pc.desktop_dir())
         self.n_files = 0
-        self.setWindowTitle(tr("Открыть фото или папку"))
+        self.setWindowTitle(tr("Открыть фото, документ или папку"))
         self.resize(980, 660)
         self.e_path = QLineEdit(str(self.cwd))
         self.e_path.returnPressed.connect(lambda: self.goto(self.e_path.text()))
@@ -5298,6 +7022,7 @@ class OpenDialog(QDialog):
         self._timer.start()
         self._folder_icon = self._big_icon("open", T["select"])
         self._blank_icon = self._big_icon("image", T["muted"])
+        self._doc_icon = self._big_icon("doc", T["accent"])
         self.fill()
 
     def _place(self, text, ico, pth, translate=True):
@@ -5336,6 +7061,16 @@ class OpenDialog(QDialog):
             it.setToolTip(q.name)
             self.list.addItem(it)
             self._pending.append(it)
+        try:                                               # документы (PDF, Word, Excel, ...) тоже видны, миниатюр у них нет
+            docs = sorted((q for q in self.cwd.iterdir() if q.suffix.lower() in DOC_EXTS and not q.name.startswith(("~", ".")) and q.is_file()),
+                          key=lambda q: q.name.lower())
+        except OSError:
+            docs = []
+        for q in docs:
+            it = QListWidgetItem(self._doc_icon, q.name)
+            it.setData(Qt.UserRole, ("x", str(q)))
+            it.setToolTip(q.name)
+            self.list.addItem(it)
         self.e_path.setText(str(self.cwd))
         self.upd()
 
@@ -5392,15 +7127,26 @@ class OpenDialog(QDialog):
         k, q = it.data(Qt.UserRole)
         if k == "d":
             self.goto(q)
+        elif k == "x":
+            self.choice = ("doc", Path(q), False)
+            self.accept()
         else:
             self.choice = ("files", [Path(q)], self.sw_add.isChecked())
             self.accept()
 
-    def upd(self):
+    def _docs(self):
         sel = self._sel()
+        docs = [q for k, q in sel if k == "x"]
+        return docs if docs and len(docs) == len(sel) else []     # документ открывается, только если выделены одни документы
+
+    def upd(self):
+        sel = [x for x in self._sel() if x[0] != "x"]
         act = pc.OpenDialog.decide(sel, self.cwd, self.n_files)
         rec = self.app.s["recursive"]
-        if act is None:
+        docs = self._docs()
+        if docs:
+            text, ok = trf("Открыть документ «{name}»", name=docs[0].name), True
+        elif act is None:
             text, ok = tr("Открыть"), False
         elif act[0] == "files":
             text, ok = trf("Открыть выбранные фото ({n})", n=len(act[1])), True
@@ -5414,7 +7160,12 @@ class OpenDialog(QDialog):
         self.l_hint.setText(trf("В папке фото: {n}", n=self.n_files))
 
     def accept_choice(self):
-        act = pc.OpenDialog.decide(self._sel(), self.cwd, self.n_files)
+        docs = self._docs()
+        if docs:
+            self.choice = ("doc", docs[0], False)
+            self.accept()
+            return
+        act = pc.OpenDialog.decide([x for x in self._sel() if x[0] != "x"], self.cwd, self.n_files)
         if act is None:
             return
         self.choice = (act[0], act[1], self.sw_add.isChecked())
@@ -5671,13 +7422,40 @@ class AdminStatsDialog(QDialog):
         sc.setFrameShape(QFrame.NoFrame)
         sc.setWidget(self.l_sum)
         self.table = QTableWidget(0, 8)
-        self.table.setHorizontalHeaderLabels([tr(x) for x in ("Время", "Принтер", "Бумага, мм", "Файлов на листе", "Режим", "Источник", "Листов", "Файлы")])
+        self.table.setHorizontalHeaderLabels([tr(x) for x in ("Время", "Принтер", "Тип", "Бумага", "Режим", "Источник", "Листов", "Файлы")])
         self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.table.horizontalHeader().setStretchLastSection(True)
         self.table.verticalHeader().setVisible(False)
+        self.pr_period = QComboBox()
+        for k, name in (("today", "Сегодня"), ("week", "7 дней"), ("month", "30 дней"), ("all", "Всё время")):
+            self.pr_period.addItem(tr(name), k)
+        self.pr_period.setCurrentIndex(3)
+        self.pr_printer = QComboBox()
+        self.pr_printer.addItem(tr("Все принтеры"), None)
+        for name in ps.printer_names(self.recs):
+            self.pr_printer.addItem(name, name)
+        self.pr_period.currentIndexChanged.connect(lambda *_: self.fill_printers())
+        self.pr_printer.currentIndexChanged.connect(lambda *_: self.fill_printers())
+        self.l_pr = QLabel()
+        self.l_pr.setTextFormat(Qt.RichText)
+        self.l_pr.setAlignment(Qt.AlignTop | Qt.AlignLeft)
+        sc2 = QScrollArea()
+        sc2.setWidgetResizable(True)
+        sc2.setFrameShape(QFrame.NoFrame)
+        sc2.setWidget(self.l_pr)
+        pr_page = QWidget()
+        pv = vbox(spacing=8, margins=(8, 8, 8, 8))
+        lp, lq = QLabel(tr("Период")), QLabel(tr("Принтер"))
+        for w_ in (lp, lq):
+            w_.setStyleSheet("color:%s;background:transparent" % T["text"])
+        pv.addLayout(hbox(lp, self.pr_period, lq, self.pr_printer,
+                          None, btn("Экспорт по принтерам…", self._export_printers), spacing=8))
+        pv.addWidget(sc2, 1)
+        pr_page.setLayout(pv)
         tabs = QTabWidget()
         tabs.addTab(sc, tr("Сводка"))
+        tabs.addTab(pr_page, tr("Принтеры"))
         tabs.addTab(self.table, tr("Журнал"))
         v.addWidget(tabs, 1)
         v.addLayout(hbox(btn("Экспорт в CSV…", self._export), btn("Сменить пароль", self._change), btn("Очистить журнал", self._clear),
@@ -5703,12 +7481,13 @@ class AdminStatsDialog(QDialog):
         s = ps.summary(self.recs)
         td = lambda x, al="left": '<td style="padding:2px 14px 2px 0" align="%s">%s</td>' % (al, x)
         h = ["<h3>%s</h3><table>" % tr("Всего напечатано")]
-        h.append("<tr>%s%s%s</tr>" % (td("<b>%s</b>" % tr("Период")), td("<b>%s</b>" % tr("Листов"), "right"), td("<b>%s</b>" % tr("Напечатано файлов"), "right")))
+        h.append("<tr>%s%s%s%s</tr>" % (td("<b>%s</b>" % tr("Период")), td("<b>%s</b>" % tr("Листов"), "right"), td("<b>%s</b>" % tr("Фото"), "right"),
+                                        td("<b>%s</b>" % tr("Документы"), "right")))
         for k, name in (("today", "Сегодня"), ("week", "7 дней"), ("month", "30 дней"), ("all", "Всё время")):
             p = s["periods"][k]
-            h.append("<tr>%s%s%s</tr>" % (td(tr(name)), td(p["sheets"], "right"), td(p["photos"], "right")))
+            h.append("<tr>%s%s%s%s</tr>" % (td(tr(name)), td(p["sheets"], "right"), td(p["photo"], "right"), td(p["doc"], "right")))
         h.append("</table>")
-        for field, title in (("printer", "По принтерам"), ("paper", "По формату бумаги"), ("source", "По источнику (app — окно программы, agent — ИИ-агент)")):
+        for field, title in (("printer", "По принтерам"), ("paper_photo", "Бумага: фото, листов"), ("paper_doc", "Бумага: документы, листов"), ("source", "По источнику (app — окно программы, agent — ИИ-агент)")):
             h.append("<h3>%s</h3><table>" % tr(title))
             for k, n in s[field][:12]:
                 h.append("<tr>%s%s</tr>" % (td(k), td(n, "right")))
@@ -5720,13 +7499,41 @@ class AdminStatsDialog(QDialog):
                 h.append("<tr>%s%s%s</tr>" % (td(d), td(n, "right"), td('<span style="color:%s">%s</span>' % (T["accent"], "█" * max(1, round(24 * n / mx))))))
             h.append("</table>")
         self.l_sum.setText("".join(h))
+        self.fill_printers()
         rows = list(reversed(self.recs[-500:]))
         self.table.setRowCount(len(rows))
         for i, r in enumerate(rows):
-            for j, key in enumerate(("t", "printer", "paper", "photos", "mode", "source", "sheets", "files")):
+            for j, key in enumerate(("t", "printer", "kind", "paper", "mode", "source", "sheets", "files")):
                 v = r.get(key, "")
+                if key == "kind":
+                    v = tr("Документ" if ps.rkind(r) == "doc" else "Фото")
+                elif key == "paper":
+                    v = ps.paper_label(v)
                 self.table.setItem(i, j, QTableWidgetItem(", ".join(v) if isinstance(v, list) else str(v)))
         self.table.resizeColumnsToContents()
+
+    def fill_printers(self):
+        data = ps.by_printer(self.recs, self.pr_period.currentData(), self.pr_printer.currentData())
+        td = lambda x, al="left": '<td style="padding:2px 14px 2px 0" align="%s">%s</td>' % (al, x)
+        if not data:
+            self.l_pr.setText("<p>%s</p>" % tr("Нет данных за выбранный период."))
+            return
+        h = []
+        for name, d in data:
+            h.append("<h3>%s — %s: %d (%s %d, %s %d)</h3><table>" % (name, tr("листов"), d["sheets"], tr("фото"), d["photo"], tr("документы"), d["doc"]))
+            h.append("<tr>%s%s%s</tr>" % (td("<b>%s</b>" % tr("Тип")), td("<b>%s</b>" % tr("Бумага")), td("<b>%s</b>" % tr("Листов"), "right")))
+            for kind, paper, n in d["rows"]:
+                h.append("<tr>%s%s%s</tr>" % (td(tr("Документ" if kind == "doc" else "Фото")), td(paper), td(n, "right")))
+            h.append("</table>")
+        self.l_pr.setText("".join(h))
+
+    def _export_printers(self):
+        p, _ = QFileDialog.getSaveFileName(self, tr("Экспорт по принтерам…"), "print_by_printer.csv", "CSV (*.csv)")
+        if p:
+            try:
+                info(self, trf("Сохранено строк: {n}", n=ps.export_printers_csv(p, self.pr_period.currentData(), self.pr_printer.currentData(), self.recs)))
+            except OSError as ex:
+                warn(self, str(ex))
 
     def _export(self):
         p, _ = QFileDialog.getSaveFileName(self, tr("Экспорт в CSV…"), "print_log.csv", "CSV (*.csv)")
@@ -5798,8 +7605,13 @@ class SettingsDialog(QDialog):
         crop = card("Кадрирование", row("Прилипание рамки к краям и центру фото", sw_snap),
                     row("Сила прилипания, пикселей экрана", hbox(sl, l_px)),
                     lbl("Ctrl при перетаскивании — временно отключает прилипание.", "muted"))
+        sw_upd = Switch(st.get("check_updates", True))
+        sw_upd.toggled.connect(lambda on: st.__setitem__("check_updates", bool(on)))
+        upd_card = card("Обновление", row("Версия программы", lbl(APP_VERSION)),
+                        row("Проверять обновления при запуске", sw_upd),
+                        hbox(None, btn("Проверить обновления", lambda: app.check_updates(True), ico="sparkle")))
         about = lbl(tr("Настройки хранятся в файле") + ": " + str(pc.SETTINGS_PATH), "muted", wrap=True)
-        left = vbox(look, general, crop, None, spacing=12)
+        left = vbox(look, general, crop, upd_card, None, spacing=12)
         trim = hbox(spacing=6)
         for text, k in (("Лево", "l"), ("Верх", "t"), ("Право", "r"), ("Низ", "b")):
             e = QLineEdit("%g" % app.trim_mm()["ltrb".index(k)])
@@ -5864,7 +7676,7 @@ class SettingsDialog(QDialog):
 
     def _refresh_today(self):
         t = ps.today()
-        self.l_today.setText(trf("Напечатано сегодня: {s} листов, {p} файлов", s=t["sheets"], p=t["photos"]))
+        self.l_today.setText(trf("Напечатано сегодня: {s} листов (фото {p}, документы {d})", s=t["sheets"], p=t["photo"], d=t["doc"]))
 
     def _admin(self):
         if admin_login(self):
@@ -5917,7 +7729,20 @@ pc.EN.update({
     "В другую папку": "To another folder", "Папка не выбрана": "No folder chosen", "Выбрать папку": "Choose folder",
     "Разрешение, dpi": "Resolution, dpi", "Тип файла": "File type", "Качество JPEG": "JPEG quality",
     "Точный размер печати": "Exact print size", "Подпапка по формату": "Subfolder per format", "Число копий в имени файла": "Copies count in file name",
-    "Цвет": "Colour", "Профиль принтера": "Printer profile", "Выбрать профиль…": "Choose profile…",
+    "Цвет": "Colour", "Уровни и кривые": "Levels and curves", "Нет фото": "No photo", "Показать оригинал (удерживайте)": "Show original (hold)", "Сначала откройте фото": "Open a photo first", "Уровни": "Levels", "Кривые": "Curves", "По цветам": "By colour", "На весь экран…": "Full screen…",
+    "Все каналы сразу": "All channels together", "Красный канал": "Red channel", "Зелёный канал": "Green channel", "Синий канал": "Blue channel",
+    "Чёрная точка (вход)": "Black point (input)", "Гамма (середина)": "Gamma (midtones)", "Белая точка (вход)": "White point (input)",
+    "Выход: чёрный": "Output: black", "Вход: чёрный": "Input: black", "гамма": "gamma", "белый": "white",
+    "Двойной щелчок по бегунку — сбросить его.": "Double-click a marker to reset it.", "Авто": "Auto", "Сбросить": "Reset",
+    "Сбросить канал": "Reset channel", "Сбросить всё": "Reset all", "Сбросить цвет": "Reset colour", "Контраст S": "S contrast",
+    "Светлее": "Lighter", "Темнее": "Darker", "Мягкая S-кривая: больше контраста": "Soft S-curve: more contrast",
+    "Поднять средние тона": "Raise the midtones", "Опустить средние тона": "Lower the midtones",
+    "Щелчок по кривой — новая точка, двойной щелчок или правая кнопка — удалить точку.": "Click the curve to add a point; double-click or right-click a point to remove it.",
+    "Кривые: перетаскивайте точки, результат сразу виден в главном окне. Канал RGB меняет все цвета, R, G, B — по одному.": "Curves: drag the points, the result shows at once in the main window. RGB changes all colours; R, G, B one at a time.",
+    "Красный": "Red", "Жёлтый": "Yellow", "Зелёный": "Green", "Голубой": "Cyan", "Синий": "Blue", "Пурпурный": "Magenta",
+    "Оттенок": "Hue", "Насыщенность": "Saturation", "Яркость": "Brightness",
+    "Серые и нейтральные цвета не затрагиваются.": "Greys and neutral colours are left alone.",
+    "Пресет 1": "Preset 1", "Пресет 2": "Preset 2", "Сохранить": "Save", "Сохранённые настройки: нажмите, чтобы применить": "Saved settings: click to apply", "Пресет пуст: настройте ползунки и нажмите «Сохранить» под ним": "Preset is empty: set the sliders and press Save under it", "Запомнить текущие настройки ползунков в этот пресет. Он хранится, пока вы не сохраните в него другие.": "Store the current slider values in this preset. It stays until you save other values into it.", "Цвет на экране": "Colour on screen", "Профиль принтера": "Printer profile", "Выбрать профиль…": "Choose profile…",
     "Имитация печати на экране": "Simulate print on screen", "Показать цвета вне охвата": "Show out-of-gamut colours",
     "Параметры": "Settings", "это фото": "this photo", "все отмеченные": "all checked", "Менять": "Apply to",
     "Татарская": "Tatar", "Марийская": "Mari", "Основное": "Basic", "Детали": "Detail", "нет": "off", "контраст": "contrast", "цвет": "colour", "Ч/Б": "B/W", "Авто-уровни": "Auto levels",
@@ -5936,7 +7761,7 @@ pc.EN.update({
     "Не удалось прочитать файл профиля": "Could not read the profile file", "В чёрном": "Clipped black", "В белом": "Clipped white",
     "Вне охвата принтера": "Out of printer gamut", "Супер улучшения": "Super enhance", "Улучшения для Epson": "Epson enhance",
     "Применить «%s» к %d фото?": "Apply “%s” to %d photos?",
-    "Для каждого фото параметры подберутся отдельно. Отменить можно Ctrl+Z.": "Settings are chosen for each photo separately. Undo with Ctrl+Z.",
+    "Для каждого фото параметры подберутся отдельно, прежняя коррекция будет сброшена. Отменить можно Ctrl+Z.": "Settings are chosen for each photo separately, the previous correction is reset. Undo with Ctrl+Z.",
     "Анализ": "Analysing", "Готово": "Done", "не удалось": "failed", "Куда сохранять": "Where to save",
     "красочность уменьшена: принтер не передаёт часть цветов": "vibrance reduced: the printer cannot reproduce some colours",
     "разрешение сохранения 360 dpi": "save resolution set to 360 dpi", "включена компенсация точки чёрного": "black point compensation turned on",
@@ -5955,7 +7780,7 @@ pc.EN.update({
     "Сохранить проект (рамки и настройки)": "Save project (frames and settings)",
 })
 pc.EN.update({
-    "Бумага": "Paper", "Фото на листе": "Photos per sheet", "Поля": "Borders", "мм": "mm", "Кадр": "Crop", "Лист": "Sheet",
+    "Бумага": "Paper", "Фото на листе": "Photos per sheet", "Рамка и поля": "Frame and borders", "Поля": "Borders", "мм": "mm", "Кадр": "Crop", "Лист": "Sheet",
     "Сколько фото печатать на одном листе": "How many photos to print on one sheet",
     "Выключено — печать без полей, фото вплотную. Включено — белое поле по краю листа и между фото.": "Off — borderless, photos edge to edge. On — a white margin at the sheet edge and between photos.",
     "Поле по краю листа и расстояние между фото, мм": "Sheet margin and distance between photos, mm",
@@ -5965,6 +7790,37 @@ pc.EN.update({
     "Предыдущий лист": "Previous sheet", "Следующий лист": "Next sheet",
     "Отметьте фото слева — они разложатся по листам": "Check photos on the left — they will be laid out on sheets",
     "Не удалось подготовить листы": "Could not prepare the sheets",
+})
+pc.EN.update({
+    "КопиТехник Принт": "KopiTehnik Print", "КопиТехник Принт — кадрирование для фотопечати": "KopiTehnik Print — cropping for photo printing",
+    "Своё число": "Custom", "Режим «Документ» скоро": "Document mode is coming", "Печать Word и PDF с профилем бумаги для документов, редактирование и распознавание текста.": "Printing Word and PDF with a document paper profile, text editing and recognition.", "Своё число фото на листе": "Custom number of photos per sheet",
+    "Обновление": "Updates", "Версия программы": "Program version", "Проверять обновления при запуске": "Check for updates at start",
+    "Проверить обновления": "Check for updates", "Доступно обновление": "Update available", "Вышла новая версия:": "A new version is out:",
+    "Открыть страницу загрузки": "Open the download page", "Пропустить эту версию": "Skip this version", "Позже": "Later",
+    "У вас последняя версия:": "You have the latest version:",
+    "Не удалось проверить обновления. Проверьте подключение к интернету.": "Could not check for updates. Check your internet connection.",
+})
+pc.EN_FMT.update({"Вход {a} → выход {b}": "Input {a} → output {b}", "Пресет {n} пока пуст. Настройте ползунки и нажмите «Сохранить» под ним.": "Preset {n} is empty. Set the sliders and press Save under it.", "Заменить сохранённый пресет {n} текущими настройками?": "Replace saved preset {n} with the current settings?", "Применён пресет {n}": "Preset {n} applied", "Пресет {n} сохранён": "Preset {n} saved", "Страниц: {n}": "Pages: {n}", "Открыть документ «{name}»": "Open document “{name}”"})
+pc.EN.update({"Бумага: фото, листов": "Paper: photos, sheets", "Бумага: документы, листов": "Paper: documents, sheets", "Тип": "Type"})
+pc.EN.update({
+    "Документ": "Document", "PDF, Word, Excel, PowerPoint и другие офисные файлы": "PDF, Word, Excel, PowerPoint and other office files",
+    "Открыть документ…": "Open document…", "Открыть документ": "Open document", "Открыть фото, документ или папку": "Open photos, a document or a folder", "Документ не открыт": "No document open",
+    "Редактировать PDF": "Edit PDF", "Распознать текст": "Recognise text",
+    "Откроется в программе «КопиТехник Конвертор»": "Opens in KopiTehnik Converter", "Распознавание в «КопиТехник Конвертор»": "Recognition in KopiTehnik Converter",
+    "Печать документа": "Document printing", "Как страница ложится на лист": "How the page sits on the sheet", "По листу": "Fit to sheet",
+    "Только уменьшить": "Shrink only", "Как есть": "Actual size", "Поля, мм": "Margins, mm", "Страницы": "Pages", "Копий": "Copies",
+    "все, или 1-3, 5, 8-": "all, or 1-3, 5, 8-", "Профиль для документов": "Document profile",
+    "Использовать профиль принтера": "Use printer profile",
+    "У документов своя бумага и свой профиль, он не связан с профилем фото.": "Documents have their own paper and profile, separate from the photo profile.",
+    "Документы": "Documents", "Этот тип файла не поддерживается.": "This file type is not supported.",
+    "Не удалось перевести документ в PDF": "Could not convert the document to PDF", "Не удалось открыть PDF.": "Could not open the PDF.",
+    "переведён в PDF": "converted to PDF", "Сначала откройте документ.": "Open a document first.",
+    "Правка PDF и распознавание делаются в программе «КопиТехник Конвертор». Она не найдена на этом компьютере.": "PDF editing and recognition are done in KopiTehnik Converter. It was not found on this computer.",
+    "Скачать конвертер": "Download the converter", "Указать Converter.exe…": "Choose Converter.exe…", "Отмена": "Cancel",
+    "Открыт конвертер: закончите правку и сохраните.": "The converter is open: finish editing and save.",
+    "Не удалось запустить конвертер": "Could not start the converter", "изменён в конвертере": "edited in the converter",
+    "Неверный диапазон страниц": "Invalid page range", "копий": "copies", "Отправляю в печать страницу": "Sending page to print",
+    "Не удалось открыть PDF для печати.": "Could not open the PDF for printing.",
 })
 pc.EN.update({
     "Умная рамка": "Smart frame", "Анализ": "Analysis", "Дополнительно": "Advanced", "Результат": "Result", "Все": "All", "Отмеченные": "Checked",
@@ -5998,7 +7854,7 @@ pc.EN.update({
     "Групповое фото — от, чел.": "Group photo — from, people", "Начиная с этого числа людей кадр всегда стоит проверить": "From this many people the shot is always worth checking",
     "белые поля листа напечатаются красителем; для печати обычно берут «Относительный»": "the white margins of the sheet will be printed with ink; “Relative” is normally used for printing",
     "Включено управление цветом Windows (ICM) при включённом профиле принтера — цвет обработается дважды. Включите «Цвет Windows (ICM) отключён» на вкладке «Принтер».": "Windows colour management (ICM) is on together with the printer profile — colour would be processed twice. Turn on “Windows colour (ICM) off” on the Printer tab.",
-    "Печать фото": "Print photo", "Напечатать только это фото (Ctrl+Shift+P)": "Print only this photo (Ctrl+Shift+P)",
+    "Печать фото": "Print photo", "До / После": "Before / After", "До": "Before", "После": "After", "Сравнить: слева снимок без правок, справа с правками. Проведите линию мышью по фото": "Compare: the original on the left, the edited photo on the right. Drag the line over the photo", "Напечатать только это фото (Ctrl+Shift+P)": "Print only this photo (Ctrl+Shift+P)",
     "Нет открытого фото для печати.": "No open photo to print.",
     "Мелкие люди на дальнем плане": "Small people in the background", "Люди мельче этой доли от самого крупного (с лицом) считаются дальним планом": "People smaller than this share of the largest (with a face) count as background",
     "Не учитывать мелких людей": "Ignore small people", "Люди дальнего плана вообще не влияют на рамку и не дают замечаний; выключено — они лишь менее важны": "Background people do not affect the frame or raise warnings; off — they are just less important",
@@ -6067,7 +7923,7 @@ pc.EN.update({
 })
 pc.EN_FMT.update({"Конечности: нейросеть позы (скелет найден у {n} из {m} чел.), остальные — по размеру головы": "Limbs: pose network (skeleton found for {n} of {m} people), the rest from head size"})
 pc.EN.update({
-    "Улучшение для печати на Epson: светлее, чуть контрастнее и резче. Подбирается под каждый снимок.": "Enhancement for Epson printing: lighter, slightly more contrast and sharpness. Tuned for each photo.",
+    "Улучшение для печати на Epson: светлее, чуть контрастнее и резче. Подбирается под каждый снимок. Прежняя коррекция сбрасывается.": "Enhancement for Epson printing: lighter, slightly more contrast and sharpness. Tuned for each photo. The previous correction is reset.",
     "Более сильное улучшение: ярче, сочнее, резче": "Stronger enhancement: brighter, more vivid, sharper",
     "Авто-яркость": "Auto brightness", "Копировать настройки этого фото": "Copy this photo's settings", "Вставить настройки в это фото": "Paste settings into this photo",
     "Применить настройки этого фото ко всем": "Apply this photo's settings to all", "Сбросить коррекцию этого фото": "Reset this photo's adjustments",
@@ -6164,6 +8020,16 @@ def selftest(app):
         win.grab().save(str(p))
         shots.append(str(p))
 
+    def color_tab_empty():
+        win.show_page(1)                                     # без фото вкладка «Цвет» открывается: пресеты видны сразу
+        app.processEvents()
+        if win.pages.currentIndex() != 1 or not win.b_pre[1].isVisible():
+            raise RuntimeError("вкладка «Цвет» без фото не открылась или нет кнопок пресетов")
+        if win.levels_ed.isEnabled() or win.curves_panel.isEnabled() or win.sel_panel.isEnabled():
+            raise RuntimeError("без фото уровни, кривые и выбор цвета должны быть недоступны")
+        win.preset_pick(1)
+        win.show_page(0)
+    step("вкладка «Цвет» открывается без фото", color_tab_empty)
     step("открыть папку", lambda: win.load_folder(tmp))
     step("снимок окна", lambda: shot("main"))
     step("следующее фото", lambda: win.go(1))
@@ -6177,8 +8043,69 @@ def selftest(app):
     step("отметить все", lambda: win.check_all(True))
     step("страница цвета", lambda: win.show_page(1))
     step("ползунок яркости", lambda: win.sliders["bright"][0].setValue(20))
+    def enhance_resets():
+        win.adj_set({"temp": 30.0, "sepia": True, "bright": 25.0})
+        win.enhance(1)
+        a = win.cur_adj()
+        if a.get("temp") or a.get("sepia") or a.get("bright"):
+            raise RuntimeError("улучшение не сбросило прежнюю коррекцию")
     step("улучшение Epson", lambda: win.enhance(1))
+    step("улучшение сбрасывает прежнюю коррекцию", enhance_resets)
+    def presets_flow():
+        win.settings["adj_presets"] = {}                      # пресеты прошлых запусков спросили бы подтверждение замены
+        win.adj_replace({}, [win.files[win.idx]])
+        win.adj_set({"bright": 17.0, "sat": 9.0})
+        win.preset_pick(1)                                   # пресет пуст: ничего не применяется, настройки на месте
+        if win.cur_adj().get("bright") != 17.0:
+            raise RuntimeError("пустой пресет изменил настройки")
+        win.preset_save(1)
+        win.adj_replace({}, [win.files[win.idx]])
+        win.preset_pick(1)
+        if win.cur_adj().get("bright") != 17.0 or win.cur_adj().get("sat") != 9.0:
+            raise RuntimeError("пресет 1 не применился")
+        win.adj_set({"bright": -5.0})
+        win.preset_save(2)
+        win.preset_pick(1)
+        if win.cur_adj().get("bright") != 17.0 or pc.load_settings().get("adj_presets", {}).get("2", {}).get("bright") != -5.0:
+            raise RuntimeError("пресеты перепутались или не сохранились в файл")
+        win.adj_replace({}, [win.files[win.idx]])
+        win.sync_adj()
+    step("пресеты коррекции: сохранить и применить", presets_flow)
+    def levels_curves_selcol():
+        win.adj_replace({}, [win.files[win.idx]])
+        win.sync_adj()
+        if not (win.levels_ed.isEnabled() and win.curves_panel.isEnabled() and win.sel_panel.isEnabled()):
+            raise RuntimeError("с фото уровни, кривые и выбор цвета должны быть доступны")
+        win.levels_ed.rows[0] = [20.0, 1.2, 235.0, 0.0, 255.0]
+        win.levels_ed._emit()
+        if not win.cur_adj().get("levels"):
+            raise RuntimeError("уровни не записались в коррекцию")
+        win.curves_panel.shape(((0, 0), (64, 48), (192, 208), (255, 255)))
+        if not win.cur_adj().get("curves"):
+            raise RuntimeError("кривые не записались в коррекцию")
+        win.sel_panel.pick(0)
+        win.sel_panel.sl[1].setValue(40)
+        if not win.cur_adj().get("selcol"):
+            raise RuntimeError("выборочный цвет не записался в коррекцию")
+        win.levels_auto()
+        win.sync_adj()
+        win.open_curves_window()
+        app.processEvents()
+        win.curves_win.grab().save(str(out / "selftest_curves.png"))
+        win.curves_win.close()
+        a = dict(win.cur_adj())
+        win.settings["adj_presets"] = {}                      # занятый пресет спросил бы подтверждение
+        win.preset_save(2)                                   # структурные параметры проходят через пресеты и JSON
+        win.adj_replace({}, [win.files[win.idx]])
+        win.preset_pick(2)
+        if win.cur_adj() != a:
+            raise RuntimeError("пресет потерял уровни, кривые или выборочный цвет")
+        win.adj_replace({}, [win.files[win.idx]])
+        win.sync_adj()
+    step("уровни, кривые, выборочный цвет", levels_curves_selcol)
     step("снимок: цвет", lambda: shot("color"))
+    step("12 фото на листе", lambda: (win._layout_set("nup", 12), win.seg_nup.set(12)))
+    step("7 фото на листе (своё число)", lambda: (win._layout_set("nup", 7), win.seg_nup.set(7), win.layout_spec()))
     step("4 фото на листе", lambda: win._layout_set("nup", 4))
     step("вид «Лист»", lambda: (win.set_view("sheet"), win.sheet_view.update()))
     step("снимок: лист 4", lambda: (time.sleep(1.5), shot("sheet4")))
@@ -6206,6 +8133,17 @@ def selftest(app):
         d.grab().save(str(out / "selftest_open.png"))
         d.close()
     step("окно «Открыть»", open_dlg)
+
+    def drop_doc():
+        from PIL import Image
+        pdf = tmp / "бросили.pdf"
+        Image.new("RGB", (300, 400), (240, 240, 240)).save(pdf)
+        win.drop_paths([str(pdf)])
+        app.processEvents()
+        if win.app_mode != "doc" or win.pages.currentIndex() != 4:
+            raise RuntimeError("документ не открыл раздел «Документ»")
+        win.set_app_mode("photo")
+    step("документ, брошенный в окно, открывает раздел «Документ»", drop_doc)
     step("вкладка «Принтер»", lambda: (win.show_page(2), shot("printer"), win.show_page(0)))
     step("параметры сохранения", lambda: win.options() or (_ for _ in ()).throw(RuntimeError("options() вернул пусто")))
     text = "PhotoCrop Qt selftest  %s\nPySide6 %s, Python %s\n\n%s\n" % (
@@ -6233,7 +8171,8 @@ pc.EN.update({
     "Копия журнала": "Journal backup", "Сводка": "Summary", "Журнал": "Journal",
     "Время": "Time", "Бумага, мм": "Paper, mm", "Файлов на листе": "Files on the sheet", "Файлы": "Files", "Напечатано файлов": "Files printed", "Режим": "Mode", "Источник": "Source", "Листов": "Sheets",
     "Всего напечатано": "Total printed", "Период": "Period", "Фото": "Photos", "Сегодня": "Today", "7 дней": "7 days", "30 дней": "30 days",
-    "Всё время": "All time", "По принтерам": "By printer", "По формату бумаги": "By paper size",
+    "Всё время": "All time", "По принтерам": "By printer", "Принтеры": "Printers", "Все принтеры": "All printers", "Принтер": "Printer",
+    "Экспорт по принтерам…": "Export by printer…", "Нет данных за выбранный период.": "No data for the selected period.", "листов": "sheets", "фото": "photos", "документы": "documents", "Период": "Period", "По формату бумаги": "By paper size",
     "По источнику (app — окно программы, agent — ИИ-агент)": "By source (app — program window, agent — AI agent)",
     "Последние 14 дней": "Last 14 days",
 })
@@ -6244,7 +8183,7 @@ pc.EN_FMT.update({
     "Слишком много неверных попыток. Подождите {m} мин {s} с.": "Too many wrong attempts. Wait {m} min {s} s.",
     "⚠ Журнал изменён или повреждён (строка {n}). Данные ниже могут быть неточными.": "⚠ The journal was changed or damaged (line {n}). The figures below may be inaccurate.",
     "Сохранено строк: {n}": "Rows saved: {n}",
-    "Напечатано сегодня: {s} листов, {p} файлов": "Printed today: {s} sheets, {p} files",
+    "Напечатано сегодня: {s} листов (фото {p}, документы {d})": "Printed today: {s} sheets (photos {p}, documents {d})",
 })
 
 

@@ -45,7 +45,10 @@ ICM и т.д.). Частные опции драйвера Epson (наприме
 `driver_capabilities` показывает, какие бумаги, лотки и типы носителей поддерживает драйвер.
 
 ## Цветокоррекция и папка вывода (добавлено)
-- `set_adjust` (photo = ссылка, список или `"all"`): bright, contrast, gamma, shadows, highlights, sat, vib, temp, tint, r, g, b, auto (`contrast|color|bw|off`; `bw` — автоматически чёрно-белое с улучшением), bw, sepia, denoise, sharp, sharp_radius, sharp_thr; `reset=true` очищает.
+- `set_adjust` (photo = ссылка, список или `"all"`): bright, contrast, gamma, shadows, highlights, sat, vib, temp, tint, r, g, b, auto (`contrast|color|bw|off`; `bw` — автоматически чёрно-белое с улучшением), bw, sepia, denoise, sharp, sharp_radius, sharp_thr, а также `levels`, `curves`, `selcol`; `reset=true` очищает.
+  - `levels`: JSON-список из 4 строк (общий, R, G, B) по 5 чисел `[чёрная точка 0-254, гамма 0.1-10, белая точка 1-255, выход от, выход до]`; нейтрально `[0,1,255,0,255]`.
+  - `curves`: 4 списка точек `[[вход, выход], ...]` (общий, R, G, B), вход и выход 0-255; нейтрально `[[0,0],[255,255]]`.
+  - `selcol`: 6 строк (красный, жёлтый, зелёный, голубой, синий, пурпурный) по 3 числа `[оттенок, насыщенность, яркость]` от −100 до 100.
 - `set_save_options`: `out_mode` = `orig` (рядом с каждым оригиналом, в подпапку `out_name`, по умолчанию «Готовые») или `custom` (папка `outdir`).
 - `open_folder` пропускает только готовые результаты программы (папки «Готовые»/«Печать» + имя вида `_10x15`) и сообщает `skipped`; `save_files` возвращает `low_res_under_150dpi`.
 
