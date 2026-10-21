@@ -6220,7 +6220,14 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
             self.show_orig = on
             self._adj_redraw()
 
+    def _color_editors_enable(self, on):
+        """Без открытого фото уровни, кривые и выбор по цветам недоступны (серые), а не молча не реагируют на мышь."""
+        for w in (self.levels_ed, self.sel_panel, *self._curve_panels()):
+            w.setEnabled(on)
+            w.setToolTip("" if on else tr("Сначала откройте фото"))
+
     def sync_adj(self):
+        self._color_editors_enable(self.idx >= 0)
         if self.idx < 0:
             return
         self.adj_lock = True
@@ -6279,6 +6286,7 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
             w = self.curves_win = CurvesWindow(self)
             w.panel.changed.connect(lambda v: self.curves_changed(w.panel, v))
         w.panel.set_value(pc.adj_full(self.cur_adj())["curves"] if self.idx >= 0 else ())
+        self._color_editors_enable(self.idx >= 0)
         self._color_hist()
         w.show()
         w.raise_()
@@ -7521,7 +7529,7 @@ pc.EN.update({
     "В другую папку": "To another folder", "Папка не выбрана": "No folder chosen", "Выбрать папку": "Choose folder",
     "Разрешение, dpi": "Resolution, dpi", "Тип файла": "File type", "Качество JPEG": "JPEG quality",
     "Точный размер печати": "Exact print size", "Подпапка по формату": "Subfolder per format", "Число копий в имени файла": "Copies count in file name",
-    "Цвет": "Colour", "Уровни": "Levels", "Кривые": "Curves", "По цветам": "By colour", "На весь экран…": "Full screen…",
+    "Цвет": "Colour", "Сначала откройте фото": "Open a photo first", "Уровни": "Levels", "Кривые": "Curves", "По цветам": "By colour", "На весь экран…": "Full screen…",
     "Все каналы сразу": "All channels together", "Красный канал": "Red channel", "Зелёный канал": "Green channel", "Синий канал": "Blue channel",
     "Чёрная точка (вход)": "Black point (input)", "Гамма (середина)": "Gamma (midtones)", "Белая точка (вход)": "White point (input)",
     "Выход: чёрный": "Output: black", "Вход: чёрный": "Input: black", "гамма": "gamma", "белый": "white",
@@ -7817,6 +7825,8 @@ def selftest(app):
         app.processEvents()
         if win.pages.currentIndex() != 1 or not win.b_pre[1].isVisible():
             raise RuntimeError("вкладка «Цвет» без фото не открылась или нет кнопок пресетов")
+        if win.levels_ed.isEnabled() or win.curves_panel.isEnabled() or win.sel_panel.isEnabled():
+            raise RuntimeError("без фото уровни, кривые и выбор цвета должны быть недоступны")
         win.preset_pick(1)
         win.show_page(0)
     step("вкладка «Цвет» открывается без фото", color_tab_empty)
@@ -7856,6 +7866,8 @@ def selftest(app):
     def levels_curves_selcol():
         win.adj_replace({}, [win.files[win.idx]])
         win.sync_adj()
+        if not (win.levels_ed.isEnabled() and win.curves_panel.isEnabled() and win.sel_panel.isEnabled()):
+            raise RuntimeError("с фото уровни, кривые и выбор цвета должны быть доступны")
         win.levels_ed.rows[0] = [20.0, 1.2, 235.0, 0.0, 255.0]
         win.levels_ed._emit()
         if not win.cur_adj().get("levels"):
