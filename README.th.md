@@ -4,7 +4,7 @@
 
 โปรแกรม Windows สำหรับครอปและพิมพ์รูปภาพ (10×15 ซม. และขนาดอื่น ๆ) พร้อมการครอปอัจฉริยะ การแก้สี โปรไฟล์สี การจัดหน้าพิมพ์ และโหมดเอเจนต์ AI
 
-**License: not selected (ยังไม่ได้เลือกใบอนุญาต)**
+**License: [PolyForm Noncommercial 1.0.0](LICENSE)**
 
 ## Screenshots
 
@@ -68,4 +68,4 @@
 
 ## ใบอนุญาต
 
-License: not selected (ยังไม่ได้เลือกใบอนุญาต)
+License: [PolyForm Noncommercial 1.0.0](LICENSE)

@@ -6,7 +6,7 @@
 
 برنامج لنظام Windows لاقتصاص الصور وطباعتها (10×15 سم وقياسات أخرى) مع اقتصاص ذكي وتصحيح للألوان وملفات تعريف الألوان وتخطيط للطباعة ووضع وكيل الذكاء الاصطناعي.
 
-**License: not selected (لم يتم اختيار ترخيص).**
+**License: [PolyForm Noncommercial 1.0.0](LICENSE)**
 
 ## Screenshots
 
@@ -70,6 +70,6 @@
 
 ## الترخيص
 
-License: not selected (لم يتم اختيار ترخيص).
+License: [PolyForm Noncommercial 1.0.0](LICENSE)
 
 </div>

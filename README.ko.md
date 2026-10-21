@@ -4,7 +4,7 @@
 
 사진 자르기와 인쇄(10×15 cm 및 기타 규격)를 위한 Windows 프로그램입니다. 스마트 자르기, 색 보정, 색상 프로파일, 인쇄 배치, AI 에이전트 모드를 제공합니다.
 
-**License: not selected (라이선스 미선택).**
+**License: [PolyForm Noncommercial 1.0.0](LICENSE)**
 
 ## Screenshots
 
@@ -68,4 +68,4 @@ YuNet / YOLOX 모델(약 36 MB)은 저장소에 포함되지 않으며, 처음 �
 
 ## 라이선스
 
-License: not selected (라이선스 미선택).
+License: [PolyForm Noncommercial 1.0.0](LICENSE)

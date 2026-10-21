@@ -10,6 +10,6 @@ PhotoCrop (КопиТехник PRINT) 的首個公開版本。
 - 含列印前檢查的列印規劃、四邊出血、每張紙一個列印工作。
 - AI 代理模式與 MCP 伺服器（`PhotoCropAgent.exe mcp`）。
 - Qt 版本的介面語言：Русский, English, 日本語, 한국어, Türkçe, Bahasa Indonesia, العربية, हिन्दी, Italiano, Polski, Українська, Tiếng Việt, ไทย, 繁體中文, Татарча；翻譯為機器翻譯，尚未經母語人士審閱。
-- 偵測模型於首次使用時下載。License: not selected（未選擇授權條款）。
+- 偵測模型於首次使用時下載。License: PolyForm Noncommercial 1.0.0
 
 版本檔案：`PhotoCropQt.exe`、`PhotoCropAgent.exe`。

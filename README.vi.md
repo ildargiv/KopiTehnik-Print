@@ -4,7 +4,7 @@
 
 Chương trình Windows để cắt và in ảnh (10×15 cm và các khổ khác), có cắt thông minh, chỉnh màu, hồ sơ màu, bố cục in và chế độ tác tử AI.
 
-**License: not selected (chưa chọn giấy phép).**
+**License: [PolyForm Noncommercial 1.0.0](LICENSE)**
 
 ## Screenshots
 
@@ -68,4 +68,4 @@ Dòng lệnh: `python photo_crop.py agent set_format format=10x15`; `python phot
 
 ## Giấy phép
 
-License: not selected (chưa chọn giấy phép).
+License: [PolyForm Noncommercial 1.0.0](LICENSE)

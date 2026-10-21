@@ -4369,67 +4369,48 @@ def mcp_server_entry():
     return {"command": exe, "args": [str(Path(__file__).resolve()), "mcp"]}
 
 
+def _client_arg(args):
+    if "--client" in args:
+        c = args[args.index("--client") + 1]
+        import agent_clients as ac
+        if c not in ac.CLIENTS:
+            raise SystemExit("--client: " + ", ".join(ac.CLIENTS))
+        return c
+    return "claude_desktop"
+
+
 def mcp_install(args):
-    """Дописывает сервер photocrop в claude_desktop_config.json (остальные серверы не трогает; рядом остаётся копия .bak).
-    --path <файл>: другой файл конфигурации; --print: только показать."""
-    path = None
-    if "--path" in args:
-        path = Path(args[args.index("--path") + 1])
-    if path is None:
-        base = os.environ.get("APPDATA") or str(Path.home() / "AppData" / "Roaming")
-        path = Path(base) / "Claude" / "claude_desktop_config.json"
+    """Подключает PhotoCrop к клиенту MCP (по умолчанию Claude Desktop; --client claude_code|cursor|windsurf|opencode|openclaw|hermes|vscode|other).
+    JSON-файлы правятся с копией .bak, чужие серверы не трогаются. --path <файл>: другой файл; --print: только показать настройку;
+    --no-enable: не включать приём подключений в окне."""
+    import agent_clients as ac
+    client = _client_arg(args)
     entry = mcp_server_entry()
-    cfg = {}
-    if path.is_file():
-        try:
-            cfg = json.loads(path.read_text(encoding="utf-8") or "{}")
-        except ValueError:
-            print(f"Файл {path} не является корректным JSON — исправьте его вручную, ничего не изменено.")
-            return 2
-        if not isinstance(cfg, dict):
-            print(f"Файл {path}: ожидался JSON-объект — ничего не изменено.")
-            return 2
-    servers = cfg.setdefault("mcpServers", {})
-    if not isinstance(servers, dict):
-        print(f"Файл {path}: mcpServers должен быть объектом — ничего не изменено.")
-        return 2
-    servers["photocrop"] = entry
-    text = json.dumps(cfg, ensure_ascii=False, indent=2)
     if "--print" in args:
-        print(text)
+        print(ac.snippet(client, entry))
         return 0
-    path.parent.mkdir(parents=True, exist_ok=True)
-    if path.is_file():
-        shutil.copyfile(path, path.with_name(path.name + ".bak"))
-    write_json_atomic(path, cfg)
-    if "--no-enable" not in args:                      # установщик: окно программы будет принимать подключение агента
+    path = args[args.index("--path") + 1] if "--path" in args else None
+    ok, msg = ac.install(client, entry, path)
+    print(msg)
+    if ok and "--no-enable" not in args:               # установщик: окно программы будет принимать подключение агента
         try:
             cur = load_settings()
             cur["agent_enabled"] = True
             save_settings(cur)
         except Exception:
             pass
-    print(f"Готово: сервер photocrop записан в {path}\nПерезапустите Claude Desktop (закройте полностью, в т. ч. значок в трее).")
-    return 0
+    return 0 if ok else 2
 
 
 def mcp_uninstall(args):
-    """Убирает сервер photocrop из claude_desktop_config.json (остальные серверы не трогает)."""
-    if "--path" in args:
-        path = Path(args[args.index("--path") + 1])
-    else:
-        path = Path(os.environ.get("APPDATA") or str(Path.home() / "AppData" / "Roaming")) / "Claude" / "claude_desktop_config.json"
-    try:
-        cfg = json.loads(path.read_text(encoding="utf-8") or "{}")
-        servers = cfg.get("mcpServers")
-        if not isinstance(servers, dict) or "photocrop" not in servers:
-            return 0
-    except (OSError, ValueError):
-        return 0
-    shutil.copyfile(path, path.with_name(path.name + ".bak"))
-    del servers["photocrop"]
-    write_json_atomic(path, cfg)
-    print(f"Сервер photocrop убран из {path}")
+    """Убирает PhotoCrop из настройки клиента (по умолчанию из Claude Desktop; --client …). Остальные серверы не трогает."""
+    import agent_clients as ac
+    path = args[args.index("--path") + 1] if "--path" in args else None
+    clients = [_client_arg(args)] if "--client" in args else [k for k, v in ac.CLIENTS.items() if v["kind"] == "json"]
+    for c in clients:                                  # без --client: из всех клиентов с JSON-настройкой, где мы записаны
+        done, msg = ac.uninstall(c, path)
+        if msg:
+            print(msg)
     return 0
 
 
@@ -4448,7 +4429,8 @@ def agent_main(argv):
     _stdio_utf8()
     dump = lambda o, pretty=False: json.dumps(o, ensure_ascii=False, default=_jsonable, indent=1 if pretty else None)
     if argv and argv[0] == "mcp-config":
-        print(dump({"mcpServers": {"photocrop": mcp_server_entry()}}, True))
+        import agent_clients as ac
+        print(ac.snippet(_client_arg(argv), mcp_server_entry()))
         return 0
     if argv and argv[0] == "mcp-install":
         return mcp_install(argv[1:])

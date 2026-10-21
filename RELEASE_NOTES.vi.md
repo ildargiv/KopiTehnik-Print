@@ -10,6 +10,6 @@ Bản phát hành công khai đầu tiên của PhotoCrop (КопиТехник 
 - Lập kế hoạch in có kiểm tra trước khi in, tràn lề theo từng cạnh, mỗi tờ một tác vụ.
 - Chế độ tác tử AI và máy chủ MCP (`PhotoCropAgent.exe mcp`).
 - Ngôn ngữ giao diện của bản Qt: Русский, English, 日本語, 한국어, Türkçe, Bahasa Indonesia, العربية, हिन्दी, Italiano, Polski, Українська, Tiếng Việt, ไทย, 繁體中文, Татарча; bản dịch do máy dịch và chưa được người bản ngữ rà soát.
-- Mô hình nhận diện được tải khi dùng lần đầu. License: not selected (chưa chọn giấy phép).
+- Mô hình nhận diện được tải khi dùng lần đầu. License: PolyForm Noncommercial 1.0.0
 
 Tệp trong bản phát hành: `PhotoCropQt.exe`, `PhotoCropAgent.exe`.

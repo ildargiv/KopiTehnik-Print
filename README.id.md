@@ -4,7 +4,7 @@
 
 Program Windows untuk memangkas dan mencetak foto (10×15 cm dan format lain), dengan pemangkasan pintar, koreksi warna, profil warna, tata letak cetak, dan mode agen AI.
 
-**License: not selected (lisensi belum dipilih).**
+**License: [PolyForm Noncommercial 1.0.0](LICENSE)**
 
 ## Screenshots
 
@@ -68,4 +68,4 @@ Baris perintah: `python photo_crop.py agent set_format format=10x15`; `python ph
 
 ## Lisensi
 
-License: not selected (lisensi belum dipilih).
+License: [PolyForm Noncommercial 1.0.0](LICENSE)

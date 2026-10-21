@@ -10,6 +10,6 @@ Première version publique de PhotoCrop (КопиТехник PRINT).
 - Préparation de l'impression avec contrôles préalables, fond perdu par côté, un travail par feuille.
 - Mode agent IA et serveur MCP (`PhotoCropAgent.exe mcp`).
 - Langues de l'interface de la version Qt : Русский, English, 日本語, 한국어, Türkçe, Bahasa Indonesia, العربية, हिन्दी, Italiano, Polski, Українська, Tiếng Việt, ไทย, 繁體中文, Татарча ; les traductions sont automatiques et pas encore relues par des locuteurs natifs.
-- Les modèles de détection sont téléchargés à la première utilisation. License: not selected (aucune licence choisie).
+- Les modèles de détection sont téléchargés à la première utilisation. License: PolyForm Noncommercial 1.0.0
 
 Fichiers de la version : `PhotoCropQt.exe`, `PhotoCropAgent.exe`.

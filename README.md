@@ -4,7 +4,7 @@
 
 A Windows program for cropping and printing photos (10×15 cm and other formats), with smart cropping, colour correction, colour profiles, print layout and an AI-agent mode.
 
-**License: not selected.**
+**License: [PolyForm Noncommercial 1.0.0](LICENSE): free for personal and non-commercial use; commercial use needs the author's permission.**
 
 ## Screenshots
 
@@ -74,4 +74,4 @@ Command line: `python photo_crop.py agent set_format format=10x15`; `python phot
 
 ## License
 
-License: not selected.
+License: [PolyForm Noncommercial 1.0.0](LICENSE): free for personal and non-commercial use; commercial use needs the author's permission.

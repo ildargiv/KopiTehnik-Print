@@ -10,6 +10,6 @@ Rilis publik pertama PhotoCrop (КопиТехник PRINT).
 - Perencanaan cetak dengan pemeriksaan sebelum cetak, bleed per sisi, satu pekerjaan per lembar.
 - Mode agen AI dan server MCP (`PhotoCropAgent.exe mcp`).
 - Bahasa antarmuka versi Qt: Русский, English, 日本語, 한국어, Türkçe, Bahasa Indonesia, العربية, हिन्दी, Italiano, Polski, Українська, Tiếng Việt, ไทย, 繁體中文, Татарча; terjemahan dibuat secara mesin dan belum ditinjau penutur asli.
-- Model deteksi diunduh saat pertama dipakai. License: not selected (lisensi belum dipilih).
+- Model deteksi diunduh saat pertama dipakai. License: PolyForm Noncommercial 1.0.0
 
 File dalam rilis: `PhotoCropQt.exe`, `PhotoCropAgent.exe`.

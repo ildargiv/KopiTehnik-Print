@@ -4,7 +4,7 @@
 
 Programma Windows per ritagliare e stampare foto (10×15 cm e altri formati), con ritaglio intelligente, correzione del colore, profili colore, impaginazione di stampa e modalità agente IA.
 
-**License: not selected (licenza non selezionata).**
+**License: [PolyForm Noncommercial 1.0.0](LICENSE)**
 
 ## Screenshots
 
@@ -68,4 +68,4 @@ Riga di comando: `python photo_crop.py agent set_format format=10x15`; `python p
 
 ## Licenza
 
-License: not selected (licenza non selezionata).
+License: [PolyForm Noncommercial 1.0.0](LICENSE)

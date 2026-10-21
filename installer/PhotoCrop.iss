@@ -18,6 +18,7 @@ PrivilegesRequired=lowest
 PrivilegesRequiredOverridesAllowed=dialog
 UninstallDisplayIcon={app}\PhotoCropQt.exe
 OutputDir=..\dist
+LicenseFile=..\LICENSE
 OutputBaseFilename=KopiTehnikPrint-Setup-{#AppVersion}
 Compression=lzma2
 SolidCompression=yes

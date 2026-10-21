@@ -10,6 +10,6 @@ PhotoCrop'un (КопиТехник PRINT) ilk herkese açık sürümü.
 - Baskı öncesi kontrollerle baskı planlama, kenar başına taşma, sayfa başına bir iş.
 - Yapay zekâ ajanı modu ve MCP sunucusu (`PhotoCropAgent.exe mcp`).
 - Qt sürümünün arayüz dilleri: Русский, English, 日本語, 한국어, Türkçe, Bahasa Indonesia, العربية, हिन्दी, Italiano, Polski, Українська, Tiếng Việt, ไทย, 繁體中文, Татарча; çeviriler makine çevirisidir ve anadili konuşanlarca henüz gözden geçirilmemiştir.
-- Algılama modelleri ilk kullanımda indirilir. License: not selected (lisans seçilmedi).
+- Algılama modelleri ilk kullanımda indirilir. License: PolyForm Noncommercial 1.0.0
 
 Sürümdeki dosyalar: `PhotoCropQt.exe`, `PhotoCropAgent.exe`.

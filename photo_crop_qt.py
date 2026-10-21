@@ -4166,7 +4166,8 @@ RELEASES_API = "https://api.github.com/repos/ildargiv/KopiTehnik-Print/releases/
 RELEASES_PAGE = "https://github.com/ildargiv/KopiTehnik-Print/releases/latest"
 GITHUB_URL = "https://github.com/ildargiv/KopiTehnik-Print"
 AUTHOR = "Ildar Gaisin (Гайсин Ильдар)"
-LICENSE_TEXT = "Лицензия: не выбрана, все права защищены."
+LICENSE_TEXT = "Лицензия: PolyForm Noncommercial 1.0.0. Бесплатно для личного и некоммерческого использования; для коммерческого нужно разрешение автора."
+LICENSE_URL = "https://polyformproject.org/licenses/noncommercial/1.0.0"
 
 
 def _ver(tag):
@@ -4594,13 +4595,20 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         self._agent_inv = getattr(self, "_agent_inv", None) or AgentInvoker()
         self.agent = ga.GuiAgent(self)
         self.agent.invoke = self._agent_inv.invoke
-        srv = ab.AgentHttpServer(lambda msg: pc.mcp_handle(self.agent, msg), self.settings["agent_token"])
-        try:
-            srv.start()
-        except OSError as ex:
+        srv = None
+        for want in (int(self.settings.get("agent_port") or 0), 0):          # прежний порт (адрес для HTTP-клиентов не меняется), иначе любой
+            srv = ab.AgentHttpServer(lambda msg: pc.mcp_handle(self.agent, msg), self.settings["agent_token"], want)
+            try:
+                srv.start()
+                break
+            except OSError as ex:
+                srv = None
+                err = ex
+        if srv is None:
             self.agent = None
-            warn(self, tr("Не удалось включить ИИ-агента") + ":\n%s" % ex)
+            warn(self, tr("Не удалось включить ИИ-агента") + ":\n%s" % err)
             return 0
+        self.settings["agent_port"] = srv.port
         self.agent_server = srv
         self.settings["agent_enabled"] = True
         return srv.port
@@ -6977,7 +6985,7 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         s = self.s
         self._bleed_flush()
         fresh = pc.load_settings()                    # окно печати пишет свои разделы в тот же файл — не затираем их
-        for k in ("last_dir", "start_dir_mode", "snap_px", "anim", "icc_dir", "trim_l", "trim_t", "trim_r", "trim_b", "check_updates", "skip_update", "doc_paper", "doc_fit", "doc_margin", "doc_cm_on", "doc_icc", "converter_path", "adj_presets", "confirm_actions", "agent_enabled", "agent_token", "agent_allow_print", "agent_max_sheets", "agent_confirm_print"):
+        for k in ("last_dir", "start_dir_mode", "snap_px", "anim", "icc_dir", "trim_l", "trim_t", "trim_r", "trim_b", "check_updates", "skip_update", "doc_paper", "doc_fit", "doc_margin", "doc_cm_on", "doc_icc", "converter_path", "adj_presets", "confirm_actions", "agent_enabled", "agent_token", "agent_port", "agent_allow_print", "agent_max_sheets", "agent_confirm_print"):
             if k in self.settings:
                 fresh[k] = self.settings[k]
         fresh.update(format=s["format"], orient=s["orient"], mode=s["mode"], recursive=s["recursive"], subfolder=s["subfolder"],
@@ -7718,9 +7726,9 @@ class SettingsDialog(QDialog):
         import webbrowser
         link = lambda text, url: btn(text, lambda: webbrowser.open(url), "link")
         upd_card = card("О программе", lbl("КопиТехник Принт (PhotoCrop)"), row("Версия", lbl(APP_VERSION)), row("Автор", lbl(AUTHOR)),
-                        lbl(LICENSE_TEXT, "muted", wrap=True),
-                        hbox(link("Страница проекта на GitHub", GITHUB_URL), link("Все выпуски", GITHUB_URL + "/releases"),
-                             link("Сообщить об ошибке", GITHUB_URL + "/issues"), None, spacing=6),
+                        hint(LICENSE_TEXT),
+                        hbox(link("Страница на GitHub", GITHUB_URL), link("Все выпуски", GITHUB_URL + "/releases"), None, spacing=6),
+                        hbox(link("Сообщить об ошибке", GITHUB_URL + "/issues"), link("Текст лицензии", LICENSE_URL), None, spacing=6),
                         row("Проверять обновления при запуске", sw_upd),
                         hbox(None, btn("Проверить обновления", lambda: app.check_updates(True), ico="sparkle")))
         about = lbl(tr("Настройки хранятся в файле") + ": " + str(pc.SETTINGS_PATH), "muted", wrap=True)
@@ -7799,10 +7807,16 @@ class SettingsDialog(QDialog):
         e_max.setFixedWidth(56)
         e_max.textEdited.connect(lambda v: st.__setitem__("agent_max_sheets", int(v) if v.strip().isdigit() else 0))
         self._agent_state()
+        import agent_clients as ac
+        self.cb_client = QComboBox()
+        for k, t in ac.titles().items():
+            self.cb_client.addItem(t, k)
         return card("ИИ-агент (MCP)", row("Агент может работать с этим окном", sw_on), self.l_agent_state,
                     row("Разрешить агенту печатать", sw_print), row("Макс. листов за одну печать (0 — без ограничения)", e_max),
                     row("Спрашивать меня перед печатью агента", sw_conf),
-                    hbox(btn("Подключить к Claude Desktop", self._agent_connect), btn("Скопировать настройку MCP", self._agent_copy), spacing=6),
+                    row("Программа-агент", self.cb_client),
+                    hbox(btn("Подключить", self._agent_connect), btn("Скопировать настройку", self._agent_copy),
+                         btn("Адрес для HTTP-клиентов", self._agent_http), spacing=6),
                     lbl("Агент видит те же фото и настройки, что и вы, и всё, что он делает, отменяется Ctrl+Z. "
                         "Подключение только с этого компьютера.", "muted", wrap=True))
 
@@ -7810,19 +7824,33 @@ class SettingsDialog(QDialog):
         a = self.app
         self.l_agent_state.setText(trf("Включено, порт {p}", p=a.agent_server.port) if a.agent_server else tr("Выключено"))
 
+    def _agent_client(self):
+        return self.cb_client.currentData()
+
     def _agent_connect(self):
-        import contextlib
-        import io
-        buf = io.StringIO()
-        with contextlib.redirect_stdout(buf):
-            rc = pc.mcp_install(["--no-enable"])
-        self.app.agent_start()
-        self._agent_state()
-        (info if rc == 0 else warn)(self, buf.getvalue().strip())
+        import agent_clients as ac
+        client = self._agent_client()
+        ok, msg = ac.install(client, pc.mcp_server_entry())
+        if ok:
+            self.app.agent_start()
+            self._agent_state()
+        elif ac.CLIENTS[client]["kind"] != "json" or "не найден" not in msg:
+            QApplication.clipboard().setText(ac.snippet(client, pc.mcp_server_entry()))        # настройка уже в буфере обмена
+            msg += "\n\n" + tr("Настройка скопирована в буфер обмена.")
+        (info if ok else warn)(self, msg)
 
     def _agent_copy(self):
-        QApplication.clipboard().setText(json.dumps({"mcpServers": {"photocrop": pc.mcp_server_entry()}}, ensure_ascii=False, indent=2))
+        import agent_clients as ac
+        QApplication.clipboard().setText(ac.snippet(self._agent_client(), pc.mcp_server_entry()))
         info(self, "Настройка скопирована. Вставьте её в конфигурацию клиента MCP.")
+
+    def _agent_http(self):
+        a = self.app
+        if a.agent_server is None:
+            info(self, "Сначала включите «Агент может работать с этим окном».")
+            return
+        QApplication.clipboard().setText("URL: http://127.0.0.1:%d/mcp\nAuthorization: Bearer %s" % (a.agent_server.port, a.settings["agent_token"]))
+        info(self, "Адрес и ключ скопированы. Для клиентов, которые подключаются по HTTP (Streamable HTTP), а не запуском программы.")
 
     def _counter_card(self):
         """Общий счётчик за день (виден всем) и вход в подробный счётчик для администратора."""
@@ -7932,8 +7960,8 @@ pc.EN.update({
     "Выбрать файл профиля": "Choose a profile file", "Способ рендеринга": "Rendering intent",
     "Применять профиль принтера при сохранении": "Apply the printer profile when saving", "Цветовой профиль принтера": "Printer colour profile",
     "Анимация отправки на печать и сохранения": "Animate sending to print and saving", "Язык интерфейса": "Interface language",
-    "О программе": "About", "Автор": "Author", "Версия": "Version", "Лицензия: не выбрана, все права защищены.": "Licence: none chosen, all rights reserved.",
-    "Страница проекта на GitHub": "Project page on GitHub", "Все выпуски": "All releases", "Сообщить об ошибке": "Report a problem",
+    "О программе": "About", "Программа-агент": "Agent application", "Подключить": "Connect", "Скопировать настройку": "Copy settings", "Адрес для HTTP-клиентов": "Address for HTTP clients", "Настройка скопирована в буфер обмена.": "The settings were copied to the clipboard.", "Автор": "Author", "Версия": "Version", "Лицензия: PolyForm Noncommercial 1.0.0. Бесплатно для личного и некоммерческого использования; для коммерческого нужно разрешение автора.": "Licence: PolyForm Noncommercial 1.0.0. Free for personal and non-commercial use; commercial use needs the author's permission.", "Текст лицензии": "Licence text",
+    "Страница на GitHub": "Project page on GitHub", "Все выпуски": "All releases", "Сообщить об ошибке": "Report a problem",
     "КопиТехник Принт (PhotoCrop)": "KopiTehnik Print (PhotoCrop)",
     "Спрашивать подтверждение обычных действий (сброс, применение ко всем, печать)": "Ask for confirmation of everyday actions (reset, apply to all, print)",
     "Папка, с которой начинается «Открыть»": "Folder that “Open” starts in", "Последняя использованная": "Last used",
