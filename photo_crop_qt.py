@@ -1409,7 +1409,6 @@ class CropCanvas(QWidget):
             p.drawPixmap(QRectF(px + (PW - dw) / 2, py + (PH - dh) / 2, dw, dh), pm, QRectF(pm.rect()))
             self._cmp_under(p, (px + (PW - dw) / 2, py + (PH - dh) / 2, dw, dh))
             self._bleed(p, [(px, py), (px + PW, py), (px + PW, py + PH), (px, py + PH)], paper[0])
-            self._trim(p, [(px, py), (px + PW, py), (px + PW, py + PH), (px, py + PH)], paper)
             self.geom = None
             self._cmp_over(p)
             p.end()
@@ -1442,7 +1441,6 @@ class CropCanvas(QWidget):
                 p.drawLine(QPointF(*a2), QPointF(*b2))
         app.smart_overlay(p, ox, oy, k, W, H, f)
         self._bleed(p, P, paper[0])
-        self._trim(p, P, paper)
         p.setBrush(Qt.NoBrush)
         p.setPen(QPen(QColor(T["frame"]), 2))
         p.drawPolygon(poly)
@@ -1469,33 +1467,6 @@ class CropCanvas(QWidget):
         self._cmp_over(p)
         app.smart_banner(p, cw, f)
         p.end()
-
-    def _trim(self, p, P, paper):
-        """Пунктирная рамка внутри кадра: что останется на отпечатке после подрезки принтером (печать без полей).
-        Показывается, когда кадр — это весь лист (одно фото на лист)."""
-        app = self.app
-        if app.sheet_mode():
-            return
-        tl, tt, tr_, tb = app.trim_mm()
-        if not (tl or tt or tr_ or tb):
-            return
-        if paper[0] > paper[1]:                      # лист лежит альбомно: стороны листа поворачиваются вместе с ним
-            tl, tt, tr_, tb = tt, tr_, tb, tl
-        ux, uy = P[1][0] - P[0][0], P[1][1] - P[0][1]
-        L = math.hypot(ux, uy) or 1.0
-        ux, uy = ux / L, uy / L
-        vx, vy = P[3][0] - P[0][0], P[3][1] - P[0][1]
-        Hh = math.hypot(vx, vy) or 1.0
-        vx, vy = vx / Hh, vy / Hh
-        mm = L / max(1e-6, paper[0])
-        pt = lambda c, du, dv: QPointF(c[0] + ux * du * mm + vx * dv * mm, c[1] + uy * du * mm + vy * dv * mm)
-        poly = QPolygonF([pt(P[0], tl, tt), pt(P[1], -tr_, tt), pt(P[2], -tr_, -tb), pt(P[3], tl, -tb)])
-        p.setBrush(Qt.NoBrush)
-        for col, off in ((QColor(255, 255, 255, 210), 0), (QColor(0, 0, 0, 150), 4)):
-            pen = QPen(col, 1.2, Qt.DashLine)
-            pen.setDashOffset(off)
-            p.setPen(pen)
-            p.drawPolygon(poly)
 
     def _bleed(self, p, P, paper_w_mm):
         """Серая шкала подрезки вокруг рамки: полоса снаружи — запас за краем листа (+), внутри — отступ (−)."""
@@ -2889,14 +2860,6 @@ class SheetView(QWidget):
             else:
                 p.fillRect(r, QColor(T["hover"]))
             p.restore()
-        tl, tt, tr_, tb = app.trim_mm()                               # пунктир: что останется после подрезки принтером
-        if tl or tt or tr_ or tb:
-            p.setBrush(Qt.NoBrush)
-            for col, off in ((QColor(255, 255, 255, 200), 0), (QColor(40, 90, 140), 4)):
-                pen = QPen(col, 1.2, Qt.DashLine)
-                pen.setDashOffset(off)
-                p.setPen(pen)
-                p.drawRect(QRectF(x0 + tl * k, y0 + tt * k, Wp - (tl + tr_) * k, Hp - (tt + tb) * k))
         if self.target is not None:                                   # место, с которым поменяется фото
             tslot = next((x for x in slots if x["key"] == self.target), None)
             if tslot:
@@ -5454,17 +5417,6 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
             self.bleed_sync()
         self.redraw()
 
-    def trim_mm(self):
-        """Сколько принтер срезает с каждой стороны листа при печати без полей (лево, верх, право, низ), мм.
-        Только для показа пунктирной рамки: всё, что снаружи неё, может не попасть на отпечаток."""
-        out = []
-        for k in "ltrb":
-            try:
-                out.append(max(0.0, min(20.0, float(str(self.settings.get("trim_" + k, 3)).replace(",", ".")))))
-            except ValueError:
-                out.append(3.0)
-        return tuple(out)
-
     def border_mm(self):
         try:
             return max(0.0, min(30.0, float(str(self.s["border_mm"]).replace(",", "."))))
@@ -6985,7 +6937,7 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         s = self.s
         self._bleed_flush()
         fresh = pc.load_settings()                    # окно печати пишет свои разделы в тот же файл — не затираем их
-        for k in ("last_dir", "start_dir_mode", "snap_px", "anim", "icc_dir", "trim_l", "trim_t", "trim_r", "trim_b", "check_updates", "skip_update", "doc_paper", "doc_fit", "doc_margin", "doc_cm_on", "doc_icc", "converter_path", "adj_presets", "confirm_actions", "agent_enabled", "agent_token", "agent_port", "agent_allow_print", "agent_max_sheets", "agent_confirm_print"):
+        for k in ("last_dir", "start_dir_mode", "snap_px", "anim", "icc_dir", "check_updates", "skip_update", "doc_paper", "doc_fit", "doc_margin", "doc_cm_on", "doc_icc", "converter_path", "adj_presets", "confirm_actions", "agent_enabled", "agent_token", "agent_port", "agent_allow_print", "agent_max_sheets", "agent_confirm_print"):
             if k in self.settings:
                 fresh[k] = self.settings[k]
         fresh.update(format=s["format"], orient=s["orient"], mode=s["mode"], recursive=s["recursive"], subfolder=s["subfolder"],
@@ -7733,18 +7685,7 @@ class SettingsDialog(QDialog):
                         hbox(None, btn("Проверить обновления", lambda: app.check_updates(True), ico="sparkle")))
         about = lbl(tr("Настройки хранятся в файле") + ": " + str(pc.SETTINGS_PATH), "muted", wrap=True)
         left = vbox(look, general, crop, upd_card, None, spacing=12)
-        trim = hbox(spacing=6)
-        for text, k in (("Лево", "l"), ("Верх", "t"), ("Право", "r"), ("Низ", "b")):
-            e = QLineEdit("%g" % app.trim_mm()["ltrb".index(k)])
-            e.setFixedWidth(44)
-            e.textEdited.connect(lambda v, key="trim_" + k: (st.__setitem__(key, v), app.redraw()))
-            trim.addWidget(lbl(text, "muted"))
-            trim.addWidget(e)
-        trim.addStretch(1)
-        borderless = card("Печать без полей", lbl("Сколько принтер срезает с каждого края листа, мм"), trim,
-                          lbl("На листе это пунктирная рамка: всё, что внутри неё, точно останется на отпечатке. "
-                              "Важные детали держите внутри рамки.", "muted", wrap=True))
-        right = vbox(self._save_card(), borderless, self._counter_card(), self._agent_card(), None, spacing=12)
+        right = vbox(self._save_card(), self._counter_card(), self._agent_card(), None, spacing=12)
         self.setLayout(vbox(hbox(left, right, spacing=12), about, hbox(None, btn("Готово", self.accept, "primary")),
                             spacing=12, margins=(14, 14, 14, 14)))
 
@@ -8145,9 +8086,7 @@ pc.EN.update({
     "Больше копий листа": "More sheet copies",
     "Свободно": "Free", "Свободный режим: фото можно ставить куда угодно и менять их размер": "Free mode: place photos anywhere and resize them",
     "Вернуть раскладку по сетке и исходный порядок": "Restore the grid layout and original order",
-    "Печать без полей": "Borderless printing", "Сколько принтер срезает с каждого края листа, мм": "How much the printer trims from each sheet edge, mm",
-    "На листе это пунктирная рамка: всё, что внутри неё, точно останется на отпечатке. Важные детали держите внутри рамки.":
-        "On the sheet this is the dashed frame: everything inside it is sure to remain on the print. Keep important details inside it.",
+    "Печать без полей": "Borderless printing",
     "Лево": "Left", "Верх": "Top", "Право": "Right", "Низ": "Bottom",
 })
 pc.EN_FMT.update({
