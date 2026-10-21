@@ -22,6 +22,8 @@ import traceback
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+if "--selftest" in sys.argv:                                # самопроверка пишет настройки, пресеты и журнал: только во временную папку,
+    os.environ["APPDATA"] = tempfile.mkdtemp(prefix="photocrop_selftest_")      # настоящие настройки пользователя не трогаем
 import print_stats as ps                                  # noqa: E402  (счётчик печати)
 import photo_crop as pc                                    # noqa: E402  (движок программы)
 import color_tools as ct                                   # noqa: E402  (уровни, кривые, выборочный цвет)
