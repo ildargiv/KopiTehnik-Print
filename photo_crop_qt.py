@@ -4539,7 +4539,17 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         b_orig.released.connect(lambda: self.adj_show_original(False))
         b_enh = btn("Улучшить", lambda: self.enhance(1), ico="sparkle", tip="Улучшение для печати на Epson: светлее, чуть контрастнее и резче. Подбирается под каждый снимок.")
         b_sup = btn("Супер", lambda: self.enhance(2), ico="sparkle", tip="Более сильное улучшение: ярче, сочнее, резче")
+        self.b_preset = {}
+        preset_cols = []
+        for n in ("1", "2"):
+            bp = btn("Пресет " + n, lambda n=n: self.preset_apply(n), ico="color")
+            bs = btn("Сохранить", lambda n=n: self.preset_save(n), "link", ico="check")
+            bs.setToolTip(tr("Запомнить текущие ползунки в «Пресет %s»; прежний пресет заменится") % n)
+            self.b_preset[n] = bp
+            preset_cols.append(vbox(bp, bs, spacing=2))
+        self._preset_refresh()
         quick = card(None, hbox(b_enh, b_sup, b_orig, spacing=6),
+                     hbox(*preset_cols, spacing=6),
                      hbox(ibtn("sun", "Авто-яркость", self.auto_bright, 32, True, isize=16),
                           ibtn("copy", "Копировать настройки этого фото", self.adj_copy, 32, True, isize=16),
                           ibtn("paste", "Вставить настройки в это фото", lambda: self.adj_paste(False), 32, True, isize=16),
@@ -5767,6 +5777,40 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
             return
         self.adj_replace(self.cur_adj(), list(self.files))
 
+    # ---------- пресеты коррекции: два слота, хранятся в настройках до следующего «Сохранить»
+    def _presets(self):
+        return self.settings.setdefault("adj_presets", {})
+
+    def _preset_refresh(self):
+        for n, b in self.b_preset.items():
+            saved = self._presets().get(n)
+            b.setToolTip(tr("Применить «Пресет %s» к выбранным фото") % n if saved is not None
+                         else tr("Пока пуст: настройте ползунки и нажмите «Сохранить» под кнопкой"))
+
+    def preset_save(self, n):
+        if self.idx < 0:
+            info(self, "Сначала откройте фото.")
+            return
+        old = self._presets().get(n)
+        if old is not None and old != dict(self.cur_adj()) and not ask(self, tr("Заменить сохранённый «Пресет %s» текущими настройками?") % n):
+            return
+        self._presets()[n] = dict(self.cur_adj())
+        self._preset_refresh()
+        self.persist()
+        self.update_hist(tr("«Пресет %s» сохранён") % n)
+
+    def preset_apply(self, n):
+        saved = self._presets().get(n)
+        if saved is None:
+            info(self, "Пресет пока пуст: настройте ползунки и нажмите «Сохранить» под кнопкой пресета.")
+            return
+        files = self.adj_files()
+        if not files:
+            info(self, "Сначала откройте фото.")
+            return
+        self.adj_replace(saved, files)
+        self.sync_adj()
+
     def adj_copy(self):
         if self.idx < 0:
             return
@@ -6024,7 +6068,7 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         s = self.s
         self._bleed_flush()
         fresh = pc.load_settings()                    # окно печати пишет свои разделы в тот же файл — не затираем их
-        for k in ("last_dir", "start_dir_mode", "snap_px", "anim", "icc_dir", "trim_l", "trim_t", "trim_r", "trim_b", "check_updates", "skip_update", "doc_paper", "doc_fit", "doc_margin", "doc_cm_on", "doc_icc", "converter_path"):
+        for k in ("last_dir", "start_dir_mode", "snap_px", "anim", "icc_dir", "trim_l", "trim_t", "trim_r", "trim_b", "check_updates", "skip_update", "doc_paper", "doc_fit", "doc_margin", "doc_cm_on", "doc_icc", "converter_path", "adj_presets"):
             if k in self.settings:
                 fresh[k] = self.settings[k]
         fresh.update(format=s["format"], orient=s["orient"], mode=s["mode"], recursive=s["recursive"], subfolder=s["subfolder"],
@@ -6898,7 +6942,7 @@ pc.EN.update({
     "Сохранить проект (рамки и настройки)": "Save project (frames and settings)",
 })
 pc.EN.update({
-    "Бумага": "Paper", "Фото на листе": "Photos per sheet", "Поля": "Borders", "Открыть фото, папку или документ": "Open photos, a folder or a document", "Документ…": "Document…", "PDF, Word, Excel, PowerPoint: откроется раздел «Документ»": "PDF, Word, Excel, PowerPoint: opens the Document section", "Поля: белая рамка по краю и между фото": "Borders: white margin at the edge and between photos", "мм": "mm", "Кадр": "Crop", "Лист": "Sheet",
+    "Бумага": "Paper", "Фото на листе": "Photos per sheet", "Поля": "Borders", "Пресет 1": "Preset 1", "Пресет 2": "Preset 2", "Сохранить": "Save", "Запомнить текущие ползунки в «Пресет %s»; прежний пресет заменится": "Remember the current sliders in Preset %s; the old preset is replaced", "Применить «Пресет %s» к выбранным фото": "Apply Preset %s to the selected photos", "Пока пуст: настройте ползунки и нажмите «Сохранить» под кнопкой": "Empty for now: set the sliders and press Save under the button", "Заменить сохранённый «Пресет %s» текущими настройками?": "Replace the saved Preset %s with the current settings?", "«Пресет %s» сохранён": "Preset %s saved", "Пресет пока пуст: настройте ползунки и нажмите «Сохранить» под кнопкой пресета.": "The preset is empty: set the sliders and press Save under the preset button.", "Открыть фото, папку или документ": "Open photos, a folder or a document", "Документ…": "Document…", "PDF, Word, Excel, PowerPoint: откроется раздел «Документ»": "PDF, Word, Excel, PowerPoint: opens the Document section", "Поля: белая рамка по краю и между фото": "Borders: white margin at the edge and between photos", "мм": "mm", "Кадр": "Crop", "Лист": "Sheet",
     "Сколько фото печатать на одном листе": "How many photos to print on one sheet",
     "Выключено — печать без полей, фото вплотную. Включено — белое поле по краю листа и между фото.": "Off — borderless, photos edge to edge. On — a white margin at the sheet edge and between photos.",
     "Поле по краю листа и расстояние между фото, мм": "Sheet margin and distance between photos, mm",
