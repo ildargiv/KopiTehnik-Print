@@ -38,6 +38,8 @@ import threading
 import time
 from pathlib import Path
 
+import color_tools
+
 try:
     import tkinter as tk
     from tkinter import ttk, filedialog, messagebox, simpledialog
@@ -535,11 +537,12 @@ def render(img, paper, st, mode, dpi, resize):
 
 
 ADJ_KEYS = ("bright", "contrast", "gamma", "shadows", "highlights", "sat", "vib", "temp", "tint", "r", "g", "b",
-            "auto", "bw", "sepia", "denoise", "sharp", "sharp_radius", "sharp_thr")
+            "auto", "bw", "sepia", "denoise", "sharp", "sharp_radius", "sharp_thr", "levels", "curves", "selcol")
 NEUTRAL_ADJ = {"bright": 0.0, "contrast": 0.0, "gamma": 1.0, "shadows": 0.0, "highlights": 0.0,
                "sat": 0.0, "vib": 0.0, "temp": 0.0, "tint": 0.0, "r": 0.0, "g": 0.0, "b": 0.0,
                "auto": "", "bw": False, "sepia": False, "denoise": 0.0,
-               "sharp": 0.0, "sharp_radius": 1.0, "sharp_thr": 2}
+               "sharp": 0.0, "sharp_radius": 1.0, "sharp_thr": 2,
+               "levels": (), "curves": (), "selcol": ()}          # уровни, кривые, выборочный цвет: см. color_tools.py
 ADJ_LIMITS = {"bright": (-100, 100), "contrast": (-100, 100), "gamma": (0.2, 5), "shadows": (-100, 100),
               "highlights": (-100, 100), "sat": (-100, 100), "vib": (-100, 100), "temp": (-100, 100),
               "tint": (-100, 100), "r": (-100, 100), "g": (-100, 100), "b": (-100, 100), "denoise": (0, 100),
@@ -563,7 +566,9 @@ def clean_adj(a):
         if k not in NEUTRAL_ADJ:
             continue
         n = NEUTRAL_ADJ[k]
-        if isinstance(n, bool):
+        if k in color_tools.NORMALIZE:
+            v = color_tools.NORMALIZE[k](v)
+        elif isinstance(n, bool):
             v = bool(v)
         elif k == "auto":
             v = v if v in AUTO_MODES else ""
@@ -637,6 +642,7 @@ def build_luts(a, bounds=None):
     inv = 1.0 / max(0.05, a["gamma"])
     sh, hl = 0.25 * a["shadows"] / 100.0, 0.25 * a["highlights"] / 100.0
     luts = []
+    extra = color_tools.extra_luts(a)                  # уровни и кривые идут после основных ползунков
     for c in range(3):
         lo, hi = (bounds[0][c], bounds[1][c]) if bounds else (0, 255)
         tab = []
@@ -653,7 +659,7 @@ def build_luts(a, bounds=None):
                 x += sh * (1 - x) ** 2 * _smooth(x / 0.12) + hl * x * x * _smooth((1 - x) / 0.12)
             v = int(round(255 * min(1.0, max(0.0, x))))
             tab.append(max(v, tab[-1]) if tab else v)   # таблица не убывает (при больших значениях яркости)
-        luts.append(tab)
+        luts.append([extra[c][v] for v in tab] if extra else tab)
     return luts
 
 
@@ -1635,6 +1641,8 @@ def adjust_color(img, o, ref=None):
         else:          # приглушаем в основном самые насыщенные
             dull = ImageEnhance.Color(img).enhance(max(0.0, 1 + 1.5 * v))
             img = Image.composite(dull, img, s_ch)
+    if a["selcol"]:
+        img = color_tools.selective_color(img, a["selcol"])
     if a["bw"] or a["sepia"] or bw_auto:
         g = img.convert("L")
         if bw_auto:                                   # авто ч/б: мягкая S-кривая — снимок «оживает», белый и чёрный на месте
@@ -3652,6 +3660,11 @@ class AgentSession:
                         v = "" if v in ("", "off", "none", "false", "0") else v
                         if v not in AUTO_MODES:
                             raise AgentError("auto: contrast | color | bw | off", "bad_value")
+                    elif k in color_tools.NORMALIZE:      # levels / curves / selcol: JSON-строка или список
+                        try:
+                            v = json.loads(v) if isinstance(v, str) else v
+                        except ValueError:
+                            raise AgentError(f"{k}: нужен JSON-список, см. AGENT.md", "bad_value")
                     elif isinstance(NEUTRAL_ADJ[k], bool):
                         v = _truthy(v)
                     else:
