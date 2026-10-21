@@ -4261,8 +4261,11 @@ REQUIRED = {   # обязательные параметры команд (дл�
 }
 
 
-def _tool_schema(name):
-    summary, params = SPEC[name]
+def _tool_schema(name, spec=None, readonly=None, required=None, destructive=None):
+    summary, params = (spec or SPEC)[name]
+    readonly = READONLY if readonly is None else readonly
+    required = REQUIRED if required is None else required
+    destructive = ("print", "save_files", "export_sheets", "clear_queue", "cancel_job", "job_control") if destructive is None else destructive
     props = {}
     for pn, pt, pd in params:
         p = {"description": pd} if pd else {}
@@ -4270,13 +4273,13 @@ def _tool_schema(name):
             p["type"] = pt
         props[pn] = p
     schema = {"type": "object", "properties": props, "additionalProperties": True}
-    req = [r for r in REQUIRED.get(name, []) if r in props]
+    req = [r for r in required.get(name, []) if r in props]
     if req:
         schema["required"] = req
     # подсказки клиенту: что только читает, а что тратит бумагу или пишет на диск (клиент может не спрашивать подтверждение у безопасных)
-    ann = {"readOnlyHint": name in READONLY, "openWorldHint": False}
-    if name not in READONLY:
-        ann["destructiveHint"] = name in ("print", "save_files", "export_sheets", "clear_queue", "cancel_job", "job_control")
+    ann = {"readOnlyHint": name in readonly, "openWorldHint": False}
+    if name not in readonly:
+        ann["destructiveHint"] = name in destructive
     return {"name": name, "description": summary, "inputSchema": schema, "annotations": ann}
 
 
@@ -4302,28 +4305,44 @@ def _mcp_result(res):
 
 
 def mcp_handle(session, msg):
-    """Один JSON-RPC запрос MCP -> ответ (dict) или None для уведомлений."""
+    """Один JSON-RPC запрос MCP -> ответ (dict) или None для уведомлений.
+    Сеанс может сам задать набор команд: атрибуты spec, readonly, required, destructive, instructions и методы
+    resources() -> [(uri, имя, описание)], read_resource(uri) -> текст (так окно программы добавляет свои инструменты)."""
     mid, method, params = msg.get("id"), msg.get("method", ""), msg.get("params") or {}
     if mid is None:                       # уведомление
         return None
     ok = lambda r: {"jsonrpc": "2.0", "id": mid, "result": r}
     err = lambda c, m: {"jsonrpc": "2.0", "id": mid, "error": {"code": c, "message": m}}
+    spec = getattr(session, "spec", None) or SPEC
+    resources = session.resources() if hasattr(session, "resources") else []
     if method == "initialize":
         want = params.get("protocolVersion")
         ver = want if want in MCP_VERSIONS else MCP_VERSIONS[0]        # неизвестную версию клиента отвечаем нашей новейшей
-        return ok({"protocolVersion": ver, "capabilities": {"tools": {"listChanged": False}},
-                   "serverInfo": {"name": "photocrop", "version": AGENT_VERSION}, "instructions": MCP_INSTRUCTIONS})
+        caps = {"tools": {"listChanged": False}}
+        if resources:
+            caps["resources"] = {"listChanged": False, "subscribe": False}
+        return ok({"protocolVersion": ver, "capabilities": caps, "serverInfo": {"name": "photocrop", "version": AGENT_VERSION},
+                   "instructions": getattr(session, "instructions", None) or MCP_INSTRUCTIONS})
     if method == "ping":
         return ok({})
     if method == "tools/list":
-        return ok({"tools": [_tool_schema(n) for n in SPEC if n != "help"]})
+        kw = dict(spec=spec, readonly=getattr(session, "readonly", None), required=getattr(session, "required", None),
+                  destructive=getattr(session, "destructive", None))
+        return ok({"tools": [_tool_schema(n, **kw) for n in spec if n != "help"]})
     if method == "tools/call":
         name = params.get("name", "")
-        if name not in SPEC:
+        if name not in spec:
             return err(-32602, f"Unknown tool: {name}")
         req = dict(params.get("arguments") or {})
         req["cmd"] = name
         return ok(_mcp_result(session.execute(req)))
+    if method == "resources/list":
+        return ok({"resources": [{"uri": u, "name": n, "description": d, "mimeType": "text/markdown"} for u, n, d in resources]})
+    if method == "resources/read":
+        uri = params.get("uri", "")
+        if not any(uri == u for u, _n, _d in resources):
+            return err(-32002, f"Resource not found: {uri}")
+        return ok({"contents": [{"uri": uri, "mimeType": "text/markdown", "text": session.read_resource(uri)}]})
     return err(-32601, f"Method not found: {method}")
 
 
@@ -4383,6 +4402,13 @@ def mcp_install(args):
     if path.is_file():
         shutil.copyfile(path, path.with_name(path.name + ".bak"))
     write_json_atomic(path, cfg)
+    if "--no-enable" not in args:                      # установщик: окно программы будет принимать подключение агента
+        try:
+            cur = load_settings()
+            cur["agent_enabled"] = True
+            save_settings(cur)
+        except Exception:
+            pass
     print(f"Готово: сервер photocrop записан в {path}\nПерезапустите Claude Desktop (закройте полностью, в т. ч. значок в трее).")
     return 0
 
@@ -4399,10 +4425,11 @@ def agent_main(argv):
     if argv and argv[0] == "mcp-install":
         return mcp_install(argv[1:])
     if argv and argv[0] == "mcp":
-        s = AgentSession()
-        s.load_state()
-        out = sys.stdout                       # протокол идёт только в настоящий stdout; случайные print() библиотек — в stderr
-        sys.stdout = sys.stderr
+        import agent_bridge as ab
+        stdin, out = ab.open_stdio()           # в оконном exe каналы клиента берём по дескрипторам Windows
+        if sys.stderr is None:
+            sys.stderr = open(os.devnull, "w")
+        sys.stdout = sys.stderr                # протокол идёт только в настоящий stdout; случайные print() библиотек — в stderr
         try:
             out.reconfigure(newline="\n")      # на Windows без «\r\n»: одна строка — одно сообщение
         except Exception:
@@ -4411,7 +4438,16 @@ def agent_main(argv):
         def send(obj):
             out.write(dump(obj) + "\n")
             out.flush()
-        for line in sys.stdin:
+        local = []                             # сеанс без окна создаётся, только если окна нет
+
+        def handle_local(m):
+            if not local:
+                s = AgentSession()
+                s.load_state()
+                local.append(s)
+            return mcp_handle(local[0], m)
+        ep, checked = ab.window_alive(), time.time()      # запущено ли окно: тогда агент работает через него
+        for line in stdin:
             line = line.strip()
             if not line:
                 continue
@@ -4420,16 +4456,30 @@ def agent_main(argv):
             except ValueError:
                 send({"jsonrpc": "2.0", "id": None, "error": {"code": -32700, "message": "Parse error"}})
                 continue
+            if not isinstance(msg, (dict, list)):
+                send({"jsonrpc": "2.0", "id": None, "error": {"code": -32600, "message": "Invalid Request"}})
+                continue
+            if ep is None and time.time() - checked > 5:
+                ep, checked = ab.window_alive(), time.time()
+            done = False
+            if ep is not None:
+                try:
+                    r = ab.post(ep, msg)
+                    if r is not None:
+                        send(r)
+                    done = True
+                except (OSError, ValueError):
+                    ep, checked = None, time.time()      # окно закрыли: дальше работаем без него
+            if done:
+                continue
             if isinstance(msg, list):          # пакетный запрос -> один ответ-массив
-                rs = [r for r in (mcp_handle(s, m) for m in msg if isinstance(m, dict)) if r is not None]
+                rs = [r for r in (handle_local(m) for m in msg if isinstance(m, dict)) if r is not None]
                 if rs:
                     send(rs)
-            elif isinstance(msg, dict):
-                r = mcp_handle(s, msg)
+            else:
+                r = handle_local(msg)
                 if r is not None:
                     send(r)
-            else:
-                send({"jsonrpc": "2.0", "id": None, "error": {"code": -32600, "message": "Invalid Request"}})
         return 0
     # agent …
     args = list(argv[1:]) if argv and argv[0] == "agent" else list(argv)

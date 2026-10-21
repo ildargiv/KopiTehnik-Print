@@ -27,9 +27,10 @@ if "--selftest" in sys.argv:                                # самопрове
 import print_stats as ps                                  # noqa: E402  (счётчик печати)
 import photo_crop as pc                                    # noqa: E402  (движок программы)
 import color_tools as ct                                   # noqa: E402  (уровни, кривые, выборочный цвет)
+import gui_agent as ga                                     # noqa: E402  (ИИ-агент внутри окна)
 import i18n                                                # noqa: E402  (переводы интерфейса)
 
-if len(sys.argv) > 1 and sys.argv[1] in ("agent", "mcp", "mcp-config", "--print-project"):
+if len(sys.argv) > 1 and sys.argv[1] in ("agent", "mcp", "mcp-config", "mcp-install", "--print-project"):
     pc.main()                                              # режим агента и окно печати — как в прежней программе
     sys.exit(0)
 
@@ -950,6 +951,9 @@ def pil_to_qimage(im):
 
 
 def ask(parent, text, title="PhotoCrop"):
+    if ga.CTX["active"]:                                       # команда агента: диалог не показываем, отвечаем «да» и сообщаем в notes
+        ga.CTX["notes"].append(tr(text))
+        return True
     return QMessageBox.question(parent, title, tr(text), QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes) == QMessageBox.Yes
 
 
@@ -962,10 +966,16 @@ def ask_soft(parent, text, title="PhotoCrop"):
 
 
 def info(parent, text, title="PhotoCrop"):
+    if ga.CTX["active"]:
+        ga.CTX["notes"].append(tr(text))
+        return
     QMessageBox.information(parent, title, tr(text))
 
 
 def warn(parent, text, title="PhotoCrop"):
+    if ga.CTX["active"]:
+        ga.CTX["notes"].append(tr(text))
+        return
     QMessageBox.warning(parent, title, tr(text))
 
 
@@ -3059,6 +3069,30 @@ class SaveSignals(QObject):
     smart_models = Signal(str)
 
 
+class AgentInvoker(QObject):
+    """Выполняет функции агента в потоке окна: HTTP-сервер агента работает в своих потоках, а окном можно управлять только отсюда."""
+    call = Signal(object)
+
+    def __init__(self):
+        super().__init__()
+        self.call.connect(self._run, Qt.QueuedConnection)
+
+    def _run(self, job):
+        fn, fut = job
+        try:
+            fut.set_result(fn())
+        except BaseException as ex:                           # noqa: BLE001: исключение уходит в поток запроса
+            fut.set_exception(ex)
+
+    def invoke(self, fn):
+        if threading.current_thread() is threading.main_thread():
+            return fn()
+        from concurrent.futures import Future
+        fut = Future()
+        self.call.emit((fn, fut))
+        return fut.result()
+
+
 # ---------------------------------------------------------------- «Умная рамка» (SmartCrop): рамка, которая не режет людей
 SM_TIERS = ("head", "torso", "pet", "hands", "arms", "legs", "feet", "other")
 SM_TIER_RU = {"head": "Голова", "torso": "Тело", "pet": "Питомец", "hands": "Кисти рук", "arms": "Руки", "legs": "Ноги",
@@ -4509,6 +4543,8 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         self.previews = PreviewCache()
         self.previews.ready.connect(lambda: self.sheet_view.update())
         self.slot_order, self.free, self._layout_sig = [], {}, None
+        self.last_print = None
+        self.agent, self.agent_server = None, None
         self.sig = SaveSignals()
         self.sig.progress.connect(self._save_progress)
         self.sig.done.connect(self._save_done)
@@ -4537,6 +4573,56 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         self.resize(1400, 880)
         self.build()
         self._shortcuts()
+        self._agent_timer = QTimer(self)
+        self._agent_timer.setInterval(1500)
+        self._agent_timer.timeout.connect(self._agent_hint)
+        self._agent_timer.start()
+        if st.get("agent_enabled", False) and "--selftest" not in sys.argv:
+            self.agent_start()
+
+    # ---------- ИИ-агент внутри окна (MCP по loopback; клиент подключается через `PhotoCropQt.exe mcp`)
+    def agent_start(self):
+        """Включает сервер агента. Возвращает порт или 0, если не удалось."""
+        if self.agent_server is not None:
+            return self.agent_server.port
+        import agent_bridge as ab
+        if not self.settings.get("agent_token"):
+            self.settings["agent_token"] = ab.new_token()
+        self._agent_inv = getattr(self, "_agent_inv", None) or AgentInvoker()
+        self.agent = ga.GuiAgent(self)
+        self.agent.invoke = self._agent_inv.invoke
+        srv = ab.AgentHttpServer(lambda msg: pc.mcp_handle(self.agent, msg), self.settings["agent_token"])
+        try:
+            srv.start()
+        except OSError as ex:
+            self.agent = None
+            warn(self, tr("Не удалось включить ИИ-агента") + ":\n%s" % ex)
+            return 0
+        self.agent_server = srv
+        self.settings["agent_enabled"] = True
+        return srv.port
+
+    def agent_stop(self):
+        if self.agent_server is not None:
+            try:
+                self.agent_server.stop()
+            except Exception:
+                pass
+        self.agent_server, self.agent = None, None
+        self.settings["agent_enabled"] = False
+
+    def _agent_hint(self):
+        """Подпись в верхней панели: агент подключён / работает (последняя команда меньше 15 секунд назад)."""
+        if not hasattr(self, "l_agent"):
+            return
+        a = self.agent
+        busy = a is not None and time.time() - a.last_request < 15
+        self.l_agent.setVisible(busy)
+
+    def agent_confirm_print(self, files, total):
+        text = trf("ИИ-агент хочет напечатать листов: {n}.", n=total if total is not None else "?") + "\n" + tr("Принтер") + ": " + str(self.pr.get("printer"))
+        return QMessageBox.question(self, "PhotoCrop", text + "\n\n" + tr("Разрешить?"), QMessageBox.Yes | QMessageBox.No,
+                                    QMessageBox.Yes) == QMessageBox.Yes
 
     # ---------- построение окна (вызывается заново при смене языка или темы)
     def build(self):
@@ -4653,6 +4739,9 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
             if cp:
                 c_.hide()
             return c_
+        self.l_agent = lbl("ИИ-агент работает", "muted")
+        self.l_agent.setStyleSheet("color: %s;" % T["select"])
+        self.l_agent.hide()
         self.cb_format = QComboBox()
         self.cb_format.addItems(list(pc.FORMATS))
         self.cb_format.setCurrentText(self.s["format"])
@@ -4682,7 +4771,7 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         more.setPopupMode(QToolButton.InstantPopup)
         l = hbox(logo, name, 10, btn("Открыть", self.open_any, "primary", ico="open", tip="Открыть фото или папку (Ctrl+O)"), 10,
                  self.mode_switch, 10, cap("Бумага"), self.cb_format, 6,
-                 None,
+                 None, self.l_agent,
                  self.seg_view, 6, self.b_grid, more, ibtn("settings", "Настройки", self.open_settings),
                  spacing=8, margins=(16, 0, 12, 0))
         bar.setLayout(l)
@@ -5097,6 +5186,7 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         self.fly.play(pm, a, b, arrive, size=0.8, lift=36.0)
 
     def _print_done(self, kind, n, err):
+        self.last_print = {"result": kind, "sheets_sent": n, "error": err or None}
         self.b_print.setText(tr("Печать"))
         self.b_print.set_progress(None)
         if kind == "done":
@@ -6534,8 +6624,8 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
             im.thumbnail((500, 500), pc.RESAMPLE_FAST)
             return im
 
-    def enhance(self, level):
-        files = self.adj_files()
+    def enhance(self, level, files=None):
+        files = list(files) if files is not None else self.adj_files()
         if not files or getattr(self, "_enh_busy", False):
             return
         name = tr("Супер улучшения") if level >= 2 else tr("Улучшения для Epson")
@@ -6884,7 +6974,7 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         s = self.s
         self._bleed_flush()
         fresh = pc.load_settings()                    # окно печати пишет свои разделы в тот же файл — не затираем их
-        for k in ("last_dir", "start_dir_mode", "snap_px", "anim", "icc_dir", "trim_l", "trim_t", "trim_r", "trim_b", "check_updates", "skip_update", "doc_paper", "doc_fit", "doc_margin", "doc_cm_on", "doc_icc", "converter_path", "adj_presets", "confirm_actions"):
+        for k in ("last_dir", "start_dir_mode", "snap_px", "anim", "icc_dir", "trim_l", "trim_t", "trim_r", "trim_b", "check_updates", "skip_update", "doc_paper", "doc_fit", "doc_margin", "doc_cm_on", "doc_icc", "converter_path", "adj_presets", "confirm_actions", "agent_enabled", "agent_token", "agent_allow_print", "agent_max_sheets", "agent_confirm_print"):
             if k in self.settings:
                 fresh[k] = self.settings[k]
         fresh.update(format=s["format"], orient=s["orient"], mode=s["mode"], recursive=s["recursive"], subfolder=s["subfolder"],
@@ -6934,6 +7024,9 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         if self.saving and not self.printing and not ask(self, "Идёт сохранение. Всё равно выйти?"):
             e.ignore()
             return
+        enabled = self.settings.get("agent_enabled", False)
+        self.agent_stop()                                          # файл с адресом агента удаляется; включённость запоминаем
+        self.settings["agent_enabled"] = enabled
         try:
             self._autosave_now()
         except Exception:
@@ -7635,7 +7728,7 @@ class SettingsDialog(QDialog):
         borderless = card("Печать без полей", lbl("Сколько принтер срезает с каждого края листа, мм"), trim,
                           lbl("На листе это пунктирная рамка: всё, что внутри неё, точно останется на отпечатке. "
                               "Важные детали держите внутри рамки.", "muted", wrap=True))
-        right = vbox(self._save_card(), borderless, self._counter_card(), None, spacing=12)
+        right = vbox(self._save_card(), borderless, self._counter_card(), self._agent_card(), None, spacing=12)
         self.setLayout(vbox(hbox(left, right, spacing=12), about, hbox(None, btn("Готово", self.accept, "primary")),
                             spacing=12, margins=(14, 14, 14, 14)))
 
@@ -7677,6 +7770,51 @@ class SettingsDialog(QDialog):
         self._out_enable()
         self._q_enable()
         return c
+
+    def _agent_card(self):
+        """ИИ-агент: подключение MCP к этому окну и права агента."""
+        app, st = self.app, self.app.settings
+        sw_on = Switch(app.agent_server is not None)
+        self.l_agent_state = lbl("", "muted", wrap=True)
+
+        def on_toggle(on):
+            if on:
+                app.agent_start()
+            else:
+                app.agent_stop()
+            self._agent_state()
+        sw_on.toggled.connect(on_toggle)
+        sw_print, sw_conf = Switch(st.get("agent_allow_print", True)), Switch(st.get("agent_confirm_print", False))
+        sw_print.toggled.connect(lambda on: st.__setitem__("agent_allow_print", bool(on)))
+        sw_conf.toggled.connect(lambda on: st.__setitem__("agent_confirm_print", bool(on)))
+        e_max = QLineEdit(str(st.get("agent_max_sheets", 0) or 0))
+        e_max.setFixedWidth(56)
+        e_max.textEdited.connect(lambda v: st.__setitem__("agent_max_sheets", int(v) if v.strip().isdigit() else 0))
+        self._agent_state()
+        return card("ИИ-агент (MCP)", row("Агент может работать с этим окном", sw_on), self.l_agent_state,
+                    row("Разрешить агенту печатать", sw_print), row("Макс. листов за одну печать (0 — без ограничения)", e_max),
+                    row("Спрашивать меня перед печатью агента", sw_conf),
+                    hbox(btn("Подключить к Claude Desktop", self._agent_connect), btn("Скопировать настройку MCP", self._agent_copy), spacing=6),
+                    lbl("Агент видит те же фото и настройки, что и вы, и всё, что он делает, отменяется Ctrl+Z. "
+                        "Подключение только с этого компьютера.", "muted", wrap=True))
+
+    def _agent_state(self):
+        a = self.app
+        self.l_agent_state.setText(trf("Включено, порт {p}", p=a.agent_server.port) if a.agent_server else tr("Выключено"))
+
+    def _agent_connect(self):
+        import contextlib
+        import io
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            rc = pc.mcp_install(["--no-enable"])
+        self.app.agent_start()
+        self._agent_state()
+        (info if rc == 0 else warn)(self, buf.getvalue().strip())
+
+    def _agent_copy(self):
+        QApplication.clipboard().setText(json.dumps({"mcpServers": {"photocrop": pc.mcp_server_entry()}}, ensure_ascii=False, indent=2))
+        info(self, "Настройка скопирована. Вставьте её в конфигурацию клиента MCP.")
 
     def _counter_card(self):
         """Общий счётчик за день (виден всем) и вход в подробный счётчик для администратора."""
@@ -8135,6 +8273,87 @@ def selftest(app):
     step("окно настроек", lambda: SettingsDialog(win).grab().save(str(out / "selftest_settings.png")))
     step("окно профиля", lambda: CmDialog(win).grab().save(str(out / "selftest_profile.png")))
 
+    def agent_flow():
+        import agent_bridge as ab
+        import urllib.error
+        win.settings["agent_allow_print"] = True
+        port = win.agent_start()
+        if not port or ab.read_endpoint() is None:
+            raise RuntimeError("сервер агента не запустился")
+        ep = ab.read_endpoint()
+
+        def call(method, params=None, endpoint=None):
+            res = {}
+
+            def run():
+                try:
+                    res["r"] = ab.post(endpoint or ep, {"jsonrpc": "2.0", "id": 1, "method": method, "params": params or {}}, timeout=60)
+                except Exception as ex:                      # noqa: BLE001
+                    res["e"] = ex
+            t = threading.Thread(target=run)
+            t.start()
+            while t.is_alive():                               # окно обрабатывает запросы агента в этом потоке
+                app.processEvents()
+                time.sleep(0.01)
+            if "e" in res:
+                raise res["e"]
+            return res["r"]
+
+        def tool(name, **args):
+            r = call("tools/call", {"name": name, "arguments": args})
+            return json.loads(r["result"]["content"][0]["text"])
+        r = call("initialize", {"protocolVersion": "2025-06-18"})
+        if "PhotoCrop" not in r["result"]["instructions"] or "resources" not in r["result"]["capabilities"]:
+            raise RuntimeError("initialize: нет инструкции или ресурсов")
+        names = {t["name"] for t in call("tools/list")["result"]["tools"]}
+        need = {"app_state", "app_guide", "enhance", "set_adjust", "open_folder", "print_photos", "set_layout", "doc_open", "color_preset_apply", "undo"}
+        if need - names:
+            raise RuntimeError("нет инструментов: %s" % sorted(need - names))
+        if "# PhotoCrop" not in call("resources/read", {"uri": "photocrop://guide/overview"})["result"]["contents"][0]["text"]:
+            raise RuntimeError("справка не читается")
+        st = tool("app_state")
+        if not st["ok"] or st["result"]["photos"] != len(win.files):
+            raise RuntimeError("app_state: %s" % st)
+        win.adj_replace({}, [win.files[win.idx]])
+        r = tool("set_adjust", bright=21.0)
+        if not r["ok"] or win.cur_adj().get("bright") != 21.0:
+            raise RuntimeError("set_adjust агента не дошёл до окна: %s" % r)
+        win.undo()
+        if win.cur_adj().get("bright"):
+            raise RuntimeError("Ctrl+Z окна не отменил команду агента")
+        r = tool("enhance", level=2)
+        if not r["ok"] or not win.cur_adj():
+            raise RuntimeError("enhance: %s" % r)
+        r = tool("set_layout", nup=4, borders=True, border_mm=3)
+        if not r["ok"] or win.s["nup"] != 4 or not win.s["borders"]:
+            raise RuntimeError("set_layout: %s" % r)
+        tool("set_layout", nup=1, borders=False)
+        r = tool("set_format", format="13x18")
+        if not r["ok"] or not win.s["format"].startswith("13"):
+            raise RuntimeError("set_format агента не изменил формат окна: %s" % r)
+        tool("set_format", format="10x15")
+        r = tool("check_photos", photo="all", on=False)
+        if not r["ok"] or win.checked_files():
+            raise RuntimeError("check_photos: %s" % r)
+        tool("check_photos", photo="all", on=True)
+        r = tool("open_folder", path=str(tmp))
+        if not r["ok"] or len(win.files) != 4:
+            raise RuntimeError("open_folder агента не открыл фото в окне: %s" % r)
+        win.settings["agent_allow_print"] = False
+        r = tool("print_photos")
+        if r["ok"] or r["error"]["code"] != "print_not_allowed":
+            raise RuntimeError("запрет печати не сработал: %s" % r)
+        win.settings["agent_allow_print"] = True
+        try:
+            call("tools/list", endpoint={"port": ep["port"], "token": "wrong"})
+            raise RuntimeError("запрос с чужим ключом принят")
+        except urllib.error.HTTPError as ex:
+            if ex.code != 401:
+                raise
+        win.agent_stop()
+        if ab.read_endpoint() is not None:
+            raise RuntimeError("файл адреса агента остался после остановки")
+    step("ИИ-агент в окне: MCP по HTTP, инструменты, права", agent_flow)
     def open_dlg():
         d = OpenDialog(win, str(tmp))
         d.show()
