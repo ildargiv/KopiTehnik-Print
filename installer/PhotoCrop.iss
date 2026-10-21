@@ -17,6 +17,7 @@ DefaultGroupName=KopiTehnik Print
 PrivilegesRequired=lowest
 PrivilegesRequiredOverridesAllowed=dialog
 UninstallDisplayIcon={app}\PhotoCropQt.exe
+SetupIconFile=..\assets\app.ico
 OutputDir=..\dist
 LicenseFile=..\LICENSE
 OutputBaseFilename=KopiTehnikPrint-Setup-{#AppVersion}

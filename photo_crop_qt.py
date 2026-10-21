@@ -341,6 +341,56 @@ class WrapLabel(QLabel):
 BRAND_FONT = "Bahnschrift SemiBold"            # на Windows; иначе подставится ближайший шрифт
 
 
+def draw_brand_k(p, rect, color=QColor(255, 255, 255)):
+    """Буква «К» знака компании, нарисованная линиями: одинакова на любом компьютере и в значке программы."""
+    x, y, w, h = rect.x(), rect.y(), rect.width(), rect.height()
+    pt = lambda u, v: QPointF(x + u * w, y + v * h)
+    pen = QPen(color, w * 0.15, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin)
+    p.save()
+    p.setPen(pen)
+    p.setBrush(Qt.NoBrush)
+    p.drawLine(pt(0.34, 0.24), pt(0.34, 0.76))
+    p.drawLine(pt(0.70, 0.24), pt(0.38, 0.52))
+    p.drawLine(pt(0.47, 0.44), pt(0.72, 0.76))
+    p.restore()
+
+
+def brand_icon_pixmap(size):
+    """Значок программы (панель задач, заголовок окна): оранжевая плитка со знаком «К», как логотип в шапке."""
+    pm = QPixmap(size, size)
+    pm.fill(Qt.transparent)
+    p = QPainter(pm)
+    p.setRenderHint(QPainter.Antialiasing)
+    a1, a2 = QColor("#ff8a1f"), QColor("#ffc43a")
+    pad = size * 0.04
+    tile = QRectF(pad, pad, size - 2 * pad, size - 2 * pad)
+    path = QPainterPath()
+    path.addRoundedRect(tile, size * 0.22, size * 0.22)
+    g = QLinearGradient(tile.topLeft(), tile.bottomRight())
+    g.setColorAt(0, a2)
+    g.setColorAt(1, a1)
+    p.fillPath(path, QBrush(g))
+    p.save()
+    p.setClipPath(path)
+    gloss = QLinearGradient(0, tile.top(), 0, tile.bottom())
+    gloss.setColorAt(0, QColor(255, 255, 255, 80))
+    gloss.setColorAt(0.5, QColor(255, 255, 255, 0))
+    p.fillRect(tile, QBrush(gloss))
+    p.restore()
+    shadow = QRectF(tile.x(), tile.y() + size * 0.02, tile.width(), tile.height())
+    draw_brand_k(p, shadow, QColor(0, 0, 0, 60))
+    draw_brand_k(p, tile)
+    p.end()
+    return pm
+
+
+def app_icon():
+    ic = QIcon()
+    for n in (16, 20, 24, 32, 40, 48, 64, 128, 256):
+        ic.addPixmap(brand_icon_pixmap(n))
+    return ic
+
+
 class LogoMark(QWidget):
     """Знак компании, как в конвертере: плитка с текучим градиентом, мягкое свечение, пробегающий блик
     и «прыжок» при наведении курсора."""
@@ -446,25 +496,18 @@ class LogoMark(QWidget):
             band.setColorAt(1, QColor(255, 255, 255, 0))
             p.fillRect(tile, QBrush(band))
         p.restore()
-        font = QFont(BRAND_FONT)
-        font.setPixelSize(26)
-        font.setBold(True)
-        text = QPainterPath()
-        text.addText(0, 0, font, self.letter)
-        br = text.boundingRect()
-        text.translate(tile.center().x() - br.center().x(), tile.center().y() - br.center().y())
-        p.fillPath(text.translated(0, 1.5), QColor(0, 0, 0, 60))
-        p.fillPath(text, QColor(255, 255, 255))
+        draw_brand_k(p, tile.translated(0, 1.5), QColor(0, 0, 0, 60))
+        draw_brand_k(p, tile)
         p.end()
 
 
 class BrandTitle(QWidget):
     """Название компании, как в конвертере: буквы один раз «падают» при открытии окна, потом по ним плывёт цвет.
-    Часть после первого слова показана тихо рядом."""
+    Всё название целиком одним начертанием."""
 
     def __init__(self):
         super().__init__()
-        self.brand = self.tail = ""
+        self.brand = ""
         self._flow, self._intro, self._intro_done = 0.0, 0.0, False
         self._flow_anim = QVariantAnimation(self, duration=5200, startValue=0.0, endValue=1.0, loopCount=-1)
         self._flow_anim.valueChanged.connect(self._on_flow)
@@ -479,26 +522,20 @@ class BrandTitle(QWidget):
         self.update()
 
     def setText(self, text):
-        self.brand, _, self.tail = text.partition(" ")
+        self.brand = text
         self.updateGeometry()
         self.update()
 
     @staticmethod
-    def _fonts():
-        f1 = QFont(BRAND_FONT)
-        f1.setPixelSize(21)
-        f1.setBold(True)
-        f1.setLetterSpacing(QFont.AbsoluteSpacing, 0.6)
-        f2 = QFont("Bahnschrift Light")
-        f2.setPixelSize(14)
-        return f1, f2
+    def _font():
+        f = QFont(BRAND_FONT)
+        f.setPixelSize(21)
+        f.setBold(True)
+        f.setLetterSpacing(QFont.AbsoluteSpacing, 0.6)
+        return f
 
     def sizeHint(self):
-        f1, f2 = self._fonts()
-        w = QFontMetricsF(f1).horizontalAdvance(self.brand)
-        if self.tail:
-            w += 10 + QFontMetricsF(f2).horizontalAdvance(self.tail)
-        return QSize(int(w) + 8, 34)
+        return QSize(int(QFontMetricsF(self._font()).horizontalAdvance(self.brand)) + 8, 34)
 
     def minimumSizeHint(self):
         return self.sizeHint()
@@ -522,7 +559,7 @@ class BrandTitle(QWidget):
         self._flow_anim.stop()
 
     def paintEvent(self, _):
-        f1, f2 = self._fonts()
+        f1 = self._font()
         fm1 = QFontMetricsF(f1)
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
@@ -543,11 +580,6 @@ class BrandTitle(QWidget):
             p.setOpacity(k)
             p.drawText(QPointF(x, base + (1 - k) * 12), ch)
             x += fm1.horizontalAdvance(ch)
-        if self.tail:
-            p.setOpacity(min(1.0, max(0.0, (self._intro - 0.6) / 0.4)))
-            p.setFont(f2)
-            p.setPen(QColor(T["muted"]))
-            p.drawText(QPointF(x + 10, base - 1), self.tail)
         p.end()
 
 
@@ -8402,6 +8434,13 @@ def main():
     app = QApplication(sys.argv)
     app.setApplicationName("PhotoCrop")
     app.setStyle("Fusion")
+    if sys.platform == "win32":
+        try:                                         # свой значок на панели задач, а не значок python
+            import ctypes
+            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("KopiTehnik.Print")
+        except Exception:
+            pass
+    app.setWindowIcon(app_icon())
     if "--selftest" in sys.argv:
         sys.exit(selftest(app))
     win = MainWindow()

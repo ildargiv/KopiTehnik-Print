@@ -30,6 +30,7 @@ exe = EXE(
     a.datas,
     [],
     name='PhotoCropQt',
+    icon='assets/app.ico',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
