@@ -3980,17 +3980,12 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         more.setPopupMode(QToolButton.InstantPopup)
         l = hbox(logo, name, 10, btn("Открыть", self.open_any, "primary", ico="open", tip="Открыть фото или папку (Ctrl+O)"), 10,
                  self.mode_switch, 10, cap("Бумага"), self.cb_format, 6,
-                 cap("Поля"), self.sw_borders, self.e_border, self._mm_lbl(), None,
+                 None,
                  self.seg_view, 6, self.b_grid, more, ibtn("settings", "Настройки", self.open_settings),
                  spacing=8, margins=(16, 0, 12, 0))
         bar.setLayout(l)
-        self._photo_only += [self.cb_format, self.sw_borders, self.e_border, self.seg_view, self.b_grid]
+        self._photo_only += [self.cb_format, self.seg_view, self.b_grid]
         return bar
-
-    def _mm_lbl(self):
-        w = lbl("мм", "muted")
-        self._photo_only.append(w)
-        return w
 
     @staticmethod
     def _logo():
@@ -4485,7 +4480,9 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         self.l_sheet2 = lbl("", "muted", wrap=True)
         sw_fill = Switch(s["fill"])
         sw_fill.toggled.connect(lambda on: self._layout_set("fill", bool(on)))
-        sheet = card("Лист", lbl("Фото на листе"), self.seg_nup, self.l_sheet, self.l_sheet2, row("Весь лист — копии одного фото", sw_fill),
+        sheet = card("Лист", lbl("Фото на листе"), self.seg_nup,
+                     row("Рамка и поля", hbox(self.sw_borders, self.e_border, lbl("мм", "muted"), spacing=6)),
+                     self.l_sheet, self.l_sheet2, row("Весь лист — копии одного фото", sw_fill),
                      btn("Показать лист", lambda: self.set_view("sheet"), ico="image"))
         # --- цвет (профиль принтера выбирается на странице «Принтер»)
         self.sw_cm, self.sw_proof, self.sw_gamut = Switch(s["cm_on"]), Switch(False), Switch(False)
@@ -6882,7 +6879,7 @@ pc.EN.update({
     "Сохранить проект (рамки и настройки)": "Save project (frames and settings)",
 })
 pc.EN.update({
-    "Бумага": "Paper", "Фото на листе": "Photos per sheet", "Поля": "Borders", "мм": "mm", "Кадр": "Crop", "Лист": "Sheet",
+    "Бумага": "Paper", "Фото на листе": "Photos per sheet", "Рамка и поля": "Frame and borders", "Поля": "Borders", "мм": "mm", "Кадр": "Crop", "Лист": "Sheet",
     "Сколько фото печатать на одном листе": "How many photos to print on one sheet",
     "Выключено — печать без полей, фото вплотную. Включено — белое поле по краю листа и между фото.": "Off — borderless, photos edge to edge. On — a white margin at the sheet edge and between photos.",
     "Поле по краю листа и расстояние между фото, мм": "Sheet margin and distance between photos, mm",
