@@ -546,13 +546,72 @@ ADJ_LIMITS = {"bright": (-100, 100), "contrast": (-100, 100), "gamma": (0.2, 5),
               "sharp": (0, 500), "sharp_radius": (0.1, 10), "sharp_thr": (0, 255)}
 AUTO_MODES = ("", "contrast", "color", "bw")
 
+# --- уровни (по каналам: m — общий, r, g, b), кривые (точки 0..255) и выборочный цвет (R Y G C B M + нейтральный)
+LV_CHANNELS = ("m", "r", "g", "b")
+LV_PARTS = (("ib", 0, (0, 254)), ("g", 1.0, (0.1, 9.99)), ("iw", 255, (1, 255)), ("ob", 0, (0, 255)), ("ow", 255, (0, 255)))
+CV_KEYS = ("cv_m", "cv_r", "cv_g", "cv_b")
+CV_NEUTRAL = ((0, 0), (255, 255))
+SC_COLORS = ("r", "y", "g", "c", "b", "m")
+SC_CENTERS = (0.0, 42.5, 85.0, 127.5, 170.0, 212.5)        # цвета по кругу HSV 0..255 (PIL)
+for _c in LV_CHANNELS:
+    for _p, _n, _lim in LV_PARTS:
+        NEUTRAL_ADJ["lv_%s_%s" % (_c, _p)] = _n
+        ADJ_LIMITS["lv_%s_%s" % (_c, _p)] = _lim
+for _k in CV_KEYS:
+    NEUTRAL_ADJ[_k] = CV_NEUTRAL
+for _c in SC_COLORS:
+    for _p in "hsl":
+        NEUTRAL_ADJ["sc_%s_%s" % (_c, _p)] = 0.0
+        ADJ_LIMITS["sc_%s_%s" % (_c, _p)] = (-100, 100)
+for _p in "sl":
+    NEUTRAL_ADJ["sc_n_" + _p] = 0.0
+    ADJ_LIMITS["sc_n_" + _p] = (-100, 100)
+
+
+def clean_curve(pts):
+    """Точки кривой: пары 0..255, по возрастанию x, без повторов; не меньше двух. Плохой ввод — прямая."""
+    try:
+        d = {}
+        for x, y in pts:
+            d[int(round(min(255, max(0, float(x)))))] = int(round(min(255, max(0, float(y)))))
+        out = sorted(d.items())
+    except (TypeError, ValueError):
+        return CV_NEUTRAL
+    return tuple(out) if len(out) >= 2 else CV_NEUTRAL
+
+
+def curve_table(pts):
+    """Таблица кривой на 256 значений 0..1: монотонная кубическая интерполяция (Fritsch–Carlson), без перелётов."""
+    pts = clean_curve(pts)
+    xs, ys = [float(p[0]) for p in pts], [float(p[1]) for p in pts]
+    n = len(xs)
+    dx = [xs[i + 1] - xs[i] for i in range(n - 1)]
+    sl = [(ys[i + 1] - ys[i]) / dx[i] for i in range(n - 1)]
+    m = [sl[0]] + [0.0 if sl[i - 1] * sl[i] <= 0 else 2.0 / (1.0 / sl[i - 1] + 1.0 / sl[i]) for i in range(1, n - 1)] + [sl[-1]]
+    out, j = [], 0
+    for i in range(256):
+        while j < n - 2 and i > xs[j + 1]:
+            j += 1
+        if i <= xs[0]:
+            v = ys[0]
+        elif i >= xs[-1]:
+            v = ys[-1]
+        else:
+            h = dx[j]
+            t = (i - xs[j]) / h
+            t2, t3 = t * t, t * t * t
+            v = ((2 * t3 - 3 * t2 + 1) * ys[j] + (t3 - 2 * t2 + t) * h * m[j]
+                 + (-2 * t3 + 3 * t2) * ys[j + 1] + (t3 - t2) * h * m[j + 1])
+        out.append(min(1.0, max(0.0, v / 255.0)))
+    return out
+
 
 def adj_full(a):
     """Полный набор коррекции: недостающее — нейтрально."""
     r = dict(NEUTRAL_ADJ)
     for k in NEUTRAL_ADJ:
         if a.get(k) is not None:
-            r[k] = a[k]
+            r[k] = clean_curve(a[k]) if k in CV_KEYS else a[k]
     return r
 
 
@@ -563,14 +622,19 @@ def clean_adj(a):
         if k not in NEUTRAL_ADJ:
             continue
         n = NEUTRAL_ADJ[k]
+        if k in CV_KEYS:
+            v = clean_curve(v)
+            if v != n:
+                out[k] = [list(p) for p in v]
+            continue
         if isinstance(n, bool):
             v = bool(v)
         elif k == "auto":
             v = v if v in AUTO_MODES else ""
         else:
             v = fnum(v, n, *ADJ_LIMITS[k])
-            if k == "sharp_thr":
-                v = int(v)
+            if k == "sharp_thr" or (k.startswith("lv_") and not k.endswith("_g")):
+                v = int(round(v))
         if v != n:
             out[k] = v
     return out
@@ -636,13 +700,26 @@ def build_luts(a, bounds=None):
     kc = 1 + a["contrast"] / 100.0
     inv = 1.0 / max(0.05, a["gamma"])
     sh, hl = 0.25 * a["shadows"] / 100.0, 0.25 * a["highlights"] / 100.0
+    chn = "rgb"
+    lvl = [[(a["lv_%s_%s" % (ch, p)]) for p, _n, _l in LV_PARTS] for ch in ("m",) + tuple(chn)]    # [общий, r, g, b]
+    lv_on = [any(lvl[k][j] != LV_PARTS[j][1] for j in range(5)) for k in range(4)]
+    curves = [a[k] for k in CV_KEYS]
+    cv_on = [c != CV_NEUTRAL for c in curves]
+    cv_tab = [curve_table(c) if on else None for c, on in zip(curves, cv_on)]
     luts = []
     for c in range(3):
         lo, hi = (bounds[0][c], bounds[1][c]) if bounds else (0, 255)
+        steps = [lvl[k] for k in (0, c + 1) if lv_on[k]]                 # уровни: общий, потом канала
+        ctabs = [cv_tab[k] for k in (0, c + 1) if cv_tab[k]]             # кривые: общая, потом канала
         tab = []
         for i in range(256):
             x = (i - lo) / float(max(1, hi - lo))
             x = min(1.0, max(0.0, x))
+            for ib, g_, iw, ob, ow in steps:
+                x = min(1.0, max(0.0, (x * 255.0 - ib) / float(max(1, iw - ib))))
+                if g_ != 1.0:
+                    x = x ** (1.0 / g_)
+                x = (ob + x * (ow - ob)) / 255.0
             x = min(1.0, x * gain[c])
             x += bgk * x * (1 - x)                   # яркость: сдвиг средних тонов, чёрный и белый остаются на месте
             x = (x - 0.5) * kc + 0.5
@@ -651,8 +728,11 @@ def build_luts(a, bounds=None):
                 x = x ** inv
             if sh or hl:               # чёрный и белый остаются на месте: правятся только тени и света
                 x += sh * (1 - x) ** 2 * _smooth(x / 0.12) + hl * x * x * _smooth((1 - x) / 0.12)
-            v = int(round(255 * min(1.0, max(0.0, x))))
-            tab.append(max(v, tab[-1]) if tab else v)   # таблица не убывает (при больших значениях яркости)
+            x = min(1.0, max(0.0, x))
+            for ct in ctabs:
+                x = ct[int(round(x * 255))]
+            v = int(round(255 * x))
+            tab.append(v if (ctabs or steps) else (max(v, tab[-1]) if tab else v))   # без кривых и уровней таблица не убывает (при больших значениях яркости)
         luts.append(tab)
     return luts
 
@@ -1605,6 +1685,41 @@ def adj_has_color(a):
     return any(a[k] != NEUTRAL_ADJ[k] for k in NEUTRAL_ADJ if k not in ("denoise", "sharp", "sharp_radius", "sharp_thr"))
 
 
+def sel_color(img, a):
+    """Выборочный цвет: у каждого из R Y G C B M свой сдвиг оттенка (±30°), насыщенности и яркости; «нейтральный» — серые тона.
+    Вес цвета — по близости оттенка (треугольник), мало насыщенные пиксели меняются слабее."""
+    if not any(a["sc_%s_%s" % (c, p)] for c in SC_COLORS for p in "hsl") and not (a["sc_n_s"] or a["sc_n_l"]):
+        return img
+    try:
+        import numpy as np
+    except ImportError:
+        return img
+    hsv = np.asarray(img.convert("HSV"), dtype=np.float32).copy()
+    H, S, V = hsv[..., 0], hsv[..., 1], hsv[..., 2]
+    gate = np.minimum(1.0, S / 64.0)
+    dh = np.zeros_like(H)
+    ds = np.zeros_like(H)
+    dv = np.zeros_like(H)
+    for c, centre in zip(SC_COLORS, SC_CENTERS):
+        h_, s_, l_ = a["sc_%s_h" % c], a["sc_%s_s" % c], a["sc_%s_l" % c]
+        if not (h_ or s_ or l_):
+            continue
+        d = np.abs(H - centre)
+        d = np.minimum(d, 256.0 - d)
+        w = np.clip(1.0 - d / 42.5, 0.0, 1.0) * gate
+        dh += w * (h_ / 100.0 * 21.33)
+        ds += w * (s_ / 100.0)
+        dv += w * (l_ / 100.0)
+    if a["sc_n_s"] or a["sc_n_l"]:
+        w = np.clip(1.0 - S / 48.0, 0.0, 1.0)
+        ds += w * (a["sc_n_s"] / 100.0)
+        dv += w * (a["sc_n_l"] / 100.0)
+    hsv[..., 0] = np.mod(H + dh, 256.0)
+    hsv[..., 1] = np.clip(S * (1.0 + ds), 0, 255)
+    hsv[..., 2] = np.clip(V * (1.0 + 0.7 * dv), 0, 255)
+    return Image.fromarray(hsv.round().astype(np.uint8), "HSV").convert("RGB")
+
+
 def adjust_color(img, o, ref=None):
     """Тон и цвет (точечные операции): авто-уровни -> каналы/тон (одна таблица) -> насыщенность -> ч/б, сепия.
     ref — снимок целиком, по которому считаются авто-уровни (чтобы белые поля не влияли)."""
@@ -1635,6 +1750,7 @@ def adjust_color(img, o, ref=None):
         else:          # приглушаем в основном самые насыщенные
             dull = ImageEnhance.Color(img).enhance(max(0.0, 1 + 1.5 * v))
             img = Image.composite(dull, img, s_ch)
+    img = sel_color(img, a)
     if a["bw"] or a["sepia"] or bw_auto:
         g = img.convert("L")
         if bw_auto:                                   # авто ч/б: мягкая S-кривая — снимок «оживает», белый и чёрный на месте
