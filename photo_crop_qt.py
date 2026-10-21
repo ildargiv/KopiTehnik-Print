@@ -4882,7 +4882,7 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         self.pages.addWidget(self._page_print())
         self.pages.addWidget(self._page_smart())
         self.pages.addWidget(self._page_doc())
-        self.seg_page = Segmented([("Фото", 0), ("Цвет", 1), ("Умная рамка", 3), ("Принтер", 2), ("Документ", 4)], 0)
+        self.seg_page = Segmented([("Макет", 0), ("Цвет", 1), ("Умная рамка", 3), ("Принтер", 2), ("Документ", 4)], 0)
         self.seg_page.group.button(4).hide()                 # вкладка «Документ» видна только в режиме документа
         self.seg_page.setStyleSheet('QPushButton[kind="seg"]{padding:6px 9px;}')       # пять вкладок должны уместиться в панели
         self.seg_page.changed.connect(self.show_page)
@@ -5628,7 +5628,7 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
             self.mode_switch.set(mode)
         if hasattr(self, "left_w"):
             self.left_w.setVisible(not doc)
-            for i, b in enumerate(self.seg_page.group.buttons()):   # кнопки вкладок: Фото, Цвет, Умная рамка, Принтер, Документ
+            for i, b in enumerate(self.seg_page.group.buttons()):   # кнопки вкладок: Макет, Цвет, Умная рамка, Принтер, Документ
                 b.setVisible((i >= 3) if doc else (i < 4))
             self.b_save.setVisible(not doc)
             for w in self._photo_only:
@@ -7970,7 +7970,7 @@ pc.EN.update({
     "Сохранить проект (рамки и настройки)": "Save project (frames and settings)",
 })
 pc.EN.update({
-    "Бумага": "Paper", "Фото на листе": "Photos per sheet", "Рамка и поля": "Frame and borders", "Поля": "Borders", "мм": "mm", "Кадр": "Crop", "Лист": "Sheet",
+    "Бумага": "Paper", "Фото на листе": "Photos per sheet", "Рамка и поля": "Frame and borders", "Поля": "Borders", "мм": "mm", "Кадр": "Crop", "Макет": "Layout", "Лист": "Sheet",
     "Сколько фото печатать на одном листе": "How many photos to print on one sheet",
     "Выключено — печать без полей, фото вплотную. Включено — белое поле по краю листа и между фото.": "Off — borderless, photos edge to edge. On — a white margin at the sheet edge and between photos.",
     "Поле по краю листа и расстояние между фото, мм": "Sheet margin and distance between photos, mm",
