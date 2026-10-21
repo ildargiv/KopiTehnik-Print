@@ -4119,7 +4119,7 @@ class SmartMixin:
 
 
 # ---------------------------------------------------------------- обновление с GitHub
-APP_VERSION = "1.0.0"
+APP_VERSION = "1.1.0"
 RELEASES_API = "https://api.github.com/repos/ildargiv/KopiTehnik-Print/releases/latest"
 RELEASES_PAGE = "https://github.com/ildargiv/KopiTehnik-Print/releases/latest"
 
