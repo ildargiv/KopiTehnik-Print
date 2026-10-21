@@ -1612,7 +1612,7 @@ class LevelsWidget(QWidget):
 class CurveWidget(QWidget):
     """Кривая канала: точки тянутся мышью, щелчок по пустому месту добавляет точку, двойной щелчок или правая кнопка — убирает."""
     PAD = 14
-    HIT = 9
+    HIT = 12
 
     def __init__(self, app, big=False):
         super().__init__()
@@ -1724,7 +1724,9 @@ class CurveWidget(QWidget):
             return
         if i is None:
             x, y = self._from(e.position())
-            if any(abs(q[0] - x) < 2 for q in pts):
+            same = [k for k, q in enumerate(pts) if abs(q[0] - x) < 6]       # рядом по горизонтали уже есть точка — берём её, а не молчим
+            if same:
+                self.drag = same[0]
                 return
             pts.append([round(x), round(y)])
             pts.sort()
