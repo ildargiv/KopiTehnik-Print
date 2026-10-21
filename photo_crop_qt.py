@@ -4595,11 +4595,7 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         self.sync_adj()
 
     def show_page(self, i):
-        if i == 1 and not self.files:
-            info(self, "Сначала откройте фото.")
-            self.seg_page.set(self.pages.currentIndex())
-            return
-        self.pages.setCurrentIndex(i)
+        self.pages.setCurrentIndex(i)           # вкладка «Цвет» открывается и без фото: пресеты доступны сразу
         self.seg_page.set(i)
         if i == 1:
             self.sync_adj()
