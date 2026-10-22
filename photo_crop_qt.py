@@ -47,7 +47,7 @@ try:
     from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QFrame, QLabel, QPushButton, QToolButton, QHBoxLayout,
                                    QVBoxLayout, QGridLayout, QComboBox, QLineEdit, QSlider, QRadioButton, QButtonGroup,
                                    QListView, QStyledItemDelegate, QStyle, QScrollArea, QStackedWidget, QDialog, QFileDialog,
-                                   QMessageBox, QProgressBar, QAbstractItemView, QGraphicsDropShadowEffect, QListWidget,
+                                   QMessageBox, QProgressBar, QProgressDialog, QAbstractItemView, QGraphicsDropShadowEffect, QListWidget,
                                    QListWidgetItem, QTreeWidget, QTreeWidgetItem, QMenu, QSizePolicy, QAbstractButton, QTableWidget, QTableWidgetItem, QTabWidget,
                                    QInputDialog)
     from PySide6.QtSvg import QSvgRenderer
@@ -4114,7 +4114,7 @@ class SmartMixin:
 
 
 # ---------------------------------------------------------------- обновление с GitHub
-APP_VERSION = "1.3.0"
+APP_VERSION = "1.4.0"
 RELEASES_API = "https://api.github.com/repos/ildargiv/KopiTehnik-Print/releases/latest"
 RELEASES_PAGE = "https://github.com/ildargiv/KopiTehnik-Print/releases/latest"
 GITHUB_URL = "https://github.com/ildargiv/KopiTehnik-Print"
@@ -4123,19 +4123,22 @@ LICENSE_TEXT = "Лицензия: PolyForm Noncommercial 1.0.0. Бесплатн
 LICENSE_URL = "https://polyformproject.org/licenses/noncommercial/1.0.0"
 
 
+import updater                                                   # noqa: E402
+
+
 def _ver(tag):
     import re
     return tuple(int(x) for x in re.findall(r"\d+", str(tag))[:3]) or (0,)
 
 
 def fetch_latest_release(timeout=8):
-    """(тег, адрес страницы) последнего релиза на GitHub или None, если проверить не удалось."""
+    """(тег, адрес страницы, файлы релиза, описание) последнего релиза на GitHub или None, если проверить не удалось."""
     import urllib.request
     try:
         rq = urllib.request.Request(RELEASES_API, headers={"User-Agent": "KopiTehnikPrint", "Accept": "application/vnd.github+json"})
         with urllib.request.urlopen(rq, timeout=timeout) as r:
             d = json.loads(r.read().decode("utf-8"))
-        return str(d.get("tag_name", "")), str(d.get("html_url") or RELEASES_PAGE)
+        return str(d.get("tag_name", "")), str(d.get("html_url") or RELEASES_PAGE), updater.assets_from_release(d), str(d.get("body") or "")
     except Exception:
         return None
 
@@ -4466,6 +4469,8 @@ LOCK_EVENTS = {QEvent.MouseButtonPress, QEvent.MouseButtonRelease, QEvent.MouseB
 class MainWindow(SmartMixin, DocMixin, QMainWindow):
     _only = None                         # на время расчёта листа — печатать только это фото
     update_checked = Signal(object, bool)    # (результат проверки, показать ли ответ «обновлений нет»)
+    update_progress = Signal(int, int)       # скачано, всего байт
+    update_downloaded = Signal(object)       # путь к файлу или текст ошибки (str)
 
     def __init__(self):
         super().__init__()
@@ -4719,18 +4724,75 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
             return
         if not manual and self.settings.get("skip_update") == latest[0]:
             return
+        asset = updater.pick_asset(latest[2]) if len(latest) > 2 else None
         box = QMessageBox(self)
         box.setWindowTitle(tr("Доступно обновление"))
         box.setText("%s %s → %s" % (tr("Вышла новая версия:"), APP_VERSION, latest[0]))
-        go = box.addButton(tr("Открыть страницу загрузки"), QMessageBox.AcceptRole)
+        if asset:
+            box.setInformativeText(tr("Программа сама скачает обновление, закроется, обновится и запустится снова."))
+        if len(latest) > 3 and latest[3].strip():
+            box.setDetailedText(latest[3].strip()[:2500])
+        go = box.addButton(tr("Обновить сейчас") if asset else tr("Открыть страницу загрузки"), QMessageBox.AcceptRole)
+        page = box.addButton(tr("Открыть страницу загрузки"), QMessageBox.ActionRole) if asset else None
         skip = box.addButton(tr("Пропустить эту версию"), QMessageBox.DestructiveRole)
         box.addButton(tr("Позже"), QMessageBox.RejectRole)
+        box.setDefaultButton(go)
         box.exec()
-        if box.clickedButton() is go:
+        if box.clickedButton() is go and asset:
+            self._update_install(latest, asset)
+        elif box.clickedButton() in (go, page):
             import webbrowser
             webbrowser.open(latest[1])
         elif box.clickedButton() is skip:
             self.settings["skip_update"] = latest[0]
+
+    def _update_install(self, latest, asset):
+        """Скачивает обновление с индикатором и запускает замену; программа закрывается и открывается уже новой."""
+        dlg = QProgressDialog(trf("Скачиваю версию {v}…", v=latest[0]), tr("Отмена"), 0, 100, self)
+        dlg.setWindowTitle(tr("Обновление"))
+        dlg.setWindowModality(Qt.WindowModal)
+        dlg.setMinimumDuration(0)
+        dlg.setAutoClose(False)
+        dlg.setAutoReset(False)
+        dlg.setValue(0)
+        stop = threading.Event()
+        dlg.canceled.connect(stop.set)
+
+        def on_progress(got, total):
+            dlg.setMaximum(100 if total else 0)
+            if total:
+                dlg.setValue(min(100, int(got * 100 / total)))
+                dlg.setLabelText(trf("Скачиваю версию {v}: {a} из {b} МБ", v=latest[0], a="%.1f" % (got / 1048576), b="%.1f" % (total / 1048576)))
+
+        def on_done(res):
+            self.update_progress.disconnect(on_progress)
+            self.update_downloaded.disconnect(on_done)
+            dlg.close()
+            if isinstance(res, str):
+                if not stop.is_set():
+                    warn(self, res + "\n\n" + tr("Скачайте новую версию вручную:") + " " + latest[1])
+                return
+            try:
+                self.persist()
+                updater.launch(res)
+            except Exception as ex:
+                warn(self, trf("Не удалось запустить обновление: {e}", e=ex) + "\n\n" + latest[1])
+                return
+            QApplication.instance().quit()
+
+        self.update_progress.connect(on_progress)
+        self.update_downloaded.connect(on_done)
+
+        def work():
+            try:
+                path = updater.download(asset, progress=lambda a, b: self.update_progress.emit(a, b), cancelled=stop.is_set)
+                self.update_downloaded.emit(path)
+            except updater.UpdateError as ex:
+                self.update_downloaded.emit(str(ex))
+            except Exception as ex:
+                self.update_downloaded.emit("%s" % ex)
+        threading.Thread(target=work, daemon=True).start()
+        dlg.show()
 
     def copies_chip(self):
         """Копий каждого листа: заметная цветная плашка в плавающей панели над рабочим полем (одна величина на все панели)."""
@@ -8546,6 +8608,9 @@ pc.EN.update({
     "Принтер не выбран: поправка запомнится за связкой «принтер + формат + бумага» после выбора принтера.": "No printer selected: the correction will be stored for the printer + size + paper combination once a printer is chosen.",
     "Оттенок": "Hue", "Насыщенность": "Saturation", "Яркость": "Brightness",
     "Серые и нейтральные цвета не затрагиваются.": "Greys and neutral colours are left alone.",
+    "Обновить сейчас": "Update now", "Программа сама скачает обновление, закроется, обновится и запустится снова.": "The program will download the update, close, update itself and start again.",
+    "Скачиваю версию {v}…": "Downloading version {v}…", "Скачиваю версию {v}: {a} из {b} МБ": "Downloading version {v}: {a} of {b} MB", "Обновление": "Update",
+    "Скачайте новую версию вручную:": "Download the new version manually:", "Не удалось запустить обновление: {e}": "Could not start the update: {e}",
     "Пресет 1": "Preset 1", "Пресет 2": "Preset 2", "Пресет 3": "Preset 3", "Переименовать пресет": "Rename preset", "Сохранить": "Save", "Сохранённые настройки: нажмите, чтобы применить": "Saved settings: click to apply", "Пресет пуст: настройте ползунки и нажмите «Сохранить» под ним": "Preset is empty: set the sliders and press Save under it", "Запомнить текущие настройки ползунков в этот пресет. Он хранится, пока вы не сохраните в него другие.": "Store the current slider values in this preset. It stays until you save other values into it.", "Цвет на экране": "Colour on screen", "Профиль принтера": "Printer profile", "Выбрать профиль…": "Choose profile…",
     "Имитация печати на экране": "Simulate print on screen", "Показать цвета вне охвата": "Show out-of-gamut colours",
     "Параметры": "Settings", "это фото": "this photo", "все отмеченные": "all checked", "Это фото": "This photo", "Куда применять коррекцию: только к текущему фото или ко всем отмеченным галочкой": "Where to apply the correction: the current photo only, or all photos ticked with a checkmark", "Менять": "Apply to",
@@ -8880,7 +8945,7 @@ def selftest(app):
         if win.preset_name(3) != "Тёплый тон" or not win.b_pre[3].text().startswith("Тёпл") or pc.load_settings().get("adj_preset_names", {}).get("3") != "Тёплый тон":
             raise RuntimeError("пресет 3 не переименовался")
         win.preset_rename(3, "")
-        if win.b_pre[3].text() != win.preset_name(3) or "Тёпл" in win.b_pre[3].text():
+        if not win.preset_name(3).startswith(win.b_pre[3].text().rstrip("…")) or "Тёпл" in win.b_pre[3].text():
             raise RuntimeError("пустое имя должно вернуть «Пресет 3»")
         win.adj_replace({}, [win.files[win.idx]])
         win.sync_adj()
