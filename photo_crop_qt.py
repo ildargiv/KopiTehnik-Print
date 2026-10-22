@@ -1377,7 +1377,7 @@ class CropCanvas(QWidget):
             dw, dh = W * kk, H * kk
             p.drawPixmap(QRectF(px + (PW - dw) / 2, py + (PH - dh) / 2, dw, dh), pm, QRectF(pm.rect()))
             self._cmp_under(p, (px + (PW - dw) / 2, py + (PH - dh) / 2, dw, dh))
-            self._bleed(p, [(px, py), (px + PW, py), (px + PW, py + PH), (px, py + PH)], paper[0])
+            self._bleed(p, [(px, py), (px + PW, py), (px + PW, py + PH), (px, py + PH)], paper[0], paper[0] > paper[1] + 1e-6)
             self.geom = None
             self._cmp_over(p)
             p.end()
@@ -1409,7 +1409,7 @@ class CropCanvas(QWidget):
                 p.drawLine(QPointF(*a1), QPointF(*b1))
                 p.drawLine(QPointF(*a2), QPointF(*b2))
         app.smart_overlay(p, ox, oy, k, W, H, f)
-        self._bleed(p, P, paper[0])
+        self._bleed(p, P, paper[0], paper[0] > paper[1] + 1e-6)
         p.setBrush(Qt.NoBrush)
         p.setPen(QPen(QColor(T["frame"]), 2))
         p.drawPolygon(poly)
@@ -1437,11 +1437,17 @@ class CropCanvas(QWidget):
         app.smart_banner(p, cw, f)
         p.end()
 
-    def _bleed(self, p, P, paper_w_mm):
-        """Серая шкала подрезки вокруг рамки: полоса снаружи — запас за краем листа (+), внутри — отступ (−)."""
+    def _bleed(self, p, P, paper_w_mm, rot=False):
+        """Серая шкала подрезки вокруг рамки: полоса снаружи — запас за краем листа (+), внутри — отступ (−).
+        Значения заданы для листа, который принтер всегда печатает вертикально: у лежащего боком (альбомного) кадра
+        они поворачиваются вместе с ним, как при печати (sheet_plan): левый край кадра = низ листа, верхний = лево, и т. д."""
         sides = self.app.bleed_mm()
         if not any(abs(v) > 1e-9 for v in sides):
             return
+        names = ("Л", "В", "П", "Н")
+        if rot:
+            sl, sT, sr, sb = sides
+            sides, names = (sb, sl, sT, sr), ("Н", "Л", "В", "П")
         ux, uy = P[1][0] - P[0][0], P[1][1] - P[0][1]
         L = math.hypot(ux, uy) or 1.0
         ux, uy = ux / L, uy / L
@@ -1454,7 +1460,7 @@ class CropCanvas(QWidget):
         fnt.setPixelSize(10)
         fnt.setBold(True)
         p.setFont(fnt)
-        for (a, b, n), v, nm in zip(edges, sides, ("Л", "В", "П", "Н")):
+        for (a, b, n), v, nm in zip(edges, sides, names):
             if abs(v) < 1e-9:
                 continue
             d = max(2.0, abs(v) * mm) * (1 if v > 0 else -1)
@@ -4114,7 +4120,7 @@ class SmartMixin:
 
 
 # ---------------------------------------------------------------- обновление с GitHub
-APP_VERSION = "1.4.0"
+APP_VERSION = "1.4.1"
 RELEASES_API = "https://api.github.com/repos/ildargiv/KopiTehnik-Print/releases/latest"
 RELEASES_PAGE = "https://github.com/ildargiv/KopiTehnik-Print/releases/latest"
 GITHUB_URL = "https://github.com/ildargiv/KopiTehnik-Print"
@@ -8908,6 +8914,32 @@ def selftest(app):
     step("наклон", lambda: win.tilt(1.5))
     step("масштаб", lambda: win.zoom(0.9))
     step("книжная/альбомная", win.flip_frame)
+
+    def bleed_overlay_rotates():
+        class Rec:
+            def __init__(self):
+                self.texts = []
+
+            def font(self):
+                return QFont()
+
+            def drawText(self, _r, _fl, s):
+                self.texts.append(s)
+
+            def __getattr__(self, _n):
+                return lambda *a, **k: None
+        old_print = dict(win.settings.get("print", {}))
+        win.settings.setdefault("print", {}).update(bleed_on=True, bleed="0", bleed_l="-2", bleed_t="-2", bleed_r="-3", bleed_b="-6")
+        try:
+            P = [(0, 0), (100, 0), (100, 60), (0, 60)]
+            for rot, want in ((False, ["Л -2", "В -2", "П -3", "Н -6"]), (True, ["Н -6", "Л -2", "В -2", "П -3"])):
+                r = Rec()
+                win.canvas._bleed(r, P, 100.0, rot)
+                if r.texts != want:
+                    raise RuntimeError("подрезка у %s кадра: %r, ожидалось %r" % ("лежащего боком" if rot else "прямого", r.texts, want))
+        finally:
+            win.settings["print"] = old_print
+    step("подрезка на рамке поворачивается вместе с кадром", bleed_overlay_rotates)
     step("отмена и повтор", lambda: (win.undo(), win.redo()))
     step("снять отметку", lambda: win.toggle_check(0))
     step("снять все", lambda: win.check_all(False))
