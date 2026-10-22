@@ -2,9 +2,9 @@
 
 # KopiTehnik Print
 
-**Print software for small copy centers and photo desks.** Customer photos and documents to paper in a minute: smart crop to any format, colour matched to your printer, PDF/Word/Excel/PowerPoint printing, and a tamper-evident sheet counter.
+**Print software for small copy centers, photo desks and professional printers.** Customer photos and documents to paper in a minute: smart crop to any format, colour matched to your printer, PDF/Word/Excel/PowerPoint printing, and a tamper-evident sheet counter.
 
-**Free, legal, no cracks, no malware.** A modern alternative to cracked photo-print tools: free for personal use and for a business with one workstation. [Download for Windows](https://github.com/ildargiv/KopiTehnik-Print/releases/latest) · 20 interface languages · no Python needed
+**Free, legal, no cracks, no malware.** A modern alternative to cracked photo-print tools: free for personal use and for a single workstation: copy shop, studio, workshop or independent printer. [Download for Windows](https://github.com/ildargiv/KopiTehnik-Print/releases/latest) · 20 interface languages · no Python needed
 
 - **One window for photo and document jobs**, each with its own printer profile and paper.
 - **Fast orders**: 10×15 cm to A2, up to 30 photos per sheet, automatic orientation, pre-flight check (dpi, fit).
