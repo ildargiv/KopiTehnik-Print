@@ -34,7 +34,7 @@ OVERVIEW = """# PhotoCrop — обзор
 PHOTOS = """# Фото: открыть, выбрать, кадрировать
 
 * **Открыть**: open_folder(path) — вся папка (recursive — с подпапками); open_files(paths, add) — отдельные файлы или добавить к открытым.
-  Форматы: JPG, PNG, TIFF, BMP, WEBP, HEIC (нужна pillow-heif). Папки с результатами программы («Готовые», «Печать») пропускаются.
+  Форматы: JPG, PNG, TIFF, BMP, WEBP, HEIC (нужна pi-heif). Папки с результатами программы («Готовые», «Печать») пропускаются.
 * **Выбрать**: select_photo(photo) — какое фото показано; check_photos(photos, on) — отметки «+» (что печатать и сохранять);
   remove_unchecked — убрать неотмеченные из списка (файлы на диске не трогаются). photo — индекс с 0, имя файла или его часть.
 * **Рамка**: set_crop(cx, cy, scale, angle, orient, rotation, copies), move_crop, reset_crop, rotate_photo(90/180/270), flip_photo(h|v), set_copies.
