@@ -8120,7 +8120,7 @@ class SettingsDialog(QDialog):
         sw_upd.toggled.connect(lambda on: st.__setitem__("check_updates", bool(on)))
         import webbrowser
         link = lambda text, url: btn(text, lambda: webbrowser.open(url), "link")
-        upd_card = card("О программе", lbl("КопиТехник Принт (PhotoCrop)"), row("Версия", lbl(APP_VERSION)), row("Автор", lbl(AUTHOR)),
+        upd_card = card("О программе", lbl("KopiTehnik Print"), row("Версия", lbl(APP_VERSION)), row("Автор", lbl(AUTHOR)),
                         hint(LICENSE_TEXT),
                         hbox(link("Страница на GitHub", GITHUB_URL), link("Все выпуски", GITHUB_URL + "/releases"), None, spacing=6),
                         hbox(link("Сообщить об ошибке", GITHUB_URL + "/issues"), link("Текст лицензии", LICENSE_URL), None, spacing=6),
@@ -8423,7 +8423,7 @@ pc.EN.update({
     "Анимация отправки на печать и сохранения": "Animate sending to print and saving", "Язык интерфейса": "Interface language",
     "О программе": "About", "Программа-агент": "Agent application", "Подключить": "Connect", "Скопировать настройку": "Copy settings", "Адрес для HTTP-клиентов": "Address for HTTP clients", "Настройка скопирована в буфер обмена.": "The settings were copied to the clipboard.", "Автор": "Author", "Версия": "Version", "Лицензия: PolyForm Noncommercial 1.0.0. Бесплатно для личного и некоммерческого использования; для коммерческого нужно разрешение автора.": "Licence: PolyForm Noncommercial 1.0.0. Free for personal and non-commercial use; commercial use needs the author's permission.", "Текст лицензии": "Licence text",
     "Страница на GitHub": "Project page on GitHub", "Все выпуски": "All releases", "Сообщить об ошибке": "Report a problem",
-    "КопиТехник Принт (PhotoCrop)": "KopiTehnik Print (PhotoCrop)",
+    
     "Спрашивать подтверждение обычных действий (сброс, применение ко всем, печать)": "Ask for confirmation of everyday actions (reset, apply to all, print)",
     "Папка, с которой начинается «Открыть»": "Folder that “Open” starts in", "Последняя использованная": "Last used",
     "Кадрирование": "Cropping", "Сила прилипания, пикселей экрана": "Snap strength, screen pixels", "Общие": "General",
