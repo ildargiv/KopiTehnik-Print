@@ -12,7 +12,7 @@ import json
 import os
 import sys
 
-winspool = ctypes.windll.LoadLibrary("winspool.drv")
+winspool = ctypes.WinDLL("winspool.drv", use_last_error=True)
 winspool.OpenPrinterW.argtypes = [wt.LPWSTR, ctypes.POINTER(wt.HANDLE), ctypes.c_void_p]
 winspool.OpenPrinterW.restype = wt.BOOL
 winspool.ClosePrinter.argtypes = [wt.HANDLE]
@@ -20,6 +20,13 @@ winspool.SetPrinterW.argtypes = [wt.HANDLE, wt.DWORD, ctypes.c_void_p, wt.DWORD]
 winspool.SetPrinterW.restype = wt.BOOL
 winspool.DocumentPropertiesW.argtypes = [wt.HWND, wt.HANDLE, wt.LPWSTR, ctypes.c_void_p, ctypes.c_void_p, wt.DWORD]
 winspool.DocumentPropertiesW.restype = ctypes.c_long
+winspool.EnumPrintersW.argtypes = [wt.DWORD, wt.LPWSTR, wt.DWORD, ctypes.c_void_p, wt.DWORD,
+                                   ctypes.POINTER(wt.DWORD), ctypes.POINTER(wt.DWORD)]
+winspool.EnumPrintersW.restype = wt.BOOL
+winspool.GetPrinterW.argtypes = [wt.HANDLE, wt.DWORD, ctypes.c_void_p, wt.DWORD, ctypes.POINTER(wt.DWORD)]
+winspool.GetPrinterW.restype = wt.BOOL
+winspool.DeviceCapabilitiesW.argtypes = [wt.LPWSTR, wt.LPWSTR, ctypes.c_int, ctypes.c_void_p, ctypes.c_int]
+winspool.DeviceCapabilitiesW.restype = ctypes.c_int
 PRINTER = "EPSON L8050 Series (копия 1)"
 SNAPS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "dmsnaps")
 
@@ -108,6 +115,54 @@ def cmd_apply(name):
 def cmd_status():
     dm = get_devmode()
     print("current:", header(dm))
+
+
+def cmd_list():
+    """Список очередей печати (имя | драйвер | порт)."""
+    need = wt.DWORD()
+    got = wt.DWORD()
+    winspool.EnumPrintersW(0x02 | 0x04, None, 4, None, 0, ctypes.byref(need), ctypes.byref(got))
+    buf = (ctypes.c_ubyte * need.value)()
+    if not winspool.EnumPrintersW(0x02 | 0x04, None, 4, buf, need, ctypes.byref(need), ctypes.byref(got)):
+        raise ctypes.WinError(ctypes.get_last_error())
+    cnt = got.value
+    import struct
+    out = bytes(buf)
+
+    def wstr_at(addr):
+        pos = 0
+        while addr + pos + 1 < len(out) and out[addr + pos:addr + pos + 2] != b"\x00\x00":
+            pos += 2
+        return out[addr:addr + pos].decode("utf-16-le")
+
+    # PRINTER_INFO_4W (x64): pPrinterName@0, pServerName@8, Attributes@16; stride 24.
+    # Для локального пулера указатели — реальные адреса в нашем процессе.
+    names = []
+    for i in range(cnt):
+        addr = struct.unpack_from("<Q", out, i * 24)[0]
+        names.append(ctypes.wstring_at(addr) if addr else "")
+
+    def info2(name):
+        h = wt.HANDLE()
+        if not winspool.OpenPrinterW(name, ctypes.byref(h), None):
+            return "", ""
+        try:
+            n2 = wt.DWORD()
+            winspool.GetPrinterW(h, 2, None, 0, ctypes.byref(n2))
+            b2 = (ctypes.c_ubyte * n2.value)()
+            if not winspool.GetPrinterW(h, 2, b2, n2, ctypes.byref(n2)):
+                return "", ""
+            d = bytes(b2)
+            # PRINTER_INFO_2W: name@8, port@24, driver@32 (указатели — адреса процесса)
+            def w2(addr):
+                return ctypes.wstring_at(addr) if addr else ""
+            return w2(struct.unpack_from("<Q", d, 32)[0]), w2(struct.unpack_from("<Q", d, 24)[0])
+        finally:
+            winspool.ClosePrinter(h)
+
+    for name in names:
+        drv, port = info2(name)
+        print("%-40s | driver: %-25s | port: %s" % (name, drv, port))
 
 
 def cmd_patch(specs):
@@ -227,9 +282,75 @@ def cmd_ccor(mode):
           % (old, val, dm[s + CCOR_PRIV]))
 
 
+def cmd_size(args):
+    """size <код-бумаги> [media] — выставить бумагу/носитель с прогоном через merge
+    (драйвер сам пересчитывает приватные поля, в т.ч. priv+7768 для «без полей»).
+    Пример: size 0x36 396  (10x15, фотобумага)."""
+    import struct
+    paper = int(args[0], 0)
+    media = int(args[1], 0) if len(args) > 1 else None
+    dm = get_devmode()
+    s, _, _ = header(dm)
+    struct.pack_into("<H", dm, 78, paper)          # dmPaperSize
+    if media is not None:
+        struct.pack_into("<H", dm, 196, media)     # dmMediaType
+    dm = _merge(dm)
+    set_devmode(dm)
+    print("size: paper=%02X media=%s | после merge: paper=%02X media=%02X priv+7768=%02X src=%d"
+          % (paper, media, struct.unpack_from("<H", dm, 78)[0],
+             struct.unpack_from("<H", dm, 196)[0], dm[s + BORDER_MIRROR],
+             struct.unpack_from("<H", dm, 88)[0]))
+    print("area:", printable_area(dm))
+
+
+def _port_of(name):
+    """Порт очереди печати (для DeviceCapabilities нужен порт очереди)."""
+    import struct
+    h = wt.HANDLE()
+    if not winspool.OpenPrinterW(name, ctypes.byref(h), None):
+        raise ctypes.WinError(ctypes.get_last_error())
+    try:
+        n = wt.DWORD()
+        winspool.GetPrinterW(h, 2, None, 0, ctypes.byref(n))
+        b = (ctypes.c_ubyte * n.value)()
+        if not winspool.GetPrinterW(h, 2, b, n, ctypes.byref(n)):
+            return None
+        d = bytes(b)
+        addr = struct.unpack_from("<Q", d, 24)[0]
+        return ctypes.wstring_at(addr) if addr else None
+    finally:
+        winspool.ClosePrinter(h)
+
+
+def cmd_papers():
+    """Список размеров бумаги (DeviceCapabilities DC_PAPERS/DC_BORDERLESSPAPERS)."""
+    port = _port_of(PRINTER)
+    for cap, label in ((7, "DC_PAPERS"), (13, "DC_BORDERS"), (15, "DC_BORDERLESSPAPERS")):
+        n = winspool.DeviceCapabilitiesW(PRINTER, port, cap, None, 0)
+        if n <= 0:
+            print(label, "->", n)
+            continue
+        arr = (wt.WORD * n)()
+        winspool.DeviceCapabilitiesW(PRINTER, port, cap, arr, n)
+        print("%s (%d):" % (label, n), " ".join("%02X(%d)" % (arr[i], arr[i]) for i in range(n)))
+
+
 if __name__ == "__main__":
+    # глобальный параметр --printer=ИМЯ (или --printer ИМЯ): выбрать очередь,
+    # иначе используется PRINTER по умолчанию
+    _args = sys.argv[1:]
+    if _args and _args[0].startswith("--printer"):
+        if "=" in _args[0]:
+            PRINTER = _args[0].split("=", 1)[1]
+            _args = _args[1:]
+        elif len(_args) > 1:
+            PRINTER = _args[1]
+            _args = _args[2:]
+    sys.argv = [sys.argv[0]] + _args
     cmd = sys.argv[1] if len(sys.argv) > 1 else "status"
-    if cmd == "save":
+    if cmd == "list":
+        cmd_list()
+    elif cmd == "save":
         cmd_save(sys.argv[2])
     elif cmd == "diff":
         cmd_diff(sys.argv[2], sys.argv[3])
@@ -241,6 +362,10 @@ if __name__ == "__main__":
         cmd_border(sys.argv[2] if len(sys.argv) > 2 else "status")
     elif cmd == "ccor":
         cmd_ccor(sys.argv[2] if len(sys.argv) > 2 else "status")
+    elif cmd == "size":
+        cmd_size(sys.argv[2:])
+    elif cmd == "papers":
+        cmd_papers()
     else:
         cmd_status()
 
