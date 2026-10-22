@@ -18,14 +18,14 @@ APPDATA = Path(os.environ.get("APPDATA", str(Path.home())))
 MODELS_DIR = APPDATA / "PhotoCrop" / "models"
 CACHE_DIR = APPDATA / "PhotoCrop" / "enhance_cache"
 
-# Манифесты моделей. ONNX сконвертирован из .pth (source_weights_sha256); файл надо загрузить в релиз models-v1.
+# Манифесты моделей. ONNX сконвертирован из .pth (source_weights_sha256); файл лежит в ветке ai-models (адрес привязан к коммиту, целостность проверяет sha256).
 REGISTRY = {
     "realesr-general-x4v3": {
         "title": "Real-ESRGAN general x4v3",
         "kind": "upscale",
         "scale": 4,
         "file": "realesr-general-x4v3.onnx",
-        "url": "https://github.com/ildargiv/KopiTehnik-Print/releases/download/models-v1/realesr-general-x4v3.onnx",
+        "url": "https://raw.githubusercontent.com/ildargiv/KopiTehnik-Print/7e3b647b9430846c53dcbdc6dbb2fdf274f00f8b/realesr-general-x4v3.onnx",
         "sha256": "afca20f00823f46845fb34cc55d22861f000e19d13afdc7bd654789a3cda04c7",
         "size_mb": 4.9,
         "speed": "fast",
