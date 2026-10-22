@@ -1,77 +1,123 @@
-# PolyForm Noncommercial License 1.0.0
+# KopiTehnik Print Licence, version 1.0
 
-<https://polyformproject.org/licenses/noncommercial/1.0.0>
+Effective date: 2026-10-22.
 
-## Acceptance
+Copyright (c) 2024–2026 Ildar Vilsurovich Gaisin (Гайсин Ильдар Вильсурович) (GitHub: ildargiv) ("the Licensor").
 
-In order to get any license under these terms, you must agree to them as both strict obligations and conditions to all your licenses.
+This licence applies to the source code in this repository published on or after 2026-10-22 and to every version of KopiTehnik Print released on or after that date ("the Software"). The Software includes its source code, official builds and installers, documentation and the KopiTehnik Print name and logo, but not the third-party components described in section 11.
 
-## Copyright License
+By installing, running, copying or building the Software you agree to this licence. If you do not agree, do not use the Software.
 
-The licensor grants you a copyright license for the software to do everything you might do with the software that would otherwise infringe the licensor's copyright in it for any permitted purpose.  However, you may only distribute the software according to [Distribution License](#distribution-license) and make changes or new works based on the software according to [Changes and New Works License](#changes-and-new-works-license).
+## 1. Definitions
 
-## Distribution License
+- **"You"** means the individual or the organisation that uses the Software. If you use the Software for an organisation, "you" means that organisation together with every organisation that controls it, is controlled by it or is under common control with it ("affiliates"). "Control" means owning more than 50% of the voting rights or having the right to direct management.
+- **"Workstation"** means one physical or virtual computer (including each virtual machine, terminal-server or remote-desktop session and container) on which the Software is installed and used to work with printers, that is, to prepare and send print jobs. It does not matter whether the Software is operated by a person or by an AI agent (including through the MCP server or the command line): what counts is the computer that works with printers. A computer or server that runs the Software only to relay commands and does not prepare or send print jobs is not a Workstation. One Workstation may be connected to any number of printers.
+- **"Location"** means one physical place of business at one street address (a shop, studio, kiosk, office or home office). A mobile or event business with no fixed place counts as one Location.
+- **"Commercial Use"** means any use in connection with a business, trade or profession, or for which you or anyone else is paid, including printing for customers, whether or not for profit. Use by a non-profit, school, government body or other organisation is Commercial Use unless section 2.1 applies.
+- **"Personal Use"** means use by an individual for their own private, family or hobby purposes, with no payment from anyone for the result.
+- **"Sheet"** means one physical sheet of paper or other media sent to a printer from the Software, as counted by the Software's print counter.
+- **"Official Release"** means an installer or executable published by the Licensor on the Releases page of https://github.com/ildargiv/KopiTehnik-Print, without any change.
 
-The licensor grants you an additional copyright license to distribute copies of the software.  Your license to distribute covers distributing the software with changes and new works permitted by [Changes and New Works License](#changes-and-new-works-license).
+## 2. Free licence
 
-## Notices
+Subject to this licence, the Licensor grants you a free, non-exclusive, non-transferable, worldwide licence to install, run and copy the Software:
 
-You must ensure that anyone who gets a copy of any part of the software from you also gets a copy of these terms or the URL for them above, as well as copies of any plain-text lines beginning with `Required Notice:` that the licensor provided with the software.  For example:
+2.1. **Personal Use** — on any number of Workstations that you own or control.
 
-> Required Notice: Copyright Yoyodyne, Inc. (http://example.com)
+2.2. **Commercial Use on one Workstation** — on **one Workstation at one Location**, for each business (together with its affiliates).
 
-## Changes and New Works License
+You may also install the Software on one additional Workstation used only as a backup that does not print while the main Workstation is in use, and you may move the free licence to another Workstation or Location if you stop using it on the old one.
 
-The licensor grants you an additional copyright license to make changes and new works based on the software for any permitted purpose.
+## 3. Paid commercial licence
 
-## Patent License
+You need a separate paid commercial licence from the Licensor before you:
 
-The licensor grants you a patent license for the software that covers patent claims the licensor can license, or becomes able to license, that you would infringe by using the software.
+a) use the Software for Commercial Use on more than one Workstation (other than the backup in section 2), or at more than one Location, at the same time;
 
-## Noncommercial Purposes
+b) operate as, or for, a chain, franchise or group of businesses under common brand or control, where the Software is used at more than one Location of that group (each franchisee that has only one Workstation at one Location and is a separate business may use section 2.2, unless the franchisor installs, supplies or requires the Software);
 
-Any noncommercial purpose is a permitted purpose.
+c) exceed any volume limit that applies under section 4 once such a limit is introduced;
 
-## Personal Uses
+d) provide the Software, or access to it, to other people or businesses as part of a product or service, including preinstalling it on computers or kiosks you sell or rent, offering it as a hosted or remote service, or selling, renting, sublicensing or bundling it.
 
-Personal use for research, experiment, and testing for the benefit of public knowledge, personal study, private entertainment, hobby projects, amateur pursuits, or religious observance, without any anticipated commercial application, is use for a permitted purpose.
+There is no public price list yet. The terms of a commercial licence are agreed with the Licensor individually in a written agreement. Contact: the Licensor through the project page on GitHub (https://github.com/ildargiv/KopiTehnik-Print), for example by opening an issue or a discussion.
 
-## Noncommercial Organizations
+## 4. Possible future volume limit (notice)
 
-Use by any charitable organization, educational institution, public research organization, public safety or health organization, environmental protection organization, or government institution is use for a permitted purpose regardless of the source of funding or obligations resulting from the funding.
+4.1. At the date of this licence the Software has no limit on the number of Sheets printed. You are informed now that future versions of the Software may show a reminder about the commercial licence, and may limit the number of Sheets printed per Workstation per calendar day, for Commercial Use under section 2.2.
 
-## Fair Use
+4.2. Any such limit will: (a) be described in the release notes of the version that introduces it and in this licence before or when that version is released; (b) not block opening, editing, saving or exporting files, and not delete or damage your files or settings; (c) not stop a print job that has already started; and (d) not apply to Personal Use.
 
-You may have "fair use" rights for the software under the law. These terms do not limit them.
+4.3. A version of the Software that you have already installed is governed by the licence that came with it. Automatic updates will not apply a version with new or stricter limits without showing you the new licence terms first. You may keep using an earlier version under the licence that came with it.
 
-## No Other Rights
+## 5. Source code
 
-These terms do not allow you to sublicense or transfer any of your licenses to anyone else, or prevent the licensor from granting licenses to anyone else.  These terms do not imply any other licenses.
+5.1. The source code is published so that you can read it, check how the Software works, and build the Software for your own use permitted by section 2 or by your commercial licence. Publishing the source code does not make the Software open source and does not grant any right not stated in this licence.
 
-## Patent Defense
+5.2. You may change the Software and build it for your own permitted use, on the Workstations covered by your licence.
 
-If you make any written claim that the software infringes or contributes to infringement of any patent, your patent license for the software granted under these terms ends immediately. If your company makes such a claim, your patent license ends immediately for work on behalf of your company.
+5.3. You may **not** distribute, publish, sell or otherwise make available to others any modified version of the Software or any build made by anyone other than the Licensor, except:
+- forking and viewing the repository on GitHub as permitted by GitHub's Terms of Service, provided that your fork keeps this licence and does not publish builds or installers; and
+- proposing changes to the Licensor (for example as a pull request). By submitting a contribution you grant the Licensor a perpetual, worldwide, royalty-free, irrevocable licence to use, change, sublicense and distribute it, including under commercial licences, and you confirm that you have the right to grant this.
 
-## Violations
+5.4. You may give unmodified copies of Official Releases, together with this licence, to others. Each recipient gets their own licence directly from the Licensor under these terms, and section 3(d) still applies.
 
-The first time you are notified in writing that you have violated any of these terms, or done anything with the software not covered by your licenses, your licenses can nonetheless continue if you come into full compliance with these terms, and take practical steps to correct past violations, within 32 days of receiving notice.  Otherwise, all your licenses end immediately.
+## 6. Name and logo
 
-## No Liability
+This licence does not grant any right to use the names "KopiTehnik", "KopiTehnik Print", "PhotoCrop" or their logos, except to refer truthfully to the unmodified Software. A modified version must not use these names or logos and must not be presented as made or approved by the Licensor.
 
-***As far as the law allows, the software comes as is, without any warranty or condition, and the licensor will not be liable to you for any damages arising out of these terms or the use or nature of the software, under any kind of legal claim.***
+## 7. Licence notices and limits
 
-## Definitions
+7.1. You may not remove, disable, circumvent or falsify any licence notice, licence key check, print counter or volume limit of the Software, or help others do so, including in a modified version for your own use.
 
-The **licensor** is the individual or entity offering these terms, and the **software** is the software the licensor makes available under these terms.
+7.2. Nothing in this licence restricts rights that the applicable law gives you and that cannot be excluded by contract (for example, rights to make a backup copy, to observe and study the program, or to decompile it for interoperability), or rights you have under the licences of third-party components listed in section 11 (for example, the right under the GNU LGPL to replace and modify LGPL libraries and to reverse-engineer for debugging such modifications).
 
-**You** refers to the individual or entity agreeing to these terms.
+## 8. No warranty
 
-**Your company** is any legal entity, sole proprietorship, or other kind of organization that you work for, plus all organizations that have control over, are under the control of, or are under common control with that organization.  **Control** means ownership of substantially all the assets of an entity, or the power to direct its management and policies by vote, contract, or otherwise.  Control can be direct or indirect.
+TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW, THE SOFTWARE IS PROVIDED "AS IS" AND "AS AVAILABLE", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, ACCURACY OF COLOURS, CROPPING OR PRINT OUTPUT, AND NON-INFRINGEMENT. YOU ARE RESPONSIBLE FOR CHECKING EACH PRINT AND FOR YOUR PAPER, INK AND PRINTER COSTS.
 
-**Your licenses** are all the licenses granted to you for the software under these terms.
+## 9. Limitation of liability
 
-**Use** means anything you do with the software requiring one of your licenses.
+9.1. TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW, THE LICENSOR IS NOT LIABLE FOR ANY INDIRECT, INCIDENTAL, SPECIAL OR CONSEQUENTIAL DAMAGES, LOST PROFITS OR REVENUE, LOST DATA, WASTED MATERIALS, OR BUSINESS INTERRUPTION, ARISING FROM THE SOFTWARE OR THIS LICENCE, EVEN IF ADVISED OF THEIR POSSIBILITY.
 
----
+9.2. For the free licence, the Licensor's total liability is limited to the amount you paid for the Software, which is zero. For a paid licence, the limit is set in the commercial agreement.
 
-Required Notice: Copyright 2026 Ildar Gaisin (https://github.com/ildargiv/KopiTehnik-Print)
+9.3. Nothing in this licence limits liability that cannot be limited under applicable law, including liability for intent or gross negligence, for death or personal injury, or mandatory consumer rights.
+
+## 10. Your content and AI features
+
+You are responsible for having the rights to the photos and documents you print and for the privacy of your customers. The Software processes images locally; optional AI models are downloaded from their publishers on your request. If you connect the Software to a third-party AI service, that service's terms apply.
+
+## 11. Third-party components
+
+The Software uses third-party libraries and models that are licensed by their owners under their own licences, and this licence does not change those licences. The main components are listed in requirements.txt and keep the licences of their authors. Where a third-party licence gives you more rights for that component (for example the GNU LGPL for Qt / PySide6), those rights apply to that component.
+
+## 12. Earlier versions (PolyForm Noncommercial)
+
+12.1. Versions of the Software released before 2026-10-22 were released under the PolyForm Noncommercial License 1.0.0 (https://polyformproject.org/licenses/noncommercial/1.0.0). That licence remains in effect for those versions as it was granted.
+
+12.2. In addition, the Licensor offers those earlier versions under this licence. For each earlier version you may choose to use it under the PolyForm Noncommercial License 1.0.0 **or** under this licence. Each licence then applies only on its own terms; you may not combine permissions from both (for example, the PolyForm permission to distribute changes does not extend this licence's Commercial Use permission to modified versions).
+
+12.3. Versions released under this licence are not available under the PolyForm Noncommercial License.
+
+## 13. Termination
+
+13.1. If you breach this licence, your licence ends automatically. If the Licensor notifies you of the breach and you stop it and fix its consequences (including obtaining any missing commercial licence) within 30 days after the notice, your licence is reinstated. This reinstatement applies only once; after a second breach your licence ends without reinstatement unless the Licensor agrees in writing.
+
+13.2. Sections 1, 5.3 (contributions), 6, 8, 9, 13, 14 and 15 survive termination.
+
+## 14. Governing law and disputes
+
+14.1. This licence is governed by the laws of the Russian Federation, without regard to conflict-of-law rules. The United Nations Convention on Contracts for the International Sale of Goods does not apply.
+
+14.2. Disputes will be decided by the courts of Yoshkar-Ola, Russian Federation, unless the Licensor chooses to bring a claim in the courts of the place where you are located. If you are a consumer, this does not take away the protection of mandatory laws or the courts of your country of residence.
+
+## 15. General
+
+15.1. **Changes.** The Licensor may publish new versions of this licence. A new version applies only to versions of the Software released with it; it does not change the licence of a copy you already have.
+
+15.2. **Language.** This English text is the binding version. Translations are provided for convenience.
+
+15.3. **Severability.** If any provision is found unenforceable, it will be limited to the minimum extent necessary and the rest remains in effect.
+
+15.4. **Entire licence.** This licence, together with any commercial licence you sign, is the entire agreement about the Software. Other rights are reserved by the Licensor.

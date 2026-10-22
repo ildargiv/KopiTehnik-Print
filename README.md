@@ -1,10 +1,23 @@
 **English** | [Русский](README.ru.md) | [Español](README.es.md) | [简体中文](README.zh-CN.md) | [繁體中文](README.zh-Hant.md) | [Deutsch](README.de.md) | [Français](README.fr.md) | [Português](README.pt.md) | [日本語](README.ja.md) | [한국어](README.ko.md) | [Türkçe](README.tr.md) | [Bahasa Indonesia](README.id.md) | [العربية](README.ar.md) | [हिन्दी](README.hi.md) | [Italiano](README.it.md) | [Polski](README.pl.md) | [Українська](README.uk.md) | [Tiếng Việt](README.vi.md) | [ไทย](README.th.md) | [Татарча](README.tt.md)
 
-# PhotoCrop (КопиТехник PRINT)
+# KopiTehnik Print
 
-A Windows program for cropping and printing photos (10×15 cm and other formats), with smart cropping, colour correction, colour profiles, print layout and an AI-agent mode.
+**Photo quality on compatible ink.** Print software for Windows: accurate colour, borderless printing, smart cropping and order preparation for small copy centers, photo desks and professional printers. Every print costs less.
 
-**License: [PolyForm Noncommercial 1.0.0](LICENSE): free for personal and non-commercial use; commercial use needs the author's permission.**
+**Free, legal, no cracks, no malware.** Free for personal use and for a single workstation: copy shop, studio, workshop or independent printer. [Download for Windows](https://github.com/ildargiv/KopiTehnik-Print/releases/latest) · 20 interface languages · no Python needed
+
+## Why KopiTehnik Print
+
+- **Colour as on screen.** Printing through the printer's ICC profile for natural colours without manual guesswork.
+- **A profile for your ink.** Compatible ink and paper change the colour. Do not rebuild the profile from scratch: correct the one you have and verify it with a test sheet.
+- **Exact borderless printing.** The photo is not cropped more than needed, with less waste of paper and ink on bad prints.
+- **Prepared for inkjet printing.** Automatic brightness, contrast and shadow tuning so photos print brighter.
+- **Smart cropping.** Faces, people and animals stay in the frame, so important moments are not cut off.
+- **Connect your own AI agent.** It takes the customer's order, prepares the photos and prints through KopiTehnik Print: your agent handles the conversation and the orders, the program does the preparation and printing.
+- **Photos and documents in one window**: PDF, Word, Excel, PowerPoint, a separate profile for every printer.
+- **Sheet counter** by printer and paper size, password protected, CSV export.
+
+License: free for personal use and for a business with one workstation at one location; more workstations, chains and resale need a commercial licence. See [LICENSE](LICENSE).
 
 ## Screenshots
 
@@ -74,4 +87,4 @@ Command line: `python photo_crop.py agent set_format format=10x15`; `python phot
 
 ## License
 
-License: [PolyForm Noncommercial 1.0.0](LICENSE): free for personal and non-commercial use; commercial use needs the author's permission.
+License: [KopiTehnik Print Licence](LICENSE): free for personal use and for a business with one workstation at one location; more workstations, chains and resale need a commercial licence.

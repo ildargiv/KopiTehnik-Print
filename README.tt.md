@@ -4,7 +4,7 @@
 
 Windows өчен программа: фотоларны кадрлау һәм бастыру (10×15 см һәм башка форматлар), акыллы кадрлау, төс төзәтү, төс профильләре, басма урнаштыру һәм ИИ-агент режимы.
 
-**License: [PolyForm Noncommercial 1.0.0](LICENSE)**
+**License: [KopiTehnik Print Licence](LICENSE)**
 
 ## Screenshots
 
@@ -68,4 +68,4 @@ YuNet / YOLOX модельләре (~36 МБ) репозиторийга кер�
 
 ## Лицензия
 
-License: [PolyForm Noncommercial 1.0.0](LICENSE)
+License: [KopiTehnik Print Licence](LICENSE)

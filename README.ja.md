@@ -4,7 +4,7 @@
 
 写真のトリミングと印刷（10×15 cmほか各種サイズ）を行う Windows 用プログラム。スマートトリミング、色補正、カラープロファイル、印刷レイアウト、AI エージェントモードを備えています。
 
-**License: [PolyForm Noncommercial 1.0.0](LICENSE)**
+**License: [KopiTehnik Print Licence](LICENSE)**
 
 ## Screenshots
 
@@ -68,4 +68,4 @@ YuNet / YOLOX モデル（約 36 MB）はリポジトリに含まれません。
 
 ## ライセンス
 
-License: [PolyForm Noncommercial 1.0.0](LICENSE)
+License: [KopiTehnik Print Licence](LICENSE)
