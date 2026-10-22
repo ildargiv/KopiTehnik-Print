@@ -4119,8 +4119,8 @@ RELEASES_API = "https://api.github.com/repos/ildargiv/KopiTehnik-Print/releases/
 RELEASES_PAGE = "https://github.com/ildargiv/KopiTehnik-Print/releases/latest"
 GITHUB_URL = "https://github.com/ildargiv/KopiTehnik-Print"
 AUTHOR = "Ildar Gaisin (Гайсин Ильдар)"
-LICENSE_TEXT = "Лицензия: PolyForm Noncommercial 1.0.0. Бесплатно для личного и некоммерческого использования; для коммерческого нужно разрешение автора."
-LICENSE_URL = "https://polyformproject.org/licenses/noncommercial/1.0.0"
+LICENSE_TEXT = "Лицензия: KopiTehnik Print Licence 1.0. Бесплатно для личного использования и для одного рабочего места; несколько рабочих мест и сети по договорённости с автором."
+LICENSE_URL = "https://github.com/ildargiv/KopiTehnik-Print/blob/main/LICENSE"
 
 
 import updater                                                   # noqa: E402
@@ -6381,7 +6381,7 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
             if f.suffix.lower() in pc.EXTS and f.is_file() and f not in new:
                 new.append(f)
         if not pc.HEIC_OK and any(Path(q).suffix.lower() in (".heic", ".heif") for q in paths):
-            info(self, "Для снимков HEIC нужна библиотека pillow-heif.\nВыполните в командной строке:  pip install pillow-heif\nи запустите программу заново.")
+            info(self, "Для снимков HEIC нужна библиотека pi-heif.\nВыполните в командной строке:  pip install pillow-heif\nи запустите программу заново.")
         if not new:
             if pc.HEIC_OK or not any(Path(q).suffix.lower() in (".heic", ".heif") for q in paths):
                 info(self, "Среди выбранных нет поддерживаемых фотографий (JPG, PNG, TIFF, BMP, WEBP, HEIC).")
@@ -8643,7 +8643,7 @@ pc.EN.update({
     "Выбрать файл профиля": "Choose a profile file", "Способ рендеринга": "Rendering intent",
     "Применять профиль принтера при сохранении": "Apply the printer profile when saving", "Цветовой профиль принтера": "Printer colour profile",
     "Анимация отправки на печать и сохранения": "Animate sending to print and saving", "Язык интерфейса": "Interface language",
-    "О программе": "About", "Программа-агент": "Agent application", "Подключить": "Connect", "Скопировать настройку": "Copy settings", "Адрес для HTTP-клиентов": "Address for HTTP clients", "Настройка скопирована в буфер обмена.": "The settings were copied to the clipboard.", "Автор": "Author", "Версия": "Version", "Лицензия: PolyForm Noncommercial 1.0.0. Бесплатно для личного и некоммерческого использования; для коммерческого нужно разрешение автора.": "Licence: PolyForm Noncommercial 1.0.0. Free for personal and non-commercial use; commercial use needs the author's permission.", "Текст лицензии": "Licence text",
+    "О программе": "About", "Программа-агент": "Agent application", "Подключить": "Connect", "Скопировать настройку": "Copy settings", "Адрес для HTTP-клиентов": "Address for HTTP clients", "Настройка скопирована в буфер обмена.": "The settings were copied to the clipboard.", "Автор": "Author", "Версия": "Version", "Лицензия: KopiTehnik Print Licence 1.0. Бесплатно для личного использования и для одного рабочего места; несколько рабочих мест и сети по договорённости с автором.": "Licence: KopiTehnik Print Licence 1.0. Free for personal use and for one workstation; several workstations and networks by agreement with the author.", "Текст лицензии": "Licence text",
     "Страница на GitHub": "Project page on GitHub", "Все выпуски": "All releases", "Сообщить об ошибке": "Report a problem",
     
     "Спрашивать подтверждение обычных действий (сброс, применение ко всем, печать)": "Ask for confirmation of everyday actions (reset, apply to all, print)",

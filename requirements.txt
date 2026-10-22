@@ -1,5 +1,5 @@
 Pillow
-pillow-heif
+pi-heif
 numpy
 opencv-python
 onnxruntime

@@ -88,8 +88,11 @@ ORIENTS = {"Авто (по фото)": None, "Книжная": "portrait", "Ал
 MODES = {"Кадрировать (заполнить лист)": "crop", "Вписать целиком (белые поля)": "fit"}
 FILETYPES = {"JPEG": ".jpg", "PNG": ".png", "TIFF": ".tif"}
 EXTS = {".jpg", ".jpeg", ".jpe", ".png", ".tif", ".tiff", ".bmp", ".webp"}
-try:                                  # снимки с iPhone (HEIC/HEIF): нужна библиотека pillow-heif
-    import pillow_heif
+try:                                  # снимки с iPhone (HEIC/HEIF): нужна библиотека pi-heif
+    try:                              # pi-heif: только декодер (LGPL); pillow-heif в Windows-колёсах несёт GPL-кодировщик x265
+        import pi_heif as pillow_heif
+    except ImportError:
+        import pillow_heif
     pillow_heif.register_heif_opener()
     EXTS |= {".heic", ".heif"}
     HEIC_OK = True

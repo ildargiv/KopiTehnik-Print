@@ -2,7 +2,7 @@
 setlocal EnableExtensions
 rem ============================================================
 rem  PhotoCrop - automatic setup on a new Windows PC
-rem  Installs: Python 3.12 (if missing), Pillow, pillow-heif,
+rem  Installs: Python 3.12 (if missing), Pillow, pi-heif,
 rem  PySide6 (window), numpy / opencv / onnxruntime (Smart frame),
 rem  downloads detection models (~42 MB), creates desktop shortcuts.
 rem  Run: double-click. Internet is required. Admin rights are NOT needed.
@@ -74,8 +74,8 @@ if errorlevel 1 echo       (pip was not updated - continuing)
 
 rem ---------- 3. core packages
 echo.
-echo [3/6] Installing the main components: Pillow, pillow-heif, PySide6 (about 200 MB, may take a few minutes) ...
-"%PY%" -m pip install --disable-pip-version-check --upgrade pillow pillow-heif PySide6 >>"%LOG%" 2>&1
+echo [3/6] Installing the main components: Pillow, pi-heif, PySide6 (about 200 MB, may take a few minutes) ...
+"%PY%" -m pip install --disable-pip-version-check --upgrade pillow pi-heif PySide6 >>"%LOG%" 2>&1
 if errorlevel 1 goto :pipfail
 echo       done.
 
@@ -103,7 +103,7 @@ echo.
 echo [5/6] Checking the installation ...
 "%PY%" -c "import PIL, PySide6; print('       Pillow', PIL.__version__, '| PySide6', PySide6.__version__)" 2>>"%LOG%"
 if errorlevel 1 goto :pipfail
-"%PY%" -c "import pillow_heif; print('       HEIC/HEIF (iPhone): OK')" 2>>"%LOG%"
+"%PY%" -c "import pi_heif; print('       HEIC/HEIF (iPhone): OK')" 2>>"%LOG%"
 if errorlevel 1 echo       HEIC/HEIF: not available (iPhone photos will not open)
 if "%SMART%"=="1" "%PY%" -c "import numpy, cv2, onnxruntime as o; print('       Smart frame: OK,', ', '.join(o.get_available_providers()))" 2>>"%LOG%"
 if "%SMART%"=="1" if errorlevel 1 echo       Smart frame: not available
