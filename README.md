@@ -1,10 +1,18 @@
 **English** | [Русский](README.ru.md) | [Español](README.es.md) | [简体中文](README.zh-CN.md) | [繁體中文](README.zh-Hant.md) | [Deutsch](README.de.md) | [Français](README.fr.md) | [Português](README.pt.md) | [日本語](README.ja.md) | [한국어](README.ko.md) | [Türkçe](README.tr.md) | [Bahasa Indonesia](README.id.md) | [العربية](README.ar.md) | [हिन्दी](README.hi.md) | [Italiano](README.it.md) | [Polski](README.pl.md) | [Українська](README.uk.md) | [Tiếng Việt](README.vi.md) | [ไทย](README.th.md) | [Татарча](README.tt.md)
 
-# PhotoCrop (КопиТехник PRINT)
+# KopiTehnik Print
 
-A Windows program for cropping and printing photos (10×15 cm and other formats), with smart cropping, colour correction, colour profiles, print layout and an AI-agent mode.
+**Print software for small copy centers and photo desks.** Customer photos and documents to paper in a minute: smart crop to any format, colour matched to your printer, PDF/Word/Excel/PowerPoint printing, and a tamper-evident sheet counter.
 
-**License: [PolyForm Noncommercial 1.0.0](LICENSE): free for personal and non-commercial use; commercial use needs the author's permission.**
+**Free, legal, no cracks, no malware.** A modern alternative to cracked photo-print tools: free for personal use and for a business with one workstation. [Download for Windows](https://github.com/ildargiv/KopiTehnik-Print/releases/latest) · 20 interface languages · no Python needed
+
+- **One window for photo and document jobs**, each with its own printer profile and paper.
+- **Fast orders**: 10×15 cm to A2, up to 30 photos per sheet, automatic orientation, pre-flight check (dpi, fit).
+- **Colour you can trust**: per-photo corrections, printer ICC profiles, printer correction, borderless edge test.
+- **Know your numbers**: sheets printed per day, by printer and paper size, CSV export, admin password.
+- **AI helper (optional)**: every step is a JSON command, and an MCP server lets Claude Desktop prepare and print a customer's folder.
+
+License: free for personal use and for a business with one workstation at one location; more workstations, chains and resale need a commercial licence. See [LICENSE](LICENSE).
 
 ## Screenshots
 
@@ -74,4 +82,4 @@ Command line: `python photo_crop.py agent set_format format=10x15`; `python phot
 
 ## License
 
-License: [PolyForm Noncommercial 1.0.0](LICENSE): free for personal and non-commercial use; commercial use needs the author's permission.
+License: [KopiTehnik Print Free-Use License](LICENSE) (draft): free for personal use and for a business with one workstation at one location; more workstations, chains and resale need a commercial licence.
