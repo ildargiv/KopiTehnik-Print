@@ -6802,6 +6802,13 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         self.cm_changed()
 
     def cm_changed(self):
+        icc = self.s["icc"].strip()
+        if not getattr(self, "_prof_lock", False) and icc != getattr(self, "_pc_icc", icc) and pcr.norm(self.s["pcorr"]) != pcr.default():
+            on = self.s["pcorr"]["on"]                       # другой файл ICC: поправка к прежнему профилю не подходит
+            self.s["pcorr"] = pcr.default()
+            self.s["pcorr"]["on"] = on
+            self.pcorr_sync()
+        self._pc_icc = icc
         self.profile_save()
         self._icc_info()
         self.refresh_proof()
@@ -8928,7 +8935,17 @@ def selftest(app):
             win.profile_apply()
             if win.s["pcorr"]["tone"]["mids"][0] != -7:
                 raise RuntimeError("поправка не переключилась вместе с профилем второго формата")
+            win.cm_changed()                                      # тот же ICC: поправка на месте
+            win.s["icc"] = "другой_профиль.icc"                   # другой файл ICC: поправка обнуляется, переключатель остаётся
+            win.cm_changed()
+            if not pcr.is_neutral(win.s["pcorr"]) or not win.s["pcorr"]["on"] or win._pc_rows[0][0].value() != 0:
+                raise RuntimeError("при смене файла ICC поправка должна обнулиться: %r" % win.s["pcorr"])
+            if pcr.norm(win._profiles()[win.profile_key()]["pcorr"])["tone"]["mids"][0] != 0:
+                raise RuntimeError("обнулённая поправка не сохранилась в профиле печати")
         finally:
+            win.s["icc"] = ""
+            win._pc_icc = ""
+
             win.pr["printer"], win.s["format"] = old_pr, old_fmt
             win.settings["print_profiles"] = old_profs
             win.s["pcorr"] = pcr.default()
