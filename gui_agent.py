@@ -37,7 +37,7 @@ GUI_SPEC = {
                 [("level", "integer", "1 = Enhance, 2 = Super (default 1)."),
                  ("photo", "any", "Photo ref, list of refs, \"all\" or \"checked\". Default: the current photo.")]),
     "auto_levels": ("«Auto» in the levels editor: stretch levels of the current photo to the edges of its histogram.", []),
-    "printer_correction": ("Printer correction: a soft colour adjustment applied only when printing (after the printer profile, with or without it) "
+    "printer_correction": ("Printer correction: a soft colour adjustment applied only when printing photos and documents (after the printer profile, with or without it) "
                            "to match the print to the screen. It is stored per printer + sheet size + paper type and is never shown on screen. "
                            "Without arguments it only reads the current values.",
                            [("on", "boolean", "Switch the correction on or off for the current paper."),

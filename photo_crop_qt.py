@@ -4390,6 +4390,8 @@ class DocMixin:
         total = len(pages) * d["copies"]
         text = "%s\n%s: %s\n%s: %s, %s: %d\n%s: %d" % (self.doc["src"].name, tr("Принтер"), pr["printer"], tr("Бумага"), d["paper"],
                                                        tr("копий"), d["copies"], tr("Листов к печати"), total)
+        if pcr.active(self.s["pcorr"]):
+            text += "\n" + tr("Поправка принтера: включена")
         if cm:
             text += "\n%s: %s" % (tr("Профиль принтера"), cm["name"])
         if SOFT[0] and not ask(self, text + "\n\n" + tr("Начать печать?")):
@@ -4402,7 +4404,8 @@ class DocMixin:
         self.b_print.set_progress(0.0)
         self.b_cancel.show()
         job = dict(printer=pr["printer"], blob=blob, geom=geom, ppi=ppi, pages=pages, copies=d["copies"], fit=d["fit"], margin=margin,
-                   cm=cm, pdf=str(pdf), name=name, paper=d["paper"], total=total)
+                   cm=cm, pdf=str(pdf), name=name, paper=d["paper"], total=total,
+                   pcorr=pcr.norm(self.s["pcorr"]) if pcr.active(self.s["pcorr"]) else None)
 
         def work():
             try:
@@ -4442,6 +4445,8 @@ class DocMixin:
                     sheet.paste(im, (px, py), im)
                     if j["cm"]:
                         sheet = pc.apply_printer_profile(sheet, None, j["cm"])
+                    if j.get("pcorr"):                           # поправка принтера: после профиля, как и у фото
+                        sheet = pcr.apply(sheet, j["pcorr"])
                     job.page(sheet)
                     sent += 1
                     self.sig.progress.emit(sent - 1, j["total"], "\x01" + tr("Отправляю в печать страницу") + " %d…" % (pi + 1))
@@ -5266,7 +5271,7 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
             b.setStyleSheet("padding:6px 5px;")
         self.l_pcorr = lbl("", "muted", wrap=True)
         body = vbox(
-            hint("Подгоняет отпечаток под экран. На экране не видна, действует только при печати, с профилем принтера и без него."),
+            hint("Подгоняет отпечаток под экран. На экране не видна, действует только при печати фото и документов, с профилем принтера и без него."),
             lbl("Нейтраль (серый)", "muted"), self.seg_pc_zone,
             self._pc_slider("Тепло", tone_get(0), tone_set(0), "холоднее", "теплее"),
             self._pc_slider("Пурпур", tone_get(1), tone_set(1), "зеленее", "пурпурнее"),
@@ -8517,7 +8522,7 @@ pc.EN.update({
     "Кривые: перетаскивайте точки, результат сразу виден в главном окне. Канал RGB меняет все цвета, R, G, B — по одному.": "Curves: drag the points, the result shows at once in the main window. RGB changes all colours; R, G, B one at a time.",
     "Красный": "Red", "Жёлтый": "Yellow", "Зелёный": "Green", "Голубой": "Cyan", "Синий": "Blue", "Пурпурный": "Magenta",
     "Поправка принтера": "Printer correction", "Включить для этой бумаги": "Enable for this paper",
-    "Подгоняет отпечаток под экран. На экране не видна, действует только при печати, с профилем принтера и без него.": "Matches the print to the screen. Not shown on screen, applied only when printing, with or without a printer profile.",
+    "Подгоняет отпечаток под экран. На экране не видна, действует только при печати фото и документов, с профилем принтера и без него.": "Matches the print to the screen. Not shown on screen, applied only when printing photos and documents, with or without a printer profile.",
     "Нейтраль (серый)": "Neutral (grey)", "По цветам": "By colour", "Общее": "General", "Тени": "Shadows", "Средние": "Midtones", "Света": "Highlights",
     "Тепло": "Warmth", "Пурпур": "Magenta", "Оттенок": "Hue", "Насыщ.": "Sat.", "Яркость": "Brightness", "Гамма": "Gamma", "Цвета": "Colours",
     "холоднее": "cooler", "теплее": "warmer", "зеленее": "greener", "пурпурнее": "more magenta", "темнее": "darker", "светлее": "lighter", "бледнее": "paler", "ярче": "more vivid",
