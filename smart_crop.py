@@ -1173,8 +1173,15 @@ def load_for_detection(path, rotation=0, max_side=1600):
     if ori in (5, 6, 7, 8):
         W0, H0 = H0, W0
     if rotation:
-        im = im.rotate(-rotation, expand=True)
-        if rotation in (90, 270):
+        rot = int(rotation)
+        if (rot // 360) % 2:                                # зеркалирование (см. photo_crop.rot_make)
+            im = ImageOps.mirror(im)
+        if (rot // 720) % 2:
+            im = ImageOps.flip(im)
+        d = rot % 360
+        if d:
+            im = im.rotate(-d, expand=True)
+        if d in (90, 270):
             W0, H0 = H0, W0
     if im.mode != "RGB":
         im = im.convert("RGB")

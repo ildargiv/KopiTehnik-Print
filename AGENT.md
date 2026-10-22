@@ -19,6 +19,11 @@
 Права агента задаёт человек в Настройках: печатать или нет, максимум листов за одну печать, спрашивать ли подтверждение перед печатью.
 По умолчанию права полные.
 
+**Быстрая работа:** `batch` (несколько команд за вызов), `contact_sheet` и `compare_photo` (картинки), `analyze_photos` (сводка по серии), `white_balance` (по эталону, точка или область), `set_adjust` с `relative=true`, `flip_photo` (отражение), `list_icc_profiles` (имя профиля вместо пути).
+
+**Правило владельца:** по возможности настраивайте всё вручную (`set_crop`, `set_adjust`, параметры листа и печати), а автоматику
+(`enhance`, `auto_adjust`, `auto_levels`, `auto_crop`, умная рамка) используйте только если владелец сам об этом попросил.
+
 Инструменты окна (сверх команд движка): `app_state`, `app_guide`, `open_files`, `check_photos`, `remove_unchecked`, `enhance`
 («Улучшить» и «Супер»), `auto_levels`, `color_presets` / `color_preset_save` / `color_preset_apply`, `copy_adjust` / `paste_adjust`,
 `set_layout`, `set_view`, `set_app_mode`, `add_edge_test`, `print_photos` / `print_status`, `doc_open` / `doc_info` / `doc_set` /

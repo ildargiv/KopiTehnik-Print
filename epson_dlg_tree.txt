@@ -1,0 +1,421 @@
+Control Identifiers:
+
+Dialog - 'Свойства: EPSON L8050 Series (копия 1)'    (L8, T8, R644, B571)
+['Свойства: EPSON L8050 Series (копия 1)', 'Dialog', 'Свойства: EPSON L8050 Series (копия 1)Dialog']
+child_window(title="Свойства: EPSON L8050 Series (копия 1)", class_name="#32770")
+   | 
+   | #32770 - 'Главное'    (L26, T68, R626, B523)
+   | ['#32770', 'Главное#32770', 'Главное']
+   | child_window(title="Главное", class_name="#32770")
+   |    | 
+   |    | Static - 'Источник бумаги'    (L259, T81, R379, B94)
+   |    | ['Источник бумагиStatic', 'Источник бумаги', 'Static', 'Static0', 'Static1']
+   |    | child_window(title="Источник бумаги", class_name="Static")
+   |    | 
+   |    | ComboBox - 'Заднее устройство подачи бумаги'    (L397, T79, R616, B100)
+   |    | ['ComboBox', 'Источник бумагиComboBox', 'ComboBox0', 'ComboBox1']
+   |    | child_window(title="Заднее устройство подачи бумаги", class_name="ComboBox")
+   |    | 
+   |    | Static - 'Размер документа'    (L259, T112, R379, B125)
+   |    | ['Static2', 'Размер документаStatic', 'Размер документа']
+   |    | child_window(title="Размер документа", class_name="Static")
+   |    | 
+   |    | ComboBox - '10 x 15 см (4 x 6 in)'    (L397, T107, R616, B128)
+   |    | ['Размер документаComboBox', 'ComboBox2']
+   |    | child_window(title="10 x 15 см (4 x 6 in)", class_name="ComboBox")
+   |    | 
+   |    | CheckBox - 'Минимальные поля'    (L397, T138, R534, B151)
+   |    | ['Минимальные поля', 'CheckBox', 'Минимальные поляCheckBox', 'CheckBox0', 'CheckBox1']
+   |    | child_window(title="Минимальные поля", class_name="Button")
+   |    | 
+   |    | CheckBox - 'Без полей'    (L397, T138, R481, B151)
+   |    | ['Без полей', 'CheckBox2', 'Без полейCheckBox']
+   |    | child_window(title="Без полей", class_name="Button")
+   |    | 
+   |    | Button - 'Настройки...'    (L496, T133, R616, B157)
+   |    | ['Button', 'Настройки...Button', 'Настройки...', 'Button0', 'Button1', 'Настройки...Button0', 'Настройки...Button1', 'Настройки...0', 'Настройки...1']
+   |    | child_window(title="Настройки...", class_name="Button")
+   |    | 
+   |    | Static - 'Ориентация'    (L259, T161, R324, B174)
+   |    | ['ОриентацияStatic', 'Ориентация', 'Static3']
+   |    | child_window(title="Ориентация", class_name="Static")
+   |    | 
+   |    | RadioButton - 'Книжная'    (L397, T161, R469, B174)
+   |    | ['КнижнаяRadioButton', 'RadioButton', 'Книжная', 'RadioButton0', 'RadioButton1']
+   |    | child_window(title="Книжная", class_name="Button")
+   |    | 
+   |    | RadioButton - 'Альбомная'    (L482, T161, R562, B174)
+   |    | ['Альбомная', 'АльбомнаяRadioButton', 'RadioButton2']
+   |    | child_window(title="Альбомная", class_name="Button")
+   |    | 
+   |    | Static - 'Тип бумаги'    (L259, T193, R318, B206)
+   |    | ['Тип бумагиStatic', 'Тип бумаги', 'Static4']
+   |    | child_window(title="Тип бумаги", class_name="Static")
+   |    | 
+   |    | ComboBox - 'Глянцевая фотобумага '    (L397, T190, R616, B211)
+   |    | ['ComboBox3', 'Тип бумагиComboBox', 'КнижнаяComboBox', 'КнижнаяComboBox0', 'КнижнаяComboBox1']
+   |    | child_window(title="Глянцевая фотобумага ", class_name="ComboBox")
+   |    | 
+   |    | Static - 'Качество'    (L259, T219, R327, B232)
+   |    | ['Static5', 'КачествоStatic', 'Качество']
+   |    | child_window(title="Качество", class_name="Static")
+   |    | 
+   |    | ComboBox - 'Стандартный'    (L397, T218, R616, B239)
+   |    | ['ComboBox4', 'КнижнаяComboBox2', 'КачествоComboBox']
+   |    | child_window(title="Стандартный", class_name="ComboBox")
+   |    | 
+   |    | Static - 'Цветной'    (L259, T245, R306, B258)
+   |    | ['Static6', 'ЦветнойStatic', 'Цветной', 'Цветной0', 'Цветной1', 'ЦветнойStatic0', 'ЦветнойStatic1']
+   |    | child_window(title="Цветной", class_name="Static")
+   |    | 
+   |    | RadioButton - 'Цветной'    (L397, T245, R472, B258)
+   |    | ['ЦветнойRadioButton', 'RadioButton3', 'Цветной2']
+   |    | child_window(title="Цветной", class_name="Button")
+   |    | 
+   |    | RadioButton - 'Оттенки серого'    (L482, T245, R593, B258)
+   |    | ['Оттенки серогоRadioButton', 'RadioButton4', 'Оттенки серого']
+   |    | child_window(title="Оттенки серого", class_name="Button")
+   |    | 
+   |    | Static - ''    (L254, T266, R614, B268)
+   |    | ['ЦветнойStatic2', 'Static7']
+   |    | child_window(class_name="Static")
+   |    | 
+   |    | Static - 'Двусторонняя печать'    (L259, T279, R384, B294)
+   |    | ['Двусторонняя печать', 'Двусторонняя печатьStatic', 'Static8']
+   |    | child_window(title="Двусторонняя печать", class_name="Static")
+   |    | 
+   |    | ComboBox - 'Выключить'    (L397, T276, R616, B297)
+   |    | ['ComboBox5', 'Двусторонняя печатьComboBox']
+   |    | child_window(title="Выключить", class_name="ComboBox")
+   |    | 
+   |    | Button - 'Настройки...'    (L376, T307, R484, B331)
+   |    | ['Button2', 'Настройки...Button2', 'Настройки...2']
+   |    | child_window(title="Настройки...", class_name="Button")
+   |    | 
+   |    | Button - 'Плотность печати...'    (L487, T307, R615, B331)
+   |    | ['Плотность печати...', 'Button3', 'Плотность печати...Button', 'Плотность печати...0', 'Плотность печати...1', 'Плотность печати...Button0', 'Плотность печати...Button1']
+   |    | child_window(title="Плотность печати...", class_name="Button")
+   |    | 
+   |    | Button - 'Плотность печати...'    (L487, T307, R615, B331)
+   |    | ['Плотность печати...2', 'Button4', 'Плотность печати...Button2']
+   |    | child_window(title="Плотность печати...", class_name="Button")
+   |    | 
+   |    | Static - 'Многостр'    (L259, T354, R366, B367)
+   |    | ['МногострStatic', 'Многостр', 'Static9', 'МногострStatic0', 'МногострStatic1', 'Многостр0', 'Многостр1']
+   |    | child_window(title="Многостр", class_name="Static")
+   |    | 
+   |    | Static - 'Многостр'    (L259, T354, R366, B367)
+   |    | ['МногострStatic2', 'Многостр2', 'Static10']
+   |    | child_window(title="Многостр", class_name="Static")
+   |    | 
+   |    | ComboBox - 'Выключить'    (L394, T351, R489, B372)
+   |    | ['ComboBox6', 'МногострComboBox']
+   |    | child_window(title="Выключить", class_name="ComboBox")
+   |    | 
+   |    | Button - 'Поряд. макета...'    (L496, T349, R616, B373)
+   |    | ['Поряд. макета...Button', 'Button5', 'Поряд. макета...']
+   |    | child_window(title="Поряд. макета...", class_name="Button")
+   |    | 
+   |    | Button - 'Настройки...'    (L496, T349, R616, B373)
+   |    | ['Button6', 'Настройки...Button3', 'Настройки...3']
+   |    | child_window(title="Настройки...", class_name="Button")
+   |    | 
+   |    | Static - ''    (L254, T383, R614, B385)
+   |    | ['МногострStatic3', 'Static11']
+   |    | child_window(class_name="Static")
+   |    | 
+   |    | Static - 'Копии'    (L259, T400, R297, B413)
+   |    | ['Копии', 'КопииStatic', 'Static12', 'КопииStatic0', 'КопииStatic1']
+   |    | child_window(title="Копии", class_name="Static")
+   |    | 
+   |    | Edit - '1'    (L319, T396, R363, B416)
+   |    | ['КопииEdit', 'Edit']
+   |    | child_window(title="1", class_name="Edit")
+   |    | 
+   |    | UpDown - ''    (L361, T396, R379, B416)
+   |    | ['МногострUpDown', 'UpDown']
+   |    | child_window(class_name="msctls_updown32")
+   |    | 
+   |    | CheckBox - 'Подбор'    (L397, T393, R454, B406)
+   |    | ['Подбор', 'CheckBox3', 'ПодборCheckBox']
+   |    | child_window(title="Подбор", class_name="Button")
+   |    | 
+   |    | CheckBox - 'Обратный порядок'    (L397, T416, R525, B429)
+   |    | ['Обратный порядок', 'CheckBox4', 'Обратный порядокCheckBox']
+   |    | child_window(title="Обратный порядок", class_name="Button")
+   |    | 
+   |    | Static - ''    (L254, T435, R614, B437)
+   |    | ['КопииStatic2', 'Static13']
+   |    | child_window(class_name="Static")
+   |    | 
+   |    | Static - 'Тихий режим'    (L260, T448, R352, B461)
+   |    | ['Тихий режим', 'Тихий режимStatic', 'Static14']
+   |    | child_window(title="Тихий режим", class_name="Static")
+   |    | 
+   |    | ComboBox - 'Выключить'    (L394, T445, R546, B466)
+   |    | ['ComboBox7', 'Обратный порядокComboBox', 'Тихий режимComboBox']
+   |    | child_window(title="Выключить", class_name="ComboBox")
+   |    | 
+   |    | CheckBox - 'Просмотр'    (L358, T473, R450, B486)
+   |    | ['Просмотр', 'ПросмотрCheckBox', 'CheckBox5']
+   |    | child_window(title="Просмотр", class_name="Button")
+   |    | 
+   |    | CheckBox - 'Упрощенный организатор заданий'    (L358, T492, R573, B505)
+   |    | ['CheckBox6', 'Упрощенный организатор заданий', 'Упрощенный организатор заданийCheckBox']
+   |    | child_window(title="Упрощенный организатор заданий", class_name="Button")
+   |    | 
+   |    | Static - ''    (L394, T473, R529, B498)
+   |    | ['Обратный порядокStatic', 'Static15']
+   |    | child_window(class_name="Static")
+   |    | 
+   |    | Button - 'Добавить/Удалить предустановки...'    (L34, T104, R243, B128)
+   |    | ['Добавить/Удалить предустановки...', 'Button7', 'Добавить/Удалить предустановки...Button']
+   |    | child_window(title="Добавить/Удалить предустановки...", class_name="Button")
+   |    | 
+   |    | Static - 'Предустановки печати'    (L35, T83, R185, B96)
+   |    | ['Предустановки печатиStatic', 'Предустановки печати', 'Static16']
+   |    | child_window(title="Предустановки печати", class_name="Static")
+   |    | 
+   |    | ListView - ''    (L34, T135, R243, B340)
+   |    | ['ListViewФото 10 x 15 см - альбомная', 'ListViewФото A4 - книжная', 'ListViewДокумент - стандартное качество', 'ListViewФото 10 x 15 см - книжная', 'ListViewДокумент - быстро', 'ListViewФото A4 - альбомная', 'ListViewДокумент - высокое качество', 'ListView', 'Предустановки печатиListView', 'Добавить/Удалить предустановки...ListView', 'ListViewПечать на этикетках для дисков, подходящих для печати']
+   |    | child_window(class_name="SysListView32")
+   |    |    | 
+   |    |    | Header - ''    (L36, T137, R241, B137)
+   |    |    | ['Header', 'Добавить/Удалить предустановки...Header']
+   |    |    | child_window(class_name="SysHeader32")
+   |    | 
+   |    | Header - ''    (L36, T137, R241, B137)
+   |    | ['Header', 'Добавить/Удалить предустановки...Header']
+   |    | child_window(class_name="SysHeader32")
+   |    | 
+   |    | Static - ''    (L34, T339, R243, B453)
+   |    | ['Добавить/Удалить предустановки...Static', 'Static17']
+   |    | child_window(class_name="Static")
+   |    | 
+   |    | Button - 'Показать настройки'    (L32, T463, R242, B487)
+   |    | ['Показать настройкиButton', 'Button8', 'Показать настройки']
+   |    | child_window(title="Показать настройки", class_name="Button")
+   |    | 
+   |    | Button - 'Восстановление стандартных настроек'    (L32, T492, R242, B516)
+   |    | ['Button9', 'Восстановление стандартных настроек', 'Восстановление стандартных настроекButton']
+   |    | child_window(title="Восстановление стандартных настроек", class_name="Button")
+   |    | 
+   |    | Button - 'Уровень чернил'    (L248, T492, R346, B516)
+   |    | ['Button10', 'Уровень чернилButton', 'Уровень чернил']
+   |    | child_window(title="Уровень чернил", class_name="Button")
+   | 
+   | Static - 'Источник бумаги'    (L259, T81, R379, B94)
+   | ['Источник бумагиStatic', 'Источник бумаги', 'Static', 'Static0', 'Static1']
+   | child_window(title="Источник бумаги", class_name="Static")
+   | 
+   | ComboBox - 'Заднее устройство подачи бумаги'    (L397, T79, R616, B100)
+   | ['ComboBox', 'Источник бумагиComboBox', 'ComboBox0', 'ComboBox1']
+   | child_window(title="Заднее устройство подачи бумаги", class_name="ComboBox")
+   | 
+   | Static - 'Размер документа'    (L259, T112, R379, B125)
+   | ['Static2', 'Размер документаStatic', 'Размер документа']
+   | child_window(title="Размер документа", class_name="Static")
+   | 
+   | ComboBox - '10 x 15 см (4 x 6 in)'    (L397, T107, R616, B128)
+   | ['Размер документаComboBox', 'ComboBox2']
+   | child_window(title="10 x 15 см (4 x 6 in)", class_name="ComboBox")
+   | 
+   | CheckBox - 'Минимальные поля'    (L397, T138, R534, B151)
+   | ['Минимальные поля', 'CheckBox', 'Минимальные поляCheckBox', 'CheckBox0', 'CheckBox1']
+   | child_window(title="Минимальные поля", class_name="Button")
+   | 
+   | CheckBox - 'Без полей'    (L397, T138, R481, B151)
+   | ['Без полей', 'CheckBox2', 'Без полейCheckBox']
+   | child_window(title="Без полей", class_name="Button")
+   | 
+   | Button - 'Настройки...'    (L496, T133, R616, B157)
+   | ['Button', 'Настройки...Button', 'Настройки...', 'Button0', 'Button1', 'Настройки...Button0', 'Настройки...Button1', 'Настройки...0', 'Настройки...1']
+   | child_window(title="Настройки...", class_name="Button")
+   | 
+   | Static - 'Ориентация'    (L259, T161, R324, B174)
+   | ['ОриентацияStatic', 'Ориентация', 'Static3']
+   | child_window(title="Ориентация", class_name="Static")
+   | 
+   | RadioButton - 'Книжная'    (L397, T161, R469, B174)
+   | ['КнижнаяRadioButton', 'RadioButton', 'Книжная', 'RadioButton0', 'RadioButton1']
+   | child_window(title="Книжная", class_name="Button")
+   | 
+   | RadioButton - 'Альбомная'    (L482, T161, R562, B174)
+   | ['Альбомная', 'АльбомнаяRadioButton', 'RadioButton2']
+   | child_window(title="Альбомная", class_name="Button")
+   | 
+   | Static - 'Тип бумаги'    (L259, T193, R318, B206)
+   | ['Тип бумагиStatic', 'Тип бумаги', 'Static4']
+   | child_window(title="Тип бумаги", class_name="Static")
+   | 
+   | ComboBox - 'Глянцевая фотобумага '    (L397, T190, R616, B211)
+   | ['ComboBox3', 'Тип бумагиComboBox', 'КнижнаяComboBox', 'КнижнаяComboBox0', 'КнижнаяComboBox1']
+   | child_window(title="Глянцевая фотобумага ", class_name="ComboBox")
+   | 
+   | Static - 'Качество'    (L259, T219, R327, B232)
+   | ['Static5', 'КачествоStatic', 'Качество']
+   | child_window(title="Качество", class_name="Static")
+   | 
+   | ComboBox - 'Стандартный'    (L397, T218, R616, B239)
+   | ['ComboBox4', 'КнижнаяComboBox2', 'КачествоComboBox']
+   | child_window(title="Стандартный", class_name="ComboBox")
+   | 
+   | Static - 'Цветной'    (L259, T245, R306, B258)
+   | ['Static6', 'ЦветнойStatic', 'Цветной', 'Цветной0', 'Цветной1', 'ЦветнойStatic0', 'ЦветнойStatic1']
+   | child_window(title="Цветной", class_name="Static")
+   | 
+   | RadioButton - 'Цветной'    (L397, T245, R472, B258)
+   | ['ЦветнойRadioButton', 'RadioButton3', 'Цветной2']
+   | child_window(title="Цветной", class_name="Button")
+   | 
+   | RadioButton - 'Оттенки серого'    (L482, T245, R593, B258)
+   | ['Оттенки серогоRadioButton', 'RadioButton4', 'Оттенки серого']
+   | child_window(title="Оттенки серого", class_name="Button")
+   | 
+   | Static - ''    (L254, T266, R614, B268)
+   | ['ЦветнойStatic2', 'Static7']
+   | child_window(class_name="Static")
+   | 
+   | Static - 'Двусторонняя печать'    (L259, T279, R384, B294)
+   | ['Двусторонняя печать', 'Двусторонняя печатьStatic', 'Static8']
+   | child_window(title="Двусторонняя печать", class_name="Static")
+   | 
+   | ComboBox - 'Выключить'    (L397, T276, R616, B297)
+   | ['ComboBox5', 'Двусторонняя печатьComboBox']
+   | child_window(title="Выключить", class_name="ComboBox")
+   | 
+   | Button - 'Настройки...'    (L376, T307, R484, B331)
+   | ['Button2', 'Настройки...Button2', 'Настройки...2']
+   | child_window(title="Настройки...", class_name="Button")
+   | 
+   | Button - 'Плотность печати...'    (L487, T307, R615, B331)
+   | ['Плотность печати...', 'Button3', 'Плотность печати...Button', 'Плотность печати...0', 'Плотность печати...1', 'Плотность печати...Button0', 'Плотность печати...Button1']
+   | child_window(title="Плотность печати...", class_name="Button")
+   | 
+   | Button - 'Плотность печати...'    (L487, T307, R615, B331)
+   | ['Плотность печати...2', 'Button4', 'Плотность печати...Button2']
+   | child_window(title="Плотность печати...", class_name="Button")
+   | 
+   | Static - 'Многостр'    (L259, T354, R366, B367)
+   | ['МногострStatic', 'Многостр', 'Static9', 'МногострStatic0', 'МногострStatic1', 'Многостр0', 'Многостр1']
+   | child_window(title="Многостр", class_name="Static")
+   | 
+   | Static - 'Многостр'    (L259, T354, R366, B367)
+   | ['МногострStatic2', 'Многостр2', 'Static10']
+   | child_window(title="Многостр", class_name="Static")
+   | 
+   | ComboBox - 'Выключить'    (L394, T351, R489, B372)
+   | ['ComboBox6', 'МногострComboBox']
+   | child_window(title="Выключить", class_name="ComboBox")
+   | 
+   | Button - 'Поряд. макета...'    (L496, T349, R616, B373)
+   | ['Поряд. макета...Button', 'Button5', 'Поряд. макета...']
+   | child_window(title="Поряд. макета...", class_name="Button")
+   | 
+   | Button - 'Настройки...'    (L496, T349, R616, B373)
+   | ['Button6', 'Настройки...Button3', 'Настройки...3']
+   | child_window(title="Настройки...", class_name="Button")
+   | 
+   | Static - ''    (L254, T383, R614, B385)
+   | ['МногострStatic3', 'Static11']
+   | child_window(class_name="Static")
+   | 
+   | Static - 'Копии'    (L259, T400, R297, B413)
+   | ['Копии', 'КопииStatic', 'Static12', 'КопииStatic0', 'КопииStatic1']
+   | child_window(title="Копии", class_name="Static")
+   | 
+   | Edit - '1'    (L319, T396, R363, B416)
+   | ['КопииEdit', 'Edit']
+   | child_window(title="1", class_name="Edit")
+   | 
+   | UpDown - ''    (L361, T396, R379, B416)
+   | ['МногострUpDown', 'UpDown']
+   | child_window(class_name="msctls_updown32")
+   | 
+   | CheckBox - 'Подбор'    (L397, T393, R454, B406)
+   | ['Подбор', 'CheckBox3', 'ПодборCheckBox']
+   | child_window(title="Подбор", class_name="Button")
+   | 
+   | CheckBox - 'Обратный порядок'    (L397, T416, R525, B429)
+   | ['Обратный порядок', 'CheckBox4', 'Обратный порядокCheckBox']
+   | child_window(title="Обратный порядок", class_name="Button")
+   | 
+   | Static - ''    (L254, T435, R614, B437)
+   | ['КопииStatic2', 'Static13']
+   | child_window(class_name="Static")
+   | 
+   | Static - 'Тихий режим'    (L260, T448, R352, B461)
+   | ['Тихий режим', 'Тихий режимStatic', 'Static14']
+   | child_window(title="Тихий режим", class_name="Static")
+   | 
+   | ComboBox - 'Выключить'    (L394, T445, R546, B466)
+   | ['ComboBox7', 'Обратный порядокComboBox', 'Тихий режимComboBox']
+   | child_window(title="Выключить", class_name="ComboBox")
+   | 
+   | CheckBox - 'Просмотр'    (L358, T473, R450, B486)
+   | ['Просмотр', 'ПросмотрCheckBox', 'CheckBox5']
+   | child_window(title="Просмотр", class_name="Button")
+   | 
+   | CheckBox - 'Упрощенный организатор заданий'    (L358, T492, R573, B505)
+   | ['CheckBox6', 'Упрощенный организатор заданий', 'Упрощенный организатор заданийCheckBox']
+   | child_window(title="Упрощенный организатор заданий", class_name="Button")
+   | 
+   | Static - ''    (L394, T473, R529, B498)
+   | ['Обратный порядокStatic', 'Static15']
+   | child_window(class_name="Static")
+   | 
+   | Button - 'Добавить/Удалить предустановки...'    (L34, T104, R243, B128)
+   | ['Добавить/Удалить предустановки...', 'Button7', 'Добавить/Удалить предустановки...Button']
+   | child_window(title="Добавить/Удалить предустановки...", class_name="Button")
+   | 
+   | Static - 'Предустановки печати'    (L35, T83, R185, B96)
+   | ['Предустановки печатиStatic', 'Предустановки печати', 'Static16']
+   | child_window(title="Предустановки печати", class_name="Static")
+   | 
+   | ListView - ''    (L34, T135, R243, B340)
+   | ['ListViewФото 10 x 15 см - альбомная', 'ListViewФото A4 - книжная', 'ListViewДокумент - стандартное качество', 'ListViewФото 10 x 15 см - книжная', 'ListViewДокумент - быстро', 'ListViewФото A4 - альбомная', 'ListViewДокумент - высокое качество', 'ListView', 'Предустановки печатиListView', 'Добавить/Удалить предустановки...ListView', 'ListViewПечать на этикетках для дисков, подходящих для печати']
+   | child_window(class_name="SysListView32")
+   |    | 
+   |    | Header - ''    (L36, T137, R241, B137)
+   |    | ['Header', 'Добавить/Удалить предустановки...Header']
+   |    | child_window(class_name="SysHeader32")
+   | 
+   | Header - ''    (L36, T137, R241, B137)
+   | ['Header', 'Добавить/Удалить предустановки...Header']
+   | child_window(class_name="SysHeader32")
+   | 
+   | Static - ''    (L34, T339, R243, B453)
+   | ['Добавить/Удалить предустановки...Static', 'Static17']
+   | child_window(class_name="Static")
+   | 
+   | Button - 'Показать настройки'    (L32, T463, R242, B487)
+   | ['Показать настройкиButton', 'Button8', 'Показать настройки']
+   | child_window(title="Показать настройки", class_name="Button")
+   | 
+   | Button - 'Восстановление стандартных настроек'    (L32, T492, R242, B516)
+   | ['Button9', 'Восстановление стандартных настроек', 'Восстановление стандартных настроекButton']
+   | child_window(title="Восстановление стандартных настроек", class_name="Button")
+   | 
+   | Button - 'Уровень чернил'    (L248, T492, R346, B516)
+   | ['Button10', 'Уровень чернилButton', 'Уровень чернил']
+   | child_window(title="Уровень чернил", class_name="Button")
+   | 
+   | Button - 'ОК'    (L393, T533, R468, B556)
+   | ['Button11', 'ОКButton', 'ОК']
+   | child_window(title="ОК", class_name="Button")
+   | 
+   | Button - 'Отмена'    (L474, T533, R549, B556)
+   | ['Button12', 'Отмена', 'ОтменаButton']
+   | child_window(title="Отмена", class_name="Button")
+   | 
+   | Button - 'При&менить'    (L555, T533, R630, B556)
+   | ['Button13', 'При&менить', 'При&менитьButton']
+   | child_window(title="При&менить", class_name="Button")
+   | 
+   | Button - 'Справка'    (L555, T533, R630, B556)
+   | ['Button14', 'Справка', 'СправкаButton']
+   | child_window(title="Справка", class_name="Button")
+   | 
+   | TabControl - ''    (L22, T46, R630, B527)
+   | ['TabControl', 'TabControlСервис', 'TabControlДополнительные настройки', 'TabControlГлавное', 'Предустановки печатиTabControl']
+   | child_window(class_name="SysTabControl32")
