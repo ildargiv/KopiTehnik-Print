@@ -4,7 +4,7 @@
 
 一款 Windows 照片裁切與列印程式（10×15 公分及其他規格），具備智慧裁切、色彩校正、色彩描述檔、列印排版與 AI 代理模式。
 
-**License: [PolyForm Noncommercial 1.0.0](LICENSE)**
+**License: [KopiTehnik Print Licence](LICENSE)**
 
 ## Screenshots
 
@@ -68,4 +68,4 @@ YuNet / YOLOX 模型（約 36 MB）不包含在儲存庫中；首次使用時下
 
 ## 授權條款
 
-License: [PolyForm Noncommercial 1.0.0](LICENSE)
+License: [KopiTehnik Print Licence](LICENSE)

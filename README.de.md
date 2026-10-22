@@ -4,7 +4,7 @@
 
 Ein Windows-Programm zum Zuschneiden und Drucken von Fotos (10×15 cm und weitere Formate) mit intelligentem Zuschnitt, Farbkorrektur, Farbprofilen, Druckaufteilung und KI-Agent-Modus.
 
-**License: [PolyForm Noncommercial 1.0.0](LICENSE)**
+**License: [KopiTehnik Print Licence](LICENSE)**
 
 ## Screenshots
 
@@ -68,4 +68,4 @@ Kommandozeile: `python photo_crop.py agent set_format format=10x15`; `python pho
 
 ## Lizenz
 
-License: [PolyForm Noncommercial 1.0.0](LICENSE)
+License: [KopiTehnik Print Licence](LICENSE)

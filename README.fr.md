@@ -4,7 +4,7 @@
 
 Programme Windows pour recadrer et imprimer des photos (10×15 cm et autres formats), avec recadrage intelligent, correction des couleurs, profils colorimétriques, mise en page d'impression et mode agent IA.
 
-**License: [PolyForm Noncommercial 1.0.0](LICENSE)**
+**License: [KopiTehnik Print Licence](LICENSE)**
 
 ## Screenshots
 
@@ -68,4 +68,4 @@ En ligne de commande : `python photo_crop.py agent set_format format=10x15` ; `p
 
 ## Licence
 
-License: [PolyForm Noncommercial 1.0.0](LICENSE)
+License: [KopiTehnik Print Licence](LICENSE)
