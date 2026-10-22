@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """PhotoCrop — новый интерфейс на Qt (PySide6).
 
@@ -42,7 +42,7 @@ try:
                                 QAbstractListModel, QModelIndex, QEvent, QPropertyAnimation, QEasingCurve, Property, QByteArray,
                                 QVariantAnimation)
     from PySide6.QtGui import (QPainter, QColor, QPen, QBrush, QPixmap, QImage, QIcon, QPolygonF, QPainterPath, QFont, QIntValidator, QLinearGradient, QRadialGradient, QConicalGradient, QFontMetricsF,
-                               QKeySequence, QShortcut, QFontMetrics, QTransform)
+                               QKeySequence, QShortcut, QFontMetrics, QTransform, QFontDatabase)
     from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QFrame, QLabel, QPushButton, QToolButton, QHBoxLayout,
                                    QVBoxLayout, QGridLayout, QComboBox, QLineEdit, QSlider, QRadioButton, QButtonGroup,
                                    QListView, QStyledItemDelegate, QStyle, QScrollArea, QStackedWidget, QDialog, QFileDialog,
@@ -117,6 +117,7 @@ ICONS = {
     "check_none": '<rect x="3.5" y="3.5" width="17" height="17" rx="4"/>',
     "trash": '<path d="M4.5 7h15M9.5 7V4.8h5V7M6.5 7l.9 12.2h9.2L17.5 7M10 10.5v5.5M14 10.5v5.5"/>',
     "print": '<path d="M7 8V3.8h10V8"/><rect x="3.5" y="8" width="17" height="8.5" rx="2"/><path d="M7 13.5h10v6.7H7z"/>',
+    "edit": '<path d="M4 20h4L19.2 8.8a1.9 1.9 0 0 0 0-2.7l-1.3-1.3a1.9 1.9 0 0 0-2.7 0L4 16z"/><path d="M13.5 6.5l4 4"/>',
     "save": '<path d="M5 3.8h11l3.2 3.2V19a1.2 1.2 0 0 1-1.2 1.2H5A1.2 1.2 0 0 1 3.8 19V5A1.2 1.2 0 0 1 5 3.8z"/><path d="M8 3.8v5h7v-5M7.5 20v-6.5h9V20"/>',
     "doc": '<path d="M6 3.8h8l4 4v12.4H6z"/><path d="M14 3.8V8h4M9 12h6M9 15.5h6"/>',
     "edit": '<path d="M4.5 19.5l1-4.2L15.8 5a1.8 1.8 0 0 1 2.5 0l.7.7a1.8 1.8 0 0 1 0 2.5L8.7 18.5z"/><path d="M14 6.8l3.2 3.2"/>',
@@ -351,7 +352,75 @@ class WrapLabel(QLabel):
         return QSize(48, self.fontMetrics().height() + 2)
 
 
-BRAND_FONT = "Bahnschrift SemiBold"            # на Windows; иначе подставится ближайший шрифт
+BRAND_FONT = "Bahnschrift SemiBold"            # запасной шрифт, если свой не загрузился
+BRAND_FILE = "assets/fonts/Tektur.ttf"          # фирменный шрифт названия (SIL OFL, лицензия рядом)
+
+
+def load_brand_font():
+    """Подключает шрифт названия из папки программы (и из сборки PyInstaller). Возвращает имя семейства или запасной шрифт."""
+    global BRAND_FONT
+    base = Path(getattr(sys, "_MEIPASS", None) or Path(__file__).resolve().parent)
+    try:
+        fid = QFontDatabase.addApplicationFont(str(base / BRAND_FILE))
+        fams = QFontDatabase.applicationFontFamilies(fid) if fid >= 0 else []
+        if fams:
+            BRAND_FONT = fams[0]
+    except Exception:
+        pass
+    return BRAND_FONT
+
+
+def draw_brand_k(p, rect, color=QColor(255, 255, 255)):
+    """Буква «К» знака компании, нарисованная линиями: одинакова на любом компьютере и в значке программы."""
+    x, y, w, h = rect.x(), rect.y(), rect.width(), rect.height()
+    pt = lambda u, v: QPointF(x + u * w, y + v * h)
+    pen = QPen(color, w * 0.15, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin)
+    p.save()
+    p.setPen(pen)
+    p.setBrush(Qt.NoBrush)
+    p.drawLine(pt(0.34, 0.24), pt(0.34, 0.76))
+    p.drawLine(pt(0.70, 0.24), pt(0.38, 0.52))
+    p.drawLine(pt(0.47, 0.44), pt(0.72, 0.76))
+    p.restore()
+
+
+def brand_icon_pixmap(size):
+    """Значок программы (панель задач, заголовок окна): оранжевая плитка со знаком «К», как логотип в шапке."""
+    pm = QPixmap(size, size)
+    pm.fill(Qt.transparent)
+    p = QPainter(pm)
+    p.setRenderHint(QPainter.Antialiasing)
+    a1, a2 = QColor("#ff8a1f"), QColor("#ffc43a")
+    pad = size * 0.04
+    tile = QRectF(pad, pad, size - 2 * pad, size - 2 * pad)
+    path = QPainterPath()
+    path.addRoundedRect(tile, size * 0.22, size * 0.22)
+    g = QLinearGradient(tile.topLeft(), tile.bottomRight())
+    g.setColorAt(0, a2)
+    g.setColorAt(1, a1)
+    p.fillPath(path, QBrush(g))
+    p.save()
+    p.setClipPath(path)
+    gloss = QLinearGradient(0, tile.top(), 0, tile.bottom())
+    gloss.setColorAt(0, QColor(255, 255, 255, 80))
+    gloss.setColorAt(0.5, QColor(255, 255, 255, 0))
+    p.fillRect(tile, QBrush(gloss))
+    p.restore()
+    shadow = QRectF(tile.x(), tile.y() + size * 0.02, tile.width(), tile.height())
+    draw_brand_k(p, shadow, QColor(0, 0, 0, 60))
+    draw_brand_k(p, tile)
+    p.end()
+    return pm
+
+
+def app_icon():
+    ic = QIcon()
+    for n in (16, 20, 24, 32, 40, 48, 64, 128, 256):
+        ic.addPixmap(brand_icon_pixmap(n))
+    return ic
+
+
+PRESETS = (1, 2, 3)                                   # кнопки быстрых пресетов цвета
 
 
 class LogoMark(QWidget):
@@ -441,11 +510,11 @@ class LogoMark(QWidget):
 
 class BrandTitle(QWidget):
     """Название компании, как в конвертере: буквы один раз «падают» при открытии окна, потом по ним плывёт цвет.
-    Часть после первого слова показана тихо рядом."""
+    Всё название целиком одним начертанием."""
 
     def __init__(self):
         super().__init__()
-        self.brand = self.tail = ""
+        self.brand = ""
         self._flow, self._intro, self._intro_done = 0.0, 0.0, False
         self._flow_anim = QVariantAnimation(self, duration=5200, startValue=0.0, endValue=1.0, loopCount=-1)
         self._flow_anim.valueChanged.connect(self._on_flow)
@@ -1376,7 +1445,6 @@ class CropCanvas(QWidget):
             p.drawPixmap(QRectF(px + (PW - dw) / 2, py + (PH - dh) / 2, dw, dh), pm, QRectF(pm.rect()))
             self._cmp_under(p, (px + (PW - dw) / 2, py + (PH - dh) / 2, dw, dh))
             self._bleed(p, [(px, py), (px + PW, py), (px + PW, py + PH), (px, py + PH)], paper[0])
-            self._trim(p, [(px, py), (px + PW, py), (px + PW, py + PH), (px, py + PH)], paper)
             self.geom = None
             self._cmp_over(p)
             p.end()
@@ -1409,7 +1477,6 @@ class CropCanvas(QWidget):
                 p.drawLine(QPointF(*a2), QPointF(*b2))
         app.smart_overlay(p, ox, oy, k, W, H, f)
         self._bleed(p, P, paper[0])
-        self._trim(p, P, paper)
         p.setBrush(Qt.NoBrush)
         p.setPen(QPen(QColor(T["frame"]), 2))
         p.drawPolygon(poly)
@@ -1436,33 +1503,6 @@ class CropCanvas(QWidget):
         self._cmp_over(p)
         app.smart_banner(p, cw, f)
         p.end()
-
-    def _trim(self, p, P, paper):
-        """Пунктирная рамка внутри кадра: что останется на отпечатке после подрезки принтером (печать без полей).
-        Показывается, когда кадр — это весь лист (одно фото на лист)."""
-        app = self.app
-        if app.sheet_mode():
-            return
-        tl, tt, tr_, tb = app.trim_mm()
-        if not (tl or tt or tr_ or tb):
-            return
-        if paper[0] > paper[1]:                      # лист лежит альбомно: стороны листа поворачиваются вместе с ним
-            tl, tt, tr_, tb = tt, tr_, tb, tl
-        ux, uy = P[1][0] - P[0][0], P[1][1] - P[0][1]
-        L = math.hypot(ux, uy) or 1.0
-        ux, uy = ux / L, uy / L
-        vx, vy = P[3][0] - P[0][0], P[3][1] - P[0][1]
-        Hh = math.hypot(vx, vy) or 1.0
-        vx, vy = vx / Hh, vy / Hh
-        mm = L / max(1e-6, paper[0])
-        pt = lambda c, du, dv: QPointF(c[0] + ux * du * mm + vx * dv * mm, c[1] + uy * du * mm + vy * dv * mm)
-        poly = QPolygonF([pt(P[0], tl, tt), pt(P[1], -tr_, tt), pt(P[2], -tr_, -tb), pt(P[3], tl, -tb)])
-        p.setBrush(Qt.NoBrush)
-        for col, off in ((QColor(255, 255, 255, 210), 0), (QColor(0, 0, 0, 150), 4)):
-            pen = QPen(col, 1.2, Qt.DashLine)
-            pen.setDashOffset(off)
-            p.setPen(pen)
-            p.drawPolygon(poly)
 
     def _bleed(self, p, P, paper_w_mm):
         """Серая шкала подрезки вокруг рамки: полоса снаружи — запас за краем листа (+), внутри — отступ (−)."""
@@ -2869,14 +2909,6 @@ class SheetView(QWidget):
             else:
                 p.fillRect(r, QColor(T["hover"]))
             p.restore()
-        tl, tt, tr_, tb = app.trim_mm()                               # пунктир: что останется после подрезки принтером
-        if tl or tt or tr_ or tb:
-            p.setBrush(Qt.NoBrush)
-            for col, off in ((QColor(255, 255, 255, 200), 0), (QColor(40, 90, 140), 4)):
-                pen = QPen(col, 1.2, Qt.DashLine)
-                pen.setDashOffset(off)
-                p.setPen(pen)
-                p.drawRect(QRectF(x0 + tl * k, y0 + tt * k, Wp - (tl + tr_) * k, Hp - (tt + tb) * k))
         if self.target is not None:                                   # место, с которым поменяется фото
             tslot = next((x for x in slots if x["key"] == self.target), None)
             if tslot:
@@ -5601,6 +5633,7 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         for n in (1, 2, 3):
             b = btn(self.preset_name(n), lambda k=n: self.preset_pick(k))
             b.setProperty("kind", "chip")
+            b.setMinimumWidth(0)
             self.b_pre[n] = b
             self.b_pre_save[n] = ibtn("save", "Запомнить текущие настройки ползунков в этот пресет. Он хранится, пока вы не сохраните в него другие.",
                                       lambda k=n: self.preset_save(k), 28, True, isize=15)
@@ -5951,7 +5984,7 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
             self.mode_switch.set(mode)
         if hasattr(self, "left_w"):
             self.left_w.setVisible(not doc)
-            for i, b in enumerate(self.seg_page.group.buttons()):   # кнопки вкладок: Фото, Цвет, Умная рамка, Принтер, Документ
+            for i, b in enumerate(self.seg_page.group.buttons()):   # кнопки вкладок: Макет, Цвет, Умная рамка, Принтер, Документ
                 b.setVisible((i >= 3) if doc else (i < 4))
             self.b_save.setVisible(not doc)
             for w in self._photo_only:
@@ -7066,8 +7099,33 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
 
     def _preset_tips(self):
         for n, b in self.b_pre.items():
-            b.setToolTip(tr("Сохранённые настройки: нажмите, чтобы применить") if str(n) in self.settings.get("adj_presets", {})
-                         else tr("Пресет пуст: настройте ползунки и нажмите «Сохранить» под ним"))
+            full = self.preset_name(n)
+            fm = QFontMetrics(b.font())
+            b.setText(fm.elidedText(full, Qt.ElideRight, 70))
+            saved = str(n) in self.settings.get("adj_presets", {})
+            b.setToolTip(full + ": " + (tr("Сохранённые настройки: нажмите, чтобы применить") if saved
+                                        else tr("Пресет пуст: настройте ползунки и нажмите «Сохранить» под ним")))
+
+    def preset_rename(self, n, name=None):
+        """Своё имя пресета (до 20 символов). Пустое имя возвращает «Пресет n»."""
+        if name is None:
+            dlg = QInputDialog(self)
+            dlg.setWindowTitle(tr("Переименовать пресет"))
+            dlg.setLabelText(trf("Название пресета {n}", n=n))
+            dlg.setTextValue(self.preset_name(n) if str(n) in self.settings.get("adj_preset_names", {}) else "")
+            dlg.setOkButtonText(tr("Готово"))
+            dlg.setCancelButtonText(tr("Отмена"))
+            if not dlg.exec():
+                return
+            name = dlg.textValue()
+        names = self.settings.setdefault("adj_preset_names", {})
+        name = " ".join(str(name).split())[:20]
+        if name:
+            names[str(n)] = name
+        else:
+            names.pop(str(n), None)
+        self.persist()
+        self._preset_tips()
 
     def preset_pick(self, n):
         """Применяет сохранённый пресет к фото (или к отмеченным, как задано переключателем выше)."""
@@ -8435,7 +8493,7 @@ pc.EN.update({
     "Красный": "Red", "Жёлтый": "Yellow", "Зелёный": "Green", "Голубой": "Cyan", "Синий": "Blue", "Пурпурный": "Magenta",
     "Оттенок": "Hue", "Насыщенность": "Saturation", "Яркость": "Brightness",
     "Серые и нейтральные цвета не затрагиваются.": "Greys and neutral colours are left alone.",
-    "Пресет 1": "Preset 1", "Пресет 2": "Preset 2", "Сохранить": "Save", "Сохранённые настройки: нажмите, чтобы применить": "Saved settings: click to apply", "Пресет пуст: настройте ползунки и нажмите «Сохранить» под ним": "Preset is empty: set the sliders and press Save under it", "Запомнить текущие настройки ползунков в этот пресет. Он хранится, пока вы не сохраните в него другие.": "Store the current slider values in this preset. It stays until you save other values into it.", "Цвет на экране": "Colour on screen", "Профиль принтера": "Printer profile", "Выбрать профиль…": "Choose profile…",
+    "Пресет 1": "Preset 1", "Пресет 2": "Preset 2", "Пресет 3": "Preset 3", "Переименовать пресет": "Rename preset", "Сохранить": "Save", "Сохранённые настройки: нажмите, чтобы применить": "Saved settings: click to apply", "Пресет пуст: настройте ползунки и нажмите «Сохранить» под ним": "Preset is empty: set the sliders and press Save under it", "Запомнить текущие настройки ползунков в этот пресет. Он хранится, пока вы не сохраните в него другие.": "Store the current slider values in this preset. It stays until you save other values into it.", "Цвет на экране": "Colour on screen", "Профиль принтера": "Printer profile", "Выбрать профиль…": "Choose profile…",
     "Имитация печати на экране": "Simulate print on screen", "Показать цвета вне охвата": "Show out-of-gamut colours",
     "Параметры": "Settings", "это фото": "this photo", "все отмеченные": "all checked", "Это фото": "This photo", "Куда применять коррекцию: только к текущему фото или ко всем отмеченным галочкой": "Where to apply the correction: the current photo only, or all photos ticked with a checkmark", "Менять": "Apply to",
     "Татарская": "Tatar", "Марийская": "Mari", "Основное": "Basic", "Детали": "Detail", "нет": "off", "контраст": "contrast", "цвет": "colour", "Ч/Б": "B/W", "Авто-уровни": "Auto levels",
@@ -8477,7 +8535,7 @@ pc.EN.update({
     "Сохранить проект (рамки и настройки)": "Save project (frames and settings)",
 })
 pc.EN.update({
-    "Бумага": "Paper", "Фото на листе": "Photos per sheet", "Рамка и поля": "Frame and borders", "Поля": "Borders", "мм": "mm", "Кадр": "Crop", "Лист": "Sheet",
+    "Бумага": "Paper", "Фото на листе": "Photos per sheet", "Рамка и поля": "Frame and borders", "Поля": "Borders", "мм": "mm", "Кадр": "Crop", "Макет": "Layout", "Лист": "Sheet",
     "Сколько фото печатать на одном листе": "How many photos to print on one sheet",
     "Выключено — печать без полей, фото вплотную. Включено — белое поле по краю листа и между фото.": "Off — borderless, photos edge to edge. On — a white margin at the sheet edge and between photos.",
     "Поле по краю листа и расстояние между фото, мм": "Sheet margin and distance between photos, mm",
@@ -8497,7 +8555,7 @@ pc.EN.update({
     "У вас последняя версия:": "You have the latest version:",
     "Не удалось проверить обновления. Проверьте подключение к интернету.": "Could not check for updates. Check your internet connection.",
 })
-pc.EN_FMT.update({"Вход {a} → выход {b}": "Input {a} → output {b}", "Пресет {n} пока пуст. Настройте ползунки и нажмите «Сохранить» под ним.": "Preset {n} is empty. Set the sliders and press Save under it.", "Заменить сохранённый пресет {n} текущими настройками?": "Replace saved preset {n} with the current settings?", "Применён пресет {n}": "Preset {n} applied", "Пресет {n} сохранён": "Preset {n} saved", "Страниц: {n}": "Pages: {n}", "Открыть документ «{name}»": "Open document “{name}”"})
+pc.EN_FMT.update({"Пресет {n}": "Preset {n}", "Название пресета {n}": "Name of preset {n}", "Вход {a} → выход {b}": "Input {a} → output {b}", "Пресет {n} пока пуст. Настройте ползунки и нажмите «Сохранить» под ним.": "Preset {n} is empty. Set the sliders and press Save under it.", "Заменить сохранённый пресет {n} текущими настройками?": "Replace saved preset {n} with the current settings?", "Применён пресет {n}": "Preset {n} applied", "Пресет {n} сохранён": "Preset {n} saved", "Страниц: {n}": "Pages: {n}", "Открыть документ «{name}»": "Open document “{name}”"})
 pc.EN.update({"Бумага: фото, листов": "Paper: photos, sheets", "Бумага: документы, листов": "Paper: documents, sheets", "Тип": "Type"})
 pc.EN.update({
     "Документ": "Document", "PDF, Word, Excel, PowerPoint и другие офисные файлы": "PDF, Word, Excel, PowerPoint and other office files",
@@ -8652,9 +8710,7 @@ pc.EN.update({
     "Больше копий листа": "More sheet copies",
     "Свободно": "Free", "Свободный режим: фото можно ставить куда угодно и менять их размер": "Free mode: place photos anywhere and resize them",
     "Вернуть раскладку по сетке и исходный порядок": "Restore the grid layout and original order",
-    "Печать без полей": "Borderless printing", "Сколько принтер срезает с каждого края листа, мм": "How much the printer trims from each sheet edge, mm",
-    "На листе это пунктирная рамка: всё, что внутри неё, точно останется на отпечатке. Важные детали держите внутри рамки.":
-        "On the sheet this is the dashed frame: everything inside it is sure to remain on the print. Keep important details inside it.",
+    "Печать без полей": "Borderless printing",
     "Лево": "Left", "Верх": "Top", "Право": "Right", "Низ": "Bottom",
 })
 pc.EN_FMT.update({
@@ -8765,6 +8821,14 @@ def selftest(app):
         win.preset_pick(1)
         if win.cur_adj().get("bright") != 17.0 or pc.load_settings().get("adj_presets", {}).get("2", {}).get("bright") != -5.0:
             raise RuntimeError("пресеты перепутались или не сохранились в файл")
+        win.adj_set({"bright": 3.0})
+        win.preset_save(3)
+        win.preset_rename(3, "  Тёплый   тон ")
+        if win.preset_name(3) != "Тёплый тон" or not win.b_pre[3].text().startswith("Тёпл") or pc.load_settings().get("adj_preset_names", {}).get("3") != "Тёплый тон":
+            raise RuntimeError("пресет 3 не переименовался")
+        win.preset_rename(3, "")
+        if win.b_pre[3].text() != win.preset_name(3) or "Тёпл" in win.b_pre[3].text():
+            raise RuntimeError("пустое имя должно вернуть «Пресет 3»")
         win.adj_replace({}, [win.files[win.idx]])
         win.sync_adj()
     step("пресеты коррекции: сохранить и применить", presets_flow)
@@ -8991,6 +9055,14 @@ def main():
     app.setApplicationName("PhotoCrop")
     app.setWindowIcon(make_app_icon())
     app.setStyle("Fusion")
+    load_brand_font()
+    if sys.platform == "win32":
+        try:                                         # свой значок на панели задач, а не значок python
+            import ctypes
+            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("KopiTehnik.Print")
+        except Exception:
+            pass
+    app.setWindowIcon(app_icon())
     if "--selftest" in sys.argv:
         sys.exit(selftest(app))
     win = MainWindow()

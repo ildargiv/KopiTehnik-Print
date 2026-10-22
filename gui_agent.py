@@ -405,7 +405,8 @@ class GuiAgent:
         return {"levels": pc._jsonable(w.cur_adj().get("levels"))}
 
     def c_color_presets(self, req):
-        return {"presets": pc._jsonable(self.win.settings.get("adj_presets", {}))}
+        return {"presets": pc._jsonable(self.win.settings.get("adj_presets", {})),
+                "names": {str(n): self.win.preset_name(n) for n in (1, 2, 3)}}
 
     def c_preset_save(self, req):
         w = self.win

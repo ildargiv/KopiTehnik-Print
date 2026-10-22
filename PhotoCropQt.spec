@@ -1,9 +1,9 @@
 # -*- mode: python ; coding: utf-8 -*-
 from PyInstaller.utils.hooks import collect_all
 
-datas = []
+datas = [('assets/fonts', 'assets/fonts')]
 binaries = []
-hiddenimports = ['photo_crop', 'smart_crop', 'i18n', 'i18n_more', 'color_tools', 'print_stats', 'doc_tools', 'office_convert', 'agent_bridge', 'agent_guide', 'gui_agent']
+hiddenimports = ['photo_crop', 'smart_crop', 'i18n', 'i18n_more', 'color_tools', 'print_stats', 'doc_tools', 'office_convert', 'agent_bridge', 'agent_guide', 'agent_clients', 'gui_agent']
 tmp_ret = collect_all('onnxruntime')
 datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
 
@@ -30,6 +30,7 @@ exe = EXE(
     a.datas,
     [],
     name='PhotoCropQt',
+    icon='assets/app.ico',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
