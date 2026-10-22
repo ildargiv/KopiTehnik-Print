@@ -7810,7 +7810,8 @@ class PrinterCorrDialog(QDialog):
                     "и подвигайте ползунки; настройки запоминаются за связкой «принтер + формат + тип бумаги».", "muted", wrap=True)
         main = card(None, row("Применять поправку при печати и сохранении", self.sw_on), *rows)
         zones = card("Поправка по цветам", self.sel)
-        self.setLayout(vbox(help_, main, zones, hbox(btn("Сбросить всё", self._reset, "link"), None, btn("Готово", self.accept, "primary")),
+        who = lbl(trf("Профиль печати: {t}", t=app.profile_title()) if app.pr.get("printer") else tr("Принтер не выбран: поправка запомнится вместе с выбранным принтером."), "title", wrap=True)
+        self.setLayout(vbox(who, help_, main, zones, hbox(btn("Сбросить всё", self._reset, "link"), None, btn("Готово", self.accept, "primary")),
                             spacing=12, margins=(14, 14, 14, 14)))
 
     def _store(self):
@@ -8507,7 +8508,7 @@ pc.EN.update({
     "Поправка цвета принтера": "Printer colour correction", "Настроить поправку…": "Set up correction…", "Поправка принтера": "Printer correction",
     "Подстраивает цвета под ваш принтер и бумагу. Работает с профилем ICC и без него, на экране не видна.": "Adjusts colours to your printer and paper. Works with or without an ICC profile and is not shown on screen.",
     "Сейчас поправка не задана.": "No correction set yet.", "Оттенок: зелёный ← → пурпурный": "Tint: green ← → magenta", "Баланс: холодный ← → тёплый": "Balance: cool ← → warm",
-    "Применять поправку при печати и сохранении": "Apply correction when printing and saving", "Поправка по цветам": "Correction by colour", "Сбросить всё": "Reset all",
+    "Применять поправку при печати и сохранении": "Apply correction when printing and saving", "Поправка по цветам": "Correction by colour", "Профиль печати: {t}": "Print profile: {t}", "Принтер не выбран: поправка запомнится вместе с выбранным принтером.": "No printer selected: the correction will be saved with the printer you choose.", "Сбросить всё": "Reset all",
     "Поправка компенсирует принтер, чтобы отпечаток совпал с тем, что вы видите на экране. Поэтому на экране её не видно: она применяется только при печати и сохранении, после профиля ICC (или без него). Напечатайте тест, сравните с экраном и подвигайте ползунки; настройки запоминаются за связкой «принтер + формат + тип бумаги».":
         "The correction compensates the printer so the print matches what you see on screen. That is why it is not shown on screen: it is applied only when printing and saving, after the ICC profile (or without one). Print a test, compare it with the screen and move the sliders; the settings are remembered per printer + format + paper type.",
     "Пресет 1": "Preset 1", "Пресет 2": "Preset 2", "Пресет 3": "Preset 3", "Переименовать пресет": "Rename preset", "Сохранить": "Save", "Сохранённые настройки: нажмите, чтобы применить": "Saved settings: click to apply", "Пресет пуст: настройте ползунки и нажмите «Сохранить» под ним": "Preset is empty: set the sliders and press Save under it", "Запомнить текущие настройки ползунков в этот пресет. Он хранится, пока вы не сохраните в него другие.": "Store the current slider values in this preset. It stays until you save other values into it.", "Цвет на экране": "Colour on screen", "Профиль принтера": "Printer profile", "Выбрать профиль…": "Choose profile…",
