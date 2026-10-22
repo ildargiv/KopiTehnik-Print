@@ -33,6 +33,8 @@ The optional YOLO-pose detector in `smart_crop.py` can load a model file that th
 
 ## LGPL components (Qt / PySide6, FFmpeg, libheif, libde265)
 
-These libraries are used unmodified. You may replace them with your own compatible build of the same library and use the Software with it. The official Windows build is packed by PyInstaller; to make the replacement straightforward, run the program from source (`run_qt.bat`, with the packages from requirements.txt installed), where every library is a separate file you can substitute. Source code of each library is available at the upstream locations above. Nothing in the KopiTehnik Print Licence restricts these rights.
+These libraries are used unmodified. You may replace them with your own compatible build of the same library and use the Software with it, and you may reverse engineer the Software to the extent needed to debug such a replacement. Source code of each library is available at the upstream locations above. Nothing in the KopiTehnik Print Licence restricts these rights.
+
+Free distribution and paid distribution (sale of copies, or distribution as part of a paid service) both require these notices to be shipped with the program. For paid distribution the LGPL additionally requires that the recipient can actually replace the Qt libraries. The official build is currently a single PyInstaller executable, which makes replacement hard. Before copies are sold, either switch to a folder build (onedir, where the Qt DLLs are separate files in the program folder) or obtain a commercial Qt licence. Running from source (`run_qt.bat`) always satisfies this.
 
 This file is informational and is not legal advice.
