@@ -21,9 +21,9 @@ License: free for personal use and for a business with one workstation at one lo
 
 ## Screenshots
 
-<p align="center"><img src="docs/promo.gif" alt="PhotoCrop animated overview" width="760"></p>
+<p align="center"><img src="docs/promo.gif" alt="KopiTehnik Print animated overview" width="760"></p>
 
-![PhotoCrop main window: crop frame on a demo photo](docs/screenshots/main-window.png)
+![KopiTehnik Print main window: crop frame on a demo photo](docs/screenshots/main-window.png)
 
 ![Colour adjustments page](docs/screenshots/color-adjustments.png)
 
