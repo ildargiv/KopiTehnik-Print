@@ -7756,6 +7756,9 @@ class CmDialog(QDialog):
         self._status()
 
     def _icc_changed(self, v):
+        if v.strip() != self.app.s["icc"].strip() and self.app.s.get("pcorr"):
+            self.app.s.update(pcorr={}, pcorr_on=False)             # другой профиль ICC: прежняя поправка к нему не подходит
+            self.app.pcorr_label()
         self.app.s["icc"] = v
         self._status()
 

@@ -4127,7 +4127,10 @@ class AgentSession:
     def cmd_set_color_profile(self, a):
         c = self.cm
         if a.get("icc") is not None:
-            c["icc"] = str(self._path(self._resolve_icc(a["icc"]), "icc")) if str(a["icc"]).strip() else ""
+            new_icc = str(self._path(self._resolve_icc(a["icc"]), "icc")) if str(a["icc"]).strip() else ""
+            if new_icc != c["icc"]:
+                c["pcorr"], c["pcorr_on"] = {}, False             # другой профиль ICC: прежняя поправка к нему не подходит
+            c["icc"] = new_icc
         if a.get("intent") is not None:
             v = str(a["intent"]).strip()
             c["intent"] = INTENT_CODES.get(v.lower()) or (v if v in INTENTS else None)
