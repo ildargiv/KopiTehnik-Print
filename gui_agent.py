@@ -212,7 +212,8 @@ class GuiAgent:
             dpi = s.save["dpi"]
         s.save.update(dpi=dpi, resize=st["resize"], filetype=st["filetype"], quality=int(st["quality"]), subfolder=st["subfolder"],
                       out_mode=st["out_mode"], out_name=st["out_name"], outdir=st["outdir"], copies_in_name=st["copies_name"])
-        s.cm = {"on": st["cm_on"], "icc": st["icc"], "intent": st["intent"], "bpc": st["bpc"], "embed": st["embed"]}
+        s.cm = {"on": st["cm_on"], "icc": st["icc"], "intent": st["intent"], "bpc": st["bpc"], "embed": st["embed"],
+                "pcorr_on": st["pcorr_on"], "pcorr": dict(st["pcorr"])}
         if w.pr.get("printer"):
             s.printer = w.pr["printer"]
         if w.blob is not None:
@@ -253,7 +254,8 @@ class GuiAgent:
                       subfolder=s.save["subfolder"], out_mode=s.save["out_mode"], out_name=s.save["out_name"], outdir=s.save["outdir"],
                       copies_name=s.save["copies_in_name"])
         if s.cm != snap["cm"]:
-            st.update(cm_on=bool(s.cm["on"]), icc=s.cm["icc"], intent=s.cm["intent"], bpc=s.cm["bpc"], embed=s.cm["embed"])
+            st.update(cm_on=bool(s.cm["on"]), icc=s.cm["icc"], intent=s.cm["intent"], bpc=s.cm["bpc"], embed=s.cm["embed"],
+                      pcorr_on=bool(s.cm.get("pcorr_on")), pcorr=pc.color_tools.norm_pcorr(s.cm.get("pcorr")))
             w.cm_changed()
         if s.printer != snap["printer"] and s.printer and s.printer != w.pr.get("printer"):
             w.cb_printer.setCurrentText(s.printer)              # окно загрузит драйвер этого принтера
@@ -348,7 +350,8 @@ class GuiAgent:
                 "layout": {"nup": w.s["nup"], "borders": w.s["borders"], "border_mm": w.border_mm(), "fill": w.s["fill"]},
                 "sheets_to_print": sheets,
                 "save": {k: w.s[k] for k in ("dpi", "filetype", "quality", "out_mode", "out_name", "outdir", "subfolder", "resize")},
-                "color_profile": {"on": w.s["cm_on"], "icc": w.s["icc"], "intent": w.s["intent"], "bpc": w.s["bpc"], "embed": w.s["embed"]},
+                "color_profile": {"on": w.s["cm_on"], "icc": w.s["icc"], "intent": w.s["intent"], "bpc": w.s["bpc"], "embed": w.s["embed"],
+                                  "pcorr_on": w.s["pcorr_on"], "pcorr": w.s["pcorr"]},
                 "printer": w.pr.get("printer") or None, "printing": bool(w.printing), "saving": bool(w.saving),
                 "print_copies_per_sheet": w.pr.get("copies"), "document": self.c_doc_info({}) if w.doc.get("src") else None,
                 "color_presets_saved": sorted(w.settings.get("adj_presets", {})),

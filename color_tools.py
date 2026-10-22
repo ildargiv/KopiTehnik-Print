@@ -216,3 +216,56 @@ def selective_color(img, sel):
     new_v = np.clip(v * (1.0 + 0.6 * dv[hi] * colorful), 0, 255)
     out = np.stack([new_h, new_s, new_v], axis=-1).round().astype(np.uint8)
     return Image.fromarray(out, "HSV").convert("RGB")
+
+
+# ---------------------------------------------------------------- поправка принтера
+# Компенсирует особенности принтера и бумаги (например, лёгкий розовый оттенок): применяется только на выходе,
+# после профиля ICC (или вместо него), и никогда не показывается на экране.
+
+PCORR_RANGE = {"tint": 100, "warm": 100, "bright": 100, "sat": 100}
+
+
+def norm_pcorr(v):
+    """Словарь поправки принтера без нейтральных значений; пустой словарь — поправки нет."""
+    if not isinstance(v, dict):
+        return {}
+    out = {}
+    for k, r in PCORR_RANGE.items():
+        x = round(_clamp(_num(v.get(k), 0.0), -r, r), 1)
+        if x:
+            out[k] = x
+    sel = norm_selcol(v.get("sel") or ())
+    if sel:
+        out["sel"] = [list(r) for r in sel]
+    return out
+
+
+def _mult_lut(m):
+    return [int(round(_clamp(i * m, 0, 255))) for i in range(256)]
+
+
+def printer_correct(img, corr):
+    """Применяет поправку принтера к готовому изображению (RGB)."""
+    corr = norm_pcorr(corr)
+    if not corr:
+        return img
+    from PIL import Image, ImageEnhance
+    if img.mode != "RGB":
+        img = img.convert("RGB")
+    if corr.get("sel"):
+        img = selective_color(img, corr["sel"])
+    tint, warm = corr.get("tint", 0.0) / 100.0, corr.get("warm", 0.0) / 100.0
+    if tint or warm:                                           # баланс: пурпурный ↔ зелёный и тёплый ↔ холодный
+        r, g, b = img.split()
+        r = r.point(_mult_lut(1.0 + 0.08 * warm))
+        g = g.point(_mult_lut(1.0 - 0.10 * tint))
+        b = b.point(_mult_lut(1.0 - 0.08 * warm))
+        img = Image.merge("RGB", (r, g, b))
+    bright = corr.get("bright", 0.0) / 100.0
+    if bright:
+        gamma = 2.0 ** (-bright / 2.0)
+        img = img.point([int(round(255.0 * (i / 255.0) ** gamma)) for i in range(256)] * 3)
+    sat = corr.get("sat", 0.0)
+    if sat:
+        img = ImageEnhance.Color(img).enhance(1.0 + sat / 100.0 * 0.5)
+    return img

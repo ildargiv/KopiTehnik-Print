@@ -4371,6 +4371,7 @@ class DocMixin:
             except ValueError as ex:
                 warn(self, str(ex))
                 return
+        cm = self.cm_out(cm)
         try:
             margin = max(0.0, min(30.0, float(str(d["margin"]).replace(",", ".") or 0)))
         except ValueError:
@@ -4482,6 +4483,7 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
             "resize": bool(st.get("resize", True)), "filetype": first(pc.FILETYPES, st.get("filetype")),
             "quality": int(st.get("quality", 95)), "cm_on": bool(st.get("cm_on", False)), "icc": st.get("icc", ""),
             "intent": first(pc.INTENTS, st.get("intent")), "bpc": bool(st.get("bpc", False)), "embed": bool(st.get("embed", True)),
+            "pcorr_on": bool(st.get("pcorr_on", False)), "pcorr": ct.norm_pcorr(st.get("pcorr")),
             "proof": False, "gamut": False, "adj_scope": "one",
             "nup": (int(st["nup"]) if str(st.get("nup", "")).isdigit() and 1 <= int(st["nup"]) <= NUP_MAX else 1), "borders": bool(st.get("borders", False)),
             "border_mm": ("%g" % float(st.get("border_mm", 3) or 3)), "fill": bool(st.get("sheet_fill", False)), "free": False,
@@ -4994,6 +4996,10 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         self.sw_cm2 = Switch(self.s["cm_on"])
         self.sw_cm2.toggled.connect(lambda on: (self._cm_set("cm_on", on), self.sw_cm.set(on)))
         self.l_icc2 = lbl("", "muted", wrap=True)
+        self.sw_pc = Switch(bool(self.s["pcorr_on"]))
+        self.sw_pc.toggled.connect(self._pcorr_set)
+        self.l_pc = lbl("", "muted", wrap=True)
+        self.pcorr_label()
         printer = card("Принтер и бумага",
                        row("Принтер", hbox(self.cb_printer, spacing=4)),
                        row("Тип бумаги", self.cb_media), self.l_paper_drv, hbox(self.b_paper_edit, None), self.w_paper, row("Подача", self.cb_source),
@@ -5001,7 +5007,9 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
                             ibtn("reset", "Обновить список принтеров", self.reload_printers, 34, True), spacing=6),
                        self.l_drv, self.l_prof, hbox(self.b_prof_reset, None),
                        row("Профиль принтера", self.sw_cm2), self.l_icc2,
-                       btn("Выбрать профиль…", self.open_cm_dialog, ico="profile"))
+                       btn("Выбрать профиль…", self.open_cm_dialog, ico="profile"),
+                       row("Поправка цвета принтера", self.sw_pc), self.l_pc,
+                       btn("Настроить поправку…", self.open_pcorr_dialog, ico="settings"))
         self.cb_ppi = QComboBox()
         shrinkable_combo(self.cb_ppi, 80, 140)
         self.cb_ppi.addItems(pc.PPI_CHOICES)
@@ -5124,7 +5132,7 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
             self.profile_save()
 
     # ---------- профили печати: свои настройки для связки «принтер + формат + тип бумаги»
-    PROF_COLOR = ("cm_on", "icc", "intent", "bpc", "embed")          # лежат в self.s
+    PROF_COLOR = ("cm_on", "icc", "intent", "bpc", "embed", "pcorr_on", "pcorr")          # лежат в self.s
     PROF_PR = ("icm_off", "ppi", "sharp", "shrink")                  # лежат в self.pr
 
     def profile_key(self):
@@ -5168,6 +5176,8 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
                 for k in self.PROF_COLOR:
                     if k in prof:
                         self.s[k] = prof[k]
+                    elif k in ("pcorr_on", "pcorr"):               # профиль сохранён до появления поправки: у этой связки её нет
+                        self.s[k] = False if k == "pcorr_on" else {}
                 for k in self.PROF_PR:
                     if k in prof:
                         self.pr[k] = prof[k]
@@ -5215,7 +5225,7 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         key = self.profile_key()
         if key in self._profiles() and ask(self, "Забыть сохранённые настройки этой связки и вернуть стандартные?"):
             del self._profiles()[key]
-            self.s.update(cm_on=False, icc="", bpc=False, embed=True)
+            self.s.update(cm_on=False, icc="", bpc=False, embed=True, pcorr_on=False, pcorr={})
             self.pr.update(icm_off=True, ppi="Авто", sharp=0, shrink="0")
             self._prof_lock = True
             try:
@@ -5300,6 +5310,7 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
             except ValueError as ex:
                 warn(self, str(ex))
                 return
+        cm = self.cm_out(cm)
         try:
             self._only = only
             try:
@@ -6658,6 +6669,15 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
     def cm_build(self):
         return pc.cm_build(self.s["icc"], self.s["intent"], self.s["bpc"], self.s["embed"])
 
+    def cm_out(self, cm):
+        """Параметры цвета для печати/сохранения: профиль ICC (если есть) плюс поправка принтера.
+        Поправка работает и без профиля, и только на выходе: на экране её нет."""
+        corr = ct.norm_pcorr(self.s.get("pcorr")) if self.s.get("pcorr_on") else {}
+        if not corr:
+            return cm
+        base = cm or {"profile": None, "intent": 0, "flags": 0, "embed": False, "name": tr("Поправка принтера")}
+        return dict(base, corr=corr)
+
     def _cm_set(self, key, on):
         if self._building:
             return
@@ -6666,6 +6686,7 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
 
     def cm_changed(self):
         self.profile_save()
+        self.pcorr_label()
         self._icc_info()
         self.refresh_proof()
         self.redraw()
@@ -6719,6 +6740,26 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
             except Exception:
                 self.preview = base
         self.preview_pm = QPixmap.fromImage(pil_to_qimage(self.preview)) if self.preview is not None else None
+
+    def _pcorr_set(self, on):
+        if self._building:
+            return
+        self.s["pcorr_on"] = bool(on)
+        self.profile_save()
+        self.pcorr_label()
+
+    def pcorr_label(self):
+        corr = ct.norm_pcorr(self.s.get("pcorr"))
+        if getattr(self, "l_pc", None) is not None:
+            self.l_pc.setText(tr("Подстраивает цвета под ваш принтер и бумагу. Работает с профилем ICC и без него, на экране не видна.")
+                              + ("" if corr else " " + tr("Сейчас поправка не задана.")))
+        sw = getattr(self, "sw_pc", None)
+        if sw is not None:
+            sw.set(bool(self.s["pcorr_on"]))
+
+    def open_pcorr_dialog(self):
+        PrinterCorrDialog(self).exec()
+        self.pcorr_label()
 
     def open_cm_dialog(self):
         CmDialog(self).exec()
@@ -7008,7 +7049,7 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         for n, b in self.b_pre.items():
             full = self.preset_name(n)
             fm = QFontMetrics(b.font())
-            b.setText(fm.elidedText(full, Qt.ElideRight, 70))
+            b.setText(fm.elidedText(full, Qt.ElideRight, 86))
             saved = str(n) in self.settings.get("adj_presets", {})
             b.setToolTip(full + ": " + (tr("Сохранённые настройки: нажмите, чтобы применить") if saved
                                         else tr("Пресет пуст: настройте ползунки и нажмите «Сохранить» под ним")))
@@ -7106,6 +7147,7 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
             except ValueError as ex:
                 warn(self, str(ex))
                 return None
+        cm = self.cm_out(cm)
         return {"fmt": self.cell_fmt(), "orient": pc.ORIENTS[s["orient"]], "mode": pc.MODES[s["mode"]], "dpi": dpi,
                 "resize": s["resize"], "filetype": s["filetype"], "quality": int(s["quality"]),
                 "outdir": outdir, "out_mode": s["out_mode"], "out_name": out_name, "subfolder": s["subfolder"],
@@ -7309,7 +7351,7 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         fresh.update(format=s["format"], orient=s["orient"], mode=s["mode"], recursive=s["recursive"], subfolder=s["subfolder"],
                      copies_in_name=s["copies_name"], resize=s["resize"], filetype=s["filetype"], quality=int(s["quality"]),
                      grid=s["grid"], out_mode=s["out_mode"], out_name=s["out_name"].strip() or pc.OUT_SUBDIR,
-                     cm_on=s["cm_on"], icc=s["icc"].strip(), intent=s["intent"], bpc=s["bpc"], embed=s["embed"],
+                     cm_on=s["cm_on"], icc=s["icc"].strip(), intent=s["intent"], bpc=s["bpc"], embed=s["embed"], pcorr_on=s["pcorr_on"], pcorr=s["pcorr"],
                      snap=s["snap"], language=pc.get_language(), theme=self.theme_name,
                      nup=s["nup"], borders=s["borders"], border_mm=self.border_mm(), sheet_fill=s["fill"], qt_print=dict(self.pr),
                      cell_mode=s["cell_mode"], cell_w=self.cell_mm()[0], cell_h=self.cell_mm()[1],
@@ -7728,6 +7770,79 @@ class CmDialog(QDialog):
             self.app.settings["icc_dir"] = str(Path(p).parent)
             self.e_icc.setText(p)
             self.sw_on.setChecked(True)
+
+
+class PrinterCorrDialog(QDialog):
+    """Поправка цвета принтера: компенсирует особенности принтера и бумаги (например, лёгкий розовый оттенок).
+    Хранится в профиле печати «принтер + формат + бумага», применяется только при печати и сохранении."""
+
+    SLIDERS = (("tint", "Оттенок: зелёный ← → пурпурный"), ("warm", "Баланс: холодный ← → тёплый"),
+               ("bright", "Яркость"), ("sat", "Насыщенность"))
+
+    def __init__(self, app):
+        super().__init__(app)
+        self.app = app
+        self.setWindowTitle(tr("Поправка цвета принтера"))
+        self.setMinimumWidth(520)
+        corr = ct.norm_pcorr(app.s.get("pcorr"))
+        self.vals = dict(corr)
+        self.sw_on = Switch(bool(app.s["pcorr_on"]))
+        self.sw_on.toggled.connect(self._on)
+        self.sl, self.val = {}, {}
+        rows = []
+        for key, name in self.SLIDERS:
+            s = _ResetSlider(Qt.Horizontal)
+            s.setRange(-100, 100)
+            s.setValue(int(round(corr.get(key, 0))))
+            v = lbl("", "muted")
+            v.setFixedWidth(34)
+            v.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+            v.setText("%+d" % s.value() if s.value() else "0")
+            s.valueChanged.connect(lambda x, k=key: self._moved(k, x))
+            s.reset.connect(lambda k=key: self.sl[k].setValue(0))
+            self.sl[key], self.val[key] = s, v
+            rows.append(vbox(hbox(lbl(name), None, v), s, spacing=1, margins=(0, 3, 0, 3)))
+        self.sel = SelColorPanel()
+        self.sel.set_value(corr.get("sel"))
+        self.sel.changed.connect(self._sel)
+        help_ = lbl("Поправка компенсирует принтер, чтобы отпечаток совпал с тем, что вы видите на экране. Поэтому на экране её не видно: "
+                    "она применяется только при печати и сохранении, после профиля ICC (или без него). Напечатайте тест, сравните с экраном "
+                    "и подвигайте ползунки; настройки запоминаются за связкой «принтер + формат + тип бумаги».", "muted", wrap=True)
+        main = card(None, row("Применять поправку при печати и сохранении", self.sw_on), *rows)
+        zones = card("Поправка по цветам", self.sel)
+        self.setLayout(vbox(help_, main, zones, hbox(btn("Сбросить всё", self._reset, "link"), None, btn("Готово", self.accept, "primary")),
+                            spacing=12, margins=(14, 14, 14, 14)))
+
+    def _store(self):
+        self.app.s["pcorr"] = ct.norm_pcorr(self.vals)
+        self.app.profile_save()
+        self.app.pcorr_label()
+
+    def _on(self, on):
+        self.app.s["pcorr_on"] = bool(on)
+        self._store()
+
+    def _moved(self, key, x):
+        self.val[key].setText("%+d" % x if x else "0")
+        self.vals[key] = float(x)
+        self._on_edit()
+
+    def _sel(self, sel):
+        self.vals["sel"] = [list(r) for r in sel] if sel else []
+        self._on_edit()
+
+    def _on_edit(self):
+        if ct.norm_pcorr(self.vals) and not self.app.s["pcorr_on"]:
+            self.sw_on.set(True)                               # подвинули ползунок: значит, поправку нужно включить
+            self.app.s["pcorr_on"] = True
+        self._store()
+
+    def _reset(self):
+        for s in self.sl.values():
+            s.setValue(0)
+        self.sel.reset_all()
+        self.vals = {}
+        self._store()
 
 
 # ---------------------------------------------------------------- настройки
@@ -8389,6 +8504,12 @@ pc.EN.update({
     "Красный": "Red", "Жёлтый": "Yellow", "Зелёный": "Green", "Голубой": "Cyan", "Синий": "Blue", "Пурпурный": "Magenta",
     "Оттенок": "Hue", "Насыщенность": "Saturation", "Яркость": "Brightness",
     "Серые и нейтральные цвета не затрагиваются.": "Greys and neutral colours are left alone.",
+    "Поправка цвета принтера": "Printer colour correction", "Настроить поправку…": "Set up correction…", "Поправка принтера": "Printer correction",
+    "Подстраивает цвета под ваш принтер и бумагу. Работает с профилем ICC и без него, на экране не видна.": "Adjusts colours to your printer and paper. Works with or without an ICC profile and is not shown on screen.",
+    "Сейчас поправка не задана.": "No correction set yet.", "Оттенок: зелёный ← → пурпурный": "Tint: green ← → magenta", "Баланс: холодный ← → тёплый": "Balance: cool ← → warm",
+    "Применять поправку при печати и сохранении": "Apply correction when printing and saving", "Поправка по цветам": "Correction by colour", "Сбросить всё": "Reset all",
+    "Поправка компенсирует принтер, чтобы отпечаток совпал с тем, что вы видите на экране. Поэтому на экране её не видно: она применяется только при печати и сохранении, после профиля ICC (или без него). Напечатайте тест, сравните с экраном и подвигайте ползунки; настройки запоминаются за связкой «принтер + формат + тип бумаги».":
+        "The correction compensates the printer so the print matches what you see on screen. That is why it is not shown on screen: it is applied only when printing and saving, after the ICC profile (or without one). Print a test, compare it with the screen and move the sliders; the settings are remembered per printer + format + paper type.",
     "Пресет 1": "Preset 1", "Пресет 2": "Preset 2", "Пресет 3": "Preset 3", "Переименовать пресет": "Rename preset", "Сохранить": "Save", "Сохранённые настройки: нажмите, чтобы применить": "Saved settings: click to apply", "Пресет пуст: настройте ползунки и нажмите «Сохранить» под ним": "Preset is empty: set the sliders and press Save under it", "Запомнить текущие настройки ползунков в этот пресет. Он хранится, пока вы не сохраните в него другие.": "Store the current slider values in this preset. It stays until you save other values into it.", "Цвет на экране": "Colour on screen", "Профиль принтера": "Printer profile", "Выбрать профиль…": "Choose profile…",
     "Имитация печати на экране": "Simulate print on screen", "Показать цвета вне охвата": "Show out-of-gamut colours",
     "Параметры": "Settings", "это фото": "this photo", "все отмеченные": "all checked", "Это фото": "This photo", "Куда применять коррекцию: только к текущему фото или ко всем отмеченным галочкой": "Where to apply the correction: the current photo only, or all photos ticked with a checkmark", "Менять": "Apply to",
@@ -8723,7 +8844,7 @@ def selftest(app):
         if win.preset_name(3) != "Тёплый тон" or not win.b_pre[3].text().startswith("Тёпл") or pc.load_settings().get("adj_preset_names", {}).get("3") != "Тёплый тон":
             raise RuntimeError("пресет 3 не переименовался")
         win.preset_rename(3, "")
-        if win.b_pre[3].text() != win.preset_name(3) or "Тёпл" in win.b_pre[3].text():
+        if not win.preset_name(3).startswith(win.b_pre[3].text().rstrip("…")) or "Тёпл" in win.b_pre[3].text():
             raise RuntimeError("пустое имя должно вернуть «Пресет 3»")
         win.adj_replace({}, [win.files[win.idx]])
         win.sync_adj()
@@ -8778,6 +8899,21 @@ def selftest(app):
     step("язык русский", lambda: win.apply_look(lang="ru"))
     step("окно настроек", lambda: SettingsDialog(win).grab().save(str(out / "selftest_settings.png")))
     step("окно профиля", lambda: CmDialog(win).grab().save(str(out / "selftest_profile.png")))
+
+    def pcorr_flow():
+        d = PrinterCorrDialog(win)
+        d.sl["tint"].setValue(20)                                      # движение ползунка включает поправку и пишет её в настройки
+        if not win.s["pcorr_on"] or win.s["pcorr"].get("tint") != 20.0:
+            raise RuntimeError("поправка принтера не сохранилась")
+        cm = win.cm_out(None)
+        if not cm or cm["profile"] is not None or cm["corr"].get("tint") != 20.0:
+            raise RuntimeError("поправка без профиля ICC не попала в параметры печати")
+        d.grab().save(str(out / "selftest_pcorr.png"))
+        d._reset()
+        if win.s["pcorr"] or win.cm_out(None) is not None:
+            raise RuntimeError("сброс поправки не сработал")
+        win.s["pcorr_on"] = False
+    step("поправка цвета принтера", pcorr_flow)
 
     def agent_flow():
         import agent_bridge as ab

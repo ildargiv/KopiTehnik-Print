@@ -450,16 +450,20 @@ def apply_printer_profile(img, src_icc, cm):
     """Преобразует цвета фото (встроенный профиль или sRGB) в пространство профиля принтера.
     Преобразование строится один раз и переиспользуется (для LUT-профилей принтера построение занимает секунды —
     при многих листах это заметно)."""
-    key = (hash(cm["profile"]), hash(src_icc) if src_icc else 0, cm["intent"], cm["flags"])
-    t = _xform_cache.get(key)
-    if t is None:
-        src = _rgb_profile(src_icc) or _srgb()
-        dst = ImageCms.ImageCmsProfile(io.BytesIO(cm["profile"]))
-        t = ImageCms.buildTransform(src, dst, "RGB", "RGB", renderingIntent=cm["intent"], flags=cm["flags"])
-        if len(_xform_cache) > 8:
-            _xform_cache.clear()
-        _xform_cache[key] = t
-    return ImageCms.applyTransform(img if img.mode == "RGB" else img.convert("RGB"), t)
+    if cm.get("profile"):
+        key = (hash(cm["profile"]), hash(src_icc) if src_icc else 0, cm["intent"], cm["flags"])
+        t = _xform_cache.get(key)
+        if t is None:
+            src = _rgb_profile(src_icc) or _srgb()
+            dst = ImageCms.ImageCmsProfile(io.BytesIO(cm["profile"]))
+            t = ImageCms.buildTransform(src, dst, "RGB", "RGB", renderingIntent=cm["intent"], flags=cm["flags"])
+            if len(_xform_cache) > 8:
+                _xform_cache.clear()
+            _xform_cache[key] = t
+        img = ImageCms.applyTransform(img if img.mode == "RGB" else img.convert("RGB"), t)
+    if cm.get("corr"):                                # поправка принтера: после профиля или вместо него, только на выходе
+        img = color_tools.printer_correct(img, cm["corr"])
+    return img
 
 
 _disp_profile = None
@@ -2844,9 +2848,12 @@ SPEC = {
                          [("dpi", "number", ""), ("resize", "boolean", ""), ("filetype", "string", ""), ("quality", "integer", ""),
                           ("outdir", "string", ""), ("out_mode", "string", "orig = next to each original photo, in subfolder out_name; custom = outdir"),
                           ("out_name", "string", "Subfolder name for out_mode=orig (default 'Готовые')."), ("subfolder", "boolean", ""), ("copies_in_name", "boolean", "Append _xN to file name when copies > 1.")]),
-    "set_color_profile": ("Printer ICC profile conversion for saving/printing. on, icc (path), intent, bpc, embed.",
+    "set_color_profile": ("Printer ICC profile conversion for saving/printing. on, icc (path), intent, bpc, embed. "
+                          "Also the printer colour correction (compensates the printer, applied only when printing/saving, with or without ICC, never on screen): "
+                          "pcorr_on, pcorr = {tint, warm, bright, sat: -100..100, sel: 6 rows [hue, sat, light] for red, yellow, green, cyan, blue, magenta}.",
                           [("on", "boolean", ""), ("icc", "string", ""), ("intent", "string", "relative|perceptual|saturation|absolute"),
-                           ("bpc", "boolean", ""), ("embed", "boolean", "")]),
+                           ("bpc", "boolean", ""), ("embed", "boolean", ""), ("pcorr_on", "boolean", "Printer colour correction on/off."),
+                           ("pcorr", "object", "{tint: green(-)..magenta(+), warm: cool(-)..warm(+), bright, sat, sel}; {} clears it.")]),
     "get_color_profile": ("Current profile settings and what the profile file supports.", []),
     "save_files": ("Crop and save photos as files (applies crop, adjustments, ICC profile). Without `photo` ALL photos of the folder are saved.",
                    [PHOTOS] + WAITP),
@@ -2984,7 +2991,8 @@ class AgentSession:
                      "copies_in_name": bool(s.get("copies_in_name", True))}
         self.cm = {"on": bool(s.get("cm_on", False)), "icc": s.get("icc", ""),
                    "intent": s.get("intent") if s.get("intent") in INTENTS else "Относительный колориметрический",
-                   "bpc": bool(s.get("bpc", False)), "embed": bool(s.get("embed", False))}
+                   "bpc": bool(s.get("bpc", False)), "embed": bool(s.get("embed", False)),
+                   "pcorr_on": bool(s.get("pcorr_on", False)), "pcorr": color_tools.norm_pcorr(s.get("pcorr"))}
         self.popts = dict(PRINT_DEFAULTS)
         self.popts.update({k: v for k, v in s.get("print", {}).items() if k in PRINT_DEFAULTS})
         self._undo, self._redo = [], []                  # откат команд агента (рамки, поворот, копии, коррекция, формат)
@@ -3241,9 +3249,14 @@ class AgentSession:
         return [(f, self.states[f]) for f in fl]
 
     def _cm_dict(self):
-        if not self.cm["on"]:
-            return None
-        return cm_build(self._path(self.cm["icc"], "icc") if self.cm["icc"] else "", self.cm["intent"], self.cm["bpc"], self.cm["embed"])
+        """Параметры цвета для печати/сохранения: профиль ICC (если включён) и поправка принтера (работает и без профиля)."""
+        cm = None
+        if self.cm["on"]:
+            cm = cm_build(self._path(self.cm["icc"], "icc") if self.cm["icc"] else "", self.cm["intent"], self.cm["bpc"], self.cm["embed"])
+        corr = color_tools.norm_pcorr(self.cm.get("pcorr")) if self.cm.get("pcorr_on") else {}
+        if corr:
+            cm = dict(cm or {"profile": None, "intent": 0, "flags": 0, "embed": False, "name": "Поправка принтера"}, corr=corr)
+        return cm
 
     def _ctx(self, a, need_printer=False):
         o = parse_print_opts(self.popts)
@@ -4120,9 +4133,20 @@ class AgentSession:
             c["intent"] = INTENT_CODES.get(v.lower()) or (v if v in INTENTS else None)
             if not c["intent"]:
                 raise AgentError("intent: " + " | ".join(INTENT_CODES), "bad_value")
-        for k in ("bpc", "embed", "on"):
+        for k in ("bpc", "embed", "on", "pcorr_on"):
             if a.get(k) is not None:
                 c[k] = _truthy(a[k])
+        if a.get("pcorr") is not None:                       # поправка принтера: tint, warm, bright, sat (−100..100) и sel (6 зон)
+            v = a["pcorr"]
+            try:
+                v = json.loads(v) if isinstance(v, str) else v
+            except ValueError:
+                raise AgentError("pcorr: нужен JSON-объект, см. AGENT.md", "bad_value")
+            if not isinstance(v, dict):
+                raise AgentError("pcorr: нужен объект {tint, warm, bright, sat, sel}", "bad_value")
+            c["pcorr"] = color_tools.norm_pcorr(v)
+            if c["pcorr"] and a.get("pcorr_on") is None:
+                c["pcorr_on"] = True
         if c["on"]:
             try:
                 self._cm_dict()
