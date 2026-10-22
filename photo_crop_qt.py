@@ -5204,6 +5204,9 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
                     except Exception:
                         pass
                 self.cm_changed()
+            else:                                                    # у связки нет своего профиля: чужая поправка к ней не относится
+                self.s["pcorr"] = pcr.default()
+                self.pcorr_sync()
         finally:
             self._building = False
             self._prof_lock = False
@@ -8935,6 +8938,13 @@ def selftest(app):
             win.profile_apply()
             if win.s["pcorr"]["tone"]["mids"][0] != -7:
                 raise RuntimeError("поправка не переключилась вместе с профилем второго формата")
+            win.pr["printer"] = "Другой принтер"                   # связка без профиля: прежняя поправка не переносится
+            win.s["pcorr"] = pcr.norm({"on": True, "tone": {"mids": [30, 0]}})
+            win.profile_apply()
+            if win.s["pcorr"]["on"] or not pcr.is_neutral(win.s["pcorr"]) or win._pc_rows[0][0].value() != 0:
+                raise RuntimeError("у связки без профиля поправка должна быть выключена и обнулена: %r" % win.s["pcorr"])
+            win.pr["printer"] = "Тестовый принтер"
+            win.profile_apply()
             win.cm_changed()                                      # тот же ICC: поправка на месте
             win.s["icc"] = "другой_профиль.icc"                   # другой файл ICC: поправка обнуляется, переключатель остаётся
             win.cm_changed()
