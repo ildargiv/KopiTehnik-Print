@@ -4,7 +4,7 @@
 
 **Photo quality on compatible ink.** Print software for Windows: accurate colour, borderless printing, smart cropping and order preparation for small copy centers, photo desks and professional printers. Every print costs less.
 
-**Free, legal, no cracks, no malware.** Free for personal use and for a single workstation: copy shop, studio, workshop or independent printer. [Download for Windows](https://github.com/ildargiv/KopiTehnik-Print/releases/latest) · 20 interface languages · no Python needed
+**Free, legal, no cracks, no malware.** Free for personal use and for a single workstation: copy shop, studio, workshop or independent printer. [Download for Windows](https://github.com/ildargiv/KopiTehnik-Print/releases/latest) · 15 interface languages · no Python needed
 
 ## Why KopiTehnik Print
 
