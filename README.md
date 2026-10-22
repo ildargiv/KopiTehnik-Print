@@ -13,7 +13,7 @@
 - **Exact borderless printing.** The photo is not cropped more than needed, with less waste of paper and ink on bad prints.
 - **Prepared for inkjet printing.** Automatic brightness, contrast and shadow tuning so photos print brighter.
 - **Smart cropping.** Faces, people and animals stay in the frame, so important moments are not cut off.
-- **AI agent (optional).** Your own AI opens the customer's folder, corrects colour and prints.
+- **Connect your own AI agent.** It takes the customer's order, prepares the photos and prints through KopiTehnik Print: your agent handles the conversation and the orders, the program does the preparation and printing.
 - **Photos and documents in one window**: PDF, Word, Excel, PowerPoint, a separate profile for every printer.
 - **Sheet counter** by printer and paper size, password protected, CSV export.
 
