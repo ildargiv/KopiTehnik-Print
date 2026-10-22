@@ -1,4 +1,4 @@
-; Установщик КопиТехник Принт (PhotoCrop): одна программа, установка для текущего пользователя, без прав администратора.
+; Установщик KopiTehnik Print: одна программа, установка для текущего пользователя, без прав администратора.
 ; Сборка: ISCC.exe /DAppVersion=1.2.0 installer\PhotoCrop.iss  (PhotoCropQt.exe должен лежать в dist\)
 #ifndef AppVersion
   #define AppVersion "1.2.0"
@@ -6,7 +6,7 @@
 
 [Setup]
 AppId={{6B0F7C0E-5B7E-4B63-9C0A-4B0D9B1B0C11}
-AppName=KopiTehnik Print (PhotoCrop)
+AppName=KopiTehnik Print
 AppVersion={#AppVersion}
 AppPublisher=Ildar Gaisin
 AppPublisherURL=https://github.com/ildargiv/KopiTehnik-Print
