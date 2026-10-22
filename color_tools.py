@@ -241,7 +241,9 @@ def norm_pcorr(v):
 
 
 def _mult_lut(m):
-    return [int(round(_clamp(i * m, 0, 255))) for i in range(256)]
+    """Сдвиг канала по средним тонам: чёрный и белый бумаги остаются на месте (поля листа не окрашиваются)."""
+    inv = 1.0 / m
+    return [int(round(_clamp(255.0 * (i / 255.0) ** inv, 0, 255))) for i in range(256)]
 
 
 def printer_correct(img, corr):

@@ -27,6 +27,14 @@ class PrinterCorrectionTest(unittest.TestCase):
         self.assertGreater(warm[0], 128)
         self.assertLess(warm[2], 128)
 
+    def test_white_and_black_stay(self):
+        for corr in ({"tint": 100, "warm": 100}, {"tint": -100, "warm": -100}):
+            img = Image.new("RGB", (2, 1))
+            img.putdata([(0, 0, 0), (255, 255, 255)])
+            out = ct.printer_correct(img, corr)
+            self.assertEqual(out.getpixel((0, 0)), (0, 0, 0))
+            self.assertEqual(out.getpixel((1, 0)), (255, 255, 255))
+
     def test_zone_leaves_gray(self):
         gray = Image.new("RGB", (4, 4), (100, 100, 100))
         out = ct.printer_correct(gray, {"sel": [(0, 100, 50)] * 6})

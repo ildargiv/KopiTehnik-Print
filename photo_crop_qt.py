@@ -4113,7 +4113,7 @@ class SmartMixin:
 
 
 # ---------------------------------------------------------------- обновление с GitHub
-APP_VERSION = "1.2.0"
+APP_VERSION = "1.3.0"
 RELEASES_API = "https://api.github.com/repos/ildargiv/KopiTehnik-Print/releases/latest"
 RELEASES_PAGE = "https://github.com/ildargiv/KopiTehnik-Print/releases/latest"
 GITHUB_URL = "https://github.com/ildargiv/KopiTehnik-Print"
@@ -5202,6 +5202,9 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
                     except Exception:
                         pass
                 self.cm_changed()
+            elif self.s.get("pcorr_on") or self.s.get("pcorr"):
+                self.s.update(pcorr_on=False, pcorr={})            # у этой связки своего профиля нет: чужая поправка к ней не относится
+                self.pcorr_label()
         finally:
             self._building = False
             self._prof_lock = False
