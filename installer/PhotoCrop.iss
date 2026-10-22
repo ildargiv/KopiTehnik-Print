@@ -39,6 +39,15 @@ Name: "ja"; MessagesFile: "compiler:Languages\Japanese.isl"
 Name: "pl"; MessagesFile: "compiler:Languages\Polish.isl"
 Name: "tr"; MessagesFile: "compiler:Languages\Turkish.isl"
 Name: "uk"; MessagesFile: "compiler:Languages\Ukrainian.isl"
+Name: "ar"; MessagesFile: "languages\Arabic.isl"
+Name: "zhcn"; MessagesFile: "languages\ChineseSimplified.isl"
+Name: "zhtw"; MessagesFile: "languages\ChineseTraditional.isl"
+Name: "ko"; MessagesFile: "languages\Korean.isl"
+Name: "th"; MessagesFile: "languages\Thai.isl"
+Name: "hi"; MessagesFile: "languages\Hindi.islu"
+Name: "id"; MessagesFile: "languages\Indonesian.isl"
+Name: "vi"; MessagesFile: "languages\Vietnamese.isl"
+Name: "tt"; MessagesFile: "languages\Tatar.isl"
 
 [CustomMessages]
 ru.TaskMcp=Подключить ИИ-агента (MCP) к Claude Desktop
@@ -74,6 +83,33 @@ tr.GroupAgent=Yapay zekâ ajanı
 uk.TaskMcp=Підключити ШІ-агента (MCP) до Claude Desktop
 uk.TaskMcpHint=Агент працюватиме з вікном програми: бачитиме ваші фото, покращуватиме, кадруватиме й друкуватиме. Налаштування Claude Desktop оновиться автоматично.
 uk.GroupAgent=ШІ-агент
+ar.TaskMcp=ربط وكيل الذكاء الاصطناعي (MCP) بـ Claude Desktop
+ar.TaskMcpHint=سيعمل الوكيل مع نافذة البرنامج: يرى صورك ويحسّنها ويقصّها ويطبعها. يتم تحديث إعدادات Claude Desktop تلقائيًا.
+ar.GroupAgent=وكيل الذكاء الاصطناعي
+zhcn.TaskMcp=将 AI 代理 (MCP) 连接到 Claude Desktop
+zhcn.TaskMcpHint=代理将使用程序窗口工作:查看您的照片,进行优化、裁剪和打印。Claude Desktop 的配置会自动更新。
+zhcn.GroupAgent=AI 代理
+zhtw.TaskMcp=將 AI 代理 (MCP) 連接到 Claude Desktop
+zhtw.TaskMcpHint=代理將使用程式視窗工作:檢視您的相片,進行優化、裁切與列印。Claude Desktop 的設定會自動更新。
+zhtw.GroupAgent=AI 代理
+ko.TaskMcp=AI 에이전트(MCP)를 Claude Desktop에 연결
+ko.TaskMcpHint=에이전트가 프로그램 창에서 작업합니다. 사진을 보고 보정, 자르기, 인쇄를 합니다. Claude Desktop 설정은 자동으로 업데이트됩니다.
+ko.GroupAgent=AI 에이전트
+th.TaskMcp=เชื่อมต่อเอเจนต์ AI (MCP) กับ Claude Desktop
+th.TaskMcpHint=เอเจนต์จะทำงานในหน้าต่างโปรแกรม: ดูภาพถ่ายของคุณ ปรับปรุง ครอบตัด และพิมพ์ การตั้งค่า Claude Desktop จะอัปเดตโดยอัตโนมัติ
+th.GroupAgent=เอเจนต์ AI
+hi.TaskMcp=AI एजेंट (MCP) को Claude Desktop से जोड़ें
+hi.TaskMcpHint=एजेंट प्रोग्राम की विंडो में काम करेगा: आपकी तस्वीरें देखेगा, सुधारेगा, क्रॉप करेगा और प्रिंट करेगा। Claude Desktop की सेटिंग अपने आप अपडेट हो जाएगी।
+hi.GroupAgent=AI एजेंट
+id.TaskMcp=Hubungkan agen AI (MCP) ke Claude Desktop
+id.TaskMcpHint=Agen akan bekerja di jendela program: melihat foto Anda, memperbaiki, memotong, dan mencetak. Konfigurasi Claude Desktop diperbarui secara otomatis.
+id.GroupAgent=Agen AI
+vi.TaskMcp=Kết nối tác nhân AI (MCP) với Claude Desktop
+vi.TaskMcpHint=Tác nhân sẽ làm việc trong cửa sổ chương trình: xem ảnh của bạn, cải thiện, cắt và in. Cấu hình Claude Desktop được cập nhật tự động.
+vi.GroupAgent=Tác nhân AI
+tt.TaskMcp=ЯИ-агентны (MCP) Claude Desktop белән тоташтыру
+tt.TaskMcpHint=Агент программа тәрәзәсендә эшләячәк: фотоларыгызны күрә, яхшырта, кисә һәм басма чыгара. Claude Desktop көйләүләре үзеннән-үзе яңартыла.
+tt.GroupAgent=ЯИ-агент
 
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"
