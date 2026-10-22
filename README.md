@@ -2,15 +2,20 @@
 
 # KopiTehnik Print
 
-**Print software for small copy centers, photo desks and professional printers.** Customer photos and documents to paper in a minute: smart crop to any format, colour matched to your printer, PDF/Word/Excel/PowerPoint printing, and a tamper-evident sheet counter.
+**Photo quality on compatible ink.** Print software for Windows: accurate colour, borderless printing, smart cropping and order preparation for small copy centers, photo desks and professional printers. Every print costs less.
 
-**Free, legal, no cracks, no malware.** A modern alternative to cracked photo-print tools: free for personal use and for a single workstation: copy shop, studio, workshop or independent printer. [Download for Windows](https://github.com/ildargiv/KopiTehnik-Print/releases/latest) · 20 interface languages · no Python needed
+**Free, legal, no cracks, no malware.** Free for personal use and for a single workstation: copy shop, studio, workshop or independent printer. [Download for Windows](https://github.com/ildargiv/KopiTehnik-Print/releases/latest) · 20 interface languages · no Python needed
 
-- **One window for photo and document jobs**, each with its own printer profile and paper.
-- **Fast orders**: 10×15 cm to A2, up to 30 photos per sheet, automatic orientation, pre-flight check (dpi, fit).
-- **Colour you can trust**: per-photo corrections, printer ICC profiles, printer correction, borderless edge test.
-- **Know your numbers**: sheets printed per day, by printer and paper size, CSV export, admin password.
-- **AI helper (optional)**: every step is a JSON command, and an MCP server lets Claude Desktop prepare and print a customer's folder.
+## Why KopiTehnik Print
+
+- **Colour as on screen.** Printing through the printer's ICC profile for natural colours without manual guesswork.
+- **A profile for your ink.** Compatible ink and paper change the colour. Do not rebuild the profile from scratch: correct the one you have and verify it with a test sheet.
+- **Exact borderless printing.** The photo is not cropped more than needed, with less waste of paper and ink on bad prints.
+- **Prepared for inkjet printing.** Automatic brightness, contrast and shadow tuning so photos print brighter.
+- **Smart cropping.** Faces, people and animals stay in the frame, so important moments are not cut off.
+- **AI agent (optional).** Your own AI opens the customer's folder, corrects colour and prints.
+- **Photos and documents in one window**: PDF, Word, Excel, PowerPoint, a separate profile for every printer.
+- **Sheet counter** by printer and paper size, password protected, CSV export.
 
 License: free for personal use and for a business with one workstation at one location; more workstations, chains and resale need a commercial licence. See [LICENSE](LICENSE).
 
