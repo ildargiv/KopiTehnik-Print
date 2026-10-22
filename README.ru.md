@@ -19,7 +19,7 @@
 
 ## Скриншоты
 
-<p align="center"><img src="docs/promo.gif" alt="KopiTehnik Print: анимированный обзор" width="760"></p>
+<p align="center"><img src="docs/promo-ru.gif" alt="KopiTehnik Print: анимированный обзор" width="760"></p>
 
 ![KopiTehnik Print: главное окно, рамка кадрирования на демо-фото](docs/screenshots/main-window.png)
 
