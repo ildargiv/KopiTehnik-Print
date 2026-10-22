@@ -37,6 +37,13 @@ REGISTRY = {
 }
 DEFAULT_MODEL = "realesr-general-x4v3"
 
+# Режимы для пользователя. Пока модель одна, «Быстрый» и «Качественный» используют её же; вторая модель (шаг 4) разведёт их.
+MODES = ("off", "fast", "quality", "auto")
+MODE_MODEL = {"fast": DEFAULT_MODEL, "quality": DEFAULT_MODEL, "auto": DEFAULT_MODEL}
+AUTO_DPI = 200.0          # «Автоматический»: увеличивать, только если фото даёт меньше этого dpi
+MIN_FACTOR = 1.25         # меньшее увеличение ИИ не нужно, хватает Lanczos
+MAX_FACTOR = 16.0         # слишком маленький исходник: ИИ-текстуры выдуманы, оставляем Lanczos
+
 
 class Cancelled(Exception):
     pass
@@ -169,6 +176,16 @@ def enhance(img, key=DEFAULT_MODEL, target_size=None, models_dir=None, use_gpu=T
         from PIL import Image as _I
         res = res.resize(tuple(target_size), getattr(_I, "Resampling", _I).LANCZOS)
     return res, used
+
+
+def plan(mode, factor, cur_dpi):
+    """Ключ модели, если для режима mode нужно ИИ-увеличение (factor — во сколько раз растить, cur_dpi — разрешение сейчас), иначе None."""
+    key = MODE_MODEL.get(mode)
+    if not key or not (MIN_FACTOR <= factor <= MAX_FACTOR):
+        return None
+    if mode == "auto" and cur_dpi >= AUTO_DPI:
+        return None
+    return key
 
 
 def needed_factor(img_size, target_px):

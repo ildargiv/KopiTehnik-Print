@@ -4528,7 +4528,7 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         self._doc_init()
         self.sig.queue.connect(self._queue_ready)
         self.smart_init()
-        pr = self.pr = {"printer": "", "ppi": "Авто", "sharp": 0, "marks": False, "shrink": "0", "icm_off": True, "copies": 1,
+        pr = self.pr = {"printer": "", "ppi": "Авто", "ai": "Выкл", "sharp": 0, "marks": False, "shrink": "0", "icm_off": True, "copies": 1,
                         "one_by_one": True, "pause": 2, "paper_auto": True}
         pr.update({k: v for k, v in (st.get("qt_print") or {}).items() if k in pr})
         self.printers, self.blob, self.caps = [], None, {}
@@ -5076,6 +5076,13 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         self.cb_ppi.addItems(pc.PPI_CHOICES)
         self.cb_ppi.setCurrentText(pr["ppi"] if pr["ppi"] in pc.PPI_CHOICES else pc.PPI_CHOICES[0])
         self.cb_ppi.activated.connect(lambda _i: (pr.__setitem__("ppi", self.cb_ppi.currentText()), self.profile_save()))
+        self.cb_ai = QComboBox()
+        shrinkable_combo(self.cb_ai, 80, 160)
+        for ru in pc.AI_MODES:
+            self.cb_ai.addItem(tr(ru), ru)
+        self.cb_ai.setCurrentIndex(max(0, self.cb_ai.findData(pr["ai"])))
+        self.cb_ai.setToolTip(tr("Увеличивает малые фото нейросетью перед печатью. Нужна скачанная модель; без неё печать идёт обычным способом."))
+        self.cb_ai.activated.connect(lambda _i: (pr.__setitem__("ai", self.cb_ai.currentData()), self.profile_save()))
         sl = self.sl_sharp = _ResetSlider(Qt.Horizontal)
         sl.setRange(0, 200)
         sl.setValue(int(pr["sharp"]))
@@ -5094,6 +5101,7 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         screen = card("Цвет на экране", row("Имитация печати на экране", self.sw_proof), row("Показать цвета вне охвата", self.sw_gamut))
         corr = self._pcorr_card()
         proc = card("Обработка", row("Разрешение печати, ppi", self.cb_ppi),
+                    row("ИИ-увеличение малых фото", self.cb_ai),
                     hbox(lbl("Резкость"), sl, l_sh), row("Метки реза", sw_marks),
                     row("Уменьшить лист, %", e_shrink), row("Цвет Windows (ICM) отключён", sw_icm))
         sw_one = Switch(pr["one_by_one"])
@@ -5195,7 +5203,7 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
 
     # ---------- профили печати: свои настройки для связки «принтер + формат + тип бумаги»
     PROF_COLOR = ("cm_on", "icc", "intent", "bpc", "embed", "pcorr")  # лежат в self.s
-    PROF_PR = ("icm_off", "ppi", "sharp", "shrink")                  # лежат в self.pr
+    PROF_PR = ("icm_off", "ppi", "ai", "sharp", "shrink")                  # лежат в self.pr
 
     def profile_key(self):
         media = self.cb_media.currentText() if hasattr(self, "cb_media") and self.cb_media.isEnabled() and self.cb_media.count() else ""
@@ -5249,6 +5257,7 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
                     self.sw_cm2.set(bool(self.s["cm_on"]))
                     self.sw_icm.set(bool(self.pr["icm_off"]))
                     self.cb_ppi.setCurrentText(self.pr["ppi"] if self.pr["ppi"] in pc.PPI_CHOICES else pc.PPI_CHOICES[0])
+                    self.cb_ai.setCurrentIndex(max(0, self.cb_ai.findData(self.pr["ai"])))
                     self.sl_sharp.setValue(int(self.pr["sharp"]))
                     self.l_sharp.setText(str(int(self.pr["sharp"])))
                     self.e_shrink.setText(str(self.pr["shrink"]))
@@ -5414,7 +5423,7 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         if key in self._profiles() and ask(self, "Забыть сохранённые настройки этой связки и вернуть стандартные?"):
             del self._profiles()[key]
             self.s.update(cm_on=False, icc="", bpc=False, embed=True, pcorr=pcr.default())
-            self.pr.update(icm_off=True, ppi="Авто", sharp=0, shrink="0")
+            self.pr.update(icm_off=True, ppi="Авто", ai="Выкл", sharp=0, shrink="0")
             self._prof_lock = True
             try:
                 self.sw_cm.set(False)
@@ -5509,7 +5518,7 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
                 return
             num = lambda v, d: float(str(v).replace(",", ".")) if str(v).strip() else d
             o.update(sheet_copies=int(pr["copies"]), one_by_one=bool(pr["one_by_one"]), job_pause=max(0.0, min(60.0, num(pr["pause"], 2))),
-                     marks=bool(pr["marks"]), sharp=float(pr["sharp"]), shrink_pct=num(pr["shrink"], 0), ppi=pr["ppi"])
+                     marks=bool(pr["marks"]), sharp=float(pr["sharp"]), shrink_pct=num(pr["shrink"], 0), ppi=pr["ppi"], ai=pc.AI_MODES.get(pr["ai"], "off"))
             blob = self.blob
             if pr["paper_auto"]:
                 code = self._match_paper(L["PW"], L["PH"])
@@ -8807,7 +8816,7 @@ pc.EN.update({
     "Вернуть это фото в сетку": "Put this photo back on the grid", "Убрать фото с листа": "Remove the photo from the sheet",
     "Принтер": "Printer", "Принтер и бумага": "Printer and paper", "Тип бумаги": "Media type", "Размер бумаги": "Paper size", "Подача": "Source",
     "Свойства драйвера…": "Driver properties…", "Обновить список принтеров": "Refresh the printer list", "Обработка": "Processing",
-    "Разрешение печати, ppi": "Print resolution, ppi", "Резкость": "Sharpen", "Метки реза": "Cut marks", "Уменьшить лист, %": "Shrink sheet, %",
+    "Разрешение печати, ppi": "Print resolution, ppi", "ИИ-увеличение малых фото": "AI upscaling of small photos", "Выкл": "Off", "Быстрый": "Fast", "Качественный": "High quality", "Автоматический": "Automatic", "Увеличивает малые фото нейросетью перед печатью. Нужна скачанная модель; без неё печать идёт обычным способом.": "Upscales small photos with a neural network before printing. Needs the downloaded model; without it printing works as usual.", "Резкость": "Sharpen", "Метки реза": "Cut marks", "Уменьшить лист, %": "Shrink sheet, %",
     "Насколько уменьшить лист, чтобы принтер не срезал края при печати без полей. 0 — не менять.": "How much to shrink the sheet so the printer does not trim the edges in borderless printing. 0 — no change.",
     "Цвет Windows (ICM) отключён": "Windows colour (ICM) off", "Задание": "Job", "Копий каждого листа": "Copies of each sheet",
     "Каждый лист — отдельным заданием": "Each sheet as a separate job", "Пауза между листами, сек": "Pause between sheets, s",

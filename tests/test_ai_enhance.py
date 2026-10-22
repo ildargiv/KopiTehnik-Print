@@ -46,6 +46,26 @@ class Fallback(unittest.TestCase):
         self.assertEqual(out.size, (100, 70))
 
 
+class Plan(unittest.TestCase):
+    def test_modes(self):
+        self.assertIsNone(ae.plan("off", 4, 50))
+        self.assertEqual(ae.plan("fast", 4, 300), ae.DEFAULT_MODEL)
+        self.assertIsNone(ae.plan("fast", 1.1, 50))         # почти без увеличения
+        self.assertIsNone(ae.plan("fast", 40, 10))          # слишком мелкий исходник
+        self.assertIsNone(ae.plan("auto", 4, 250))          # и так хватает dpi
+        self.assertEqual(ae.plan("auto", 4, 90), ae.DEFAULT_MODEL)
+
+
+class RenderIntegration(unittest.TestCase):
+    def test_render_falls_back_without_model(self):
+        import photo_crop as pc
+        img = Image.new("RGB", (400, 300), (120, 60, 200))
+        st = pc.CropState()
+        a, _ = pc.render(img, (210, 297), st, "crop", 300, True, "off")
+        b, _ = pc.render(img, (210, 297), st, "crop", 300, True, "quality")   # модели нет -> Lanczos
+        self.assertEqual(a.size, b.size)
+
+
 class Download(unittest.TestCase):
     def test_requires_license_and_manifest(self):
         with self.assertRaises(PermissionError):

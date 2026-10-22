@@ -553,10 +553,27 @@ def render_frame(img, g, tw=None, th=None):
                          fillcolor=(255, 255, 255))
 
 
-def render(img, paper, st, mode, dpi, resize):
-    """Готовое изображение для печати и его DPI."""
+def _ai_resize(img, size, ai, cur_dpi, log=None):
+    """Картинка img, увеличенная до size ИИ-моделью, если режим ai этого требует и модель установлена; иначе None."""
+    if ai in (None, "", "off"):
+        return None
+    try:
+        import ai_enhance as ae
+        key = ae.plan(ai, max(size[0] / img.width, size[1] / img.height), cur_dpi)
+        if not key or not ae.is_installed(key):
+            return None
+        out, used = ae.enhance(img, key, target_size=size, log=log)
+        return out if used else None
+    except Exception:
+        return None
+
+
+def render(img, paper, st, mode, dpi, resize, ai="off"):
+    """Готовое изображение для печати и его DPI. ai: режим ИИ-увеличения (off / fast / quality / auto)."""
     W, H = img.size
     pw, ph = paper
+    if dpi < 200:
+        ai = "off"                                   # ИИ только для настоящей печати, не для предпросмотра
     if mode == "fit" and not resize:                 # без пересчёта: снимок как есть на белом поле нужной формы
         r = pw / ph
         cw, ch = (W, max(H, round(W / r))) if W / H >= r else (max(W, round(H * r)), H)
@@ -567,13 +584,19 @@ def render(img, paper, st, mode, dpi, resize):
         tw, th = round(pw / 25.4 * dpi), round(ph / 25.4 * dpi)
         k = min(tw / W, th / H)
         nw, nh = max(1, round(W * k)), max(1, round(H * k))
-        pic = img.resize((nw, nh), RESAMPLE_HQ)
+        pic = _ai_resize(img, (nw, nh), ai, W / (pw / 25.4)) if k > 1 else None
+        if pic is None:
+            pic = img.resize((nw, nh), RESAMPLE_HQ)
         out = Image.new("RGB", (tw, th), "white")
         out.paste(pic, ((tw - nw) // 2, (th - nh) // 2))
         return out, dpi
     g = frame_geom(W, H, paper, st)
     if resize:
         tw, th = round(pw / 25.4 * dpi), round(ph / 25.4 * dpi)
+        if ai not in (None, "", "off") and g[2] < tw:          # ИИ растит уже вырезанный кадр, а не всё фото
+            up = _ai_resize(render_frame(img, g), (tw, th), ai, g[2] / (pw / 25.4))
+            if up is not None:
+                return up, dpi
         return render_frame(img, g, tw, th), dpi
     out = render_frame(img, g)
     return out, out.width / (pw / 25.4)
@@ -972,7 +995,7 @@ def process_file(path, st, o, dest=None):
     W, H = im.size
     orient = st.orient if st.orient else o["orient"]
     paper = paper_size(o["fmt"], orient, W, H)
-    out, out_dpi = render(im, paper, st, o["mode"], o["dpi"], o["resize"])
+    out, out_dpi = render(im, paper, st, o["mode"], o["dpi"], o["resize"], o.get("ai", "off"))
     out = adjust_detail(out, adj, out_dpi)
     cm = o.get("cm")
     if cm:
@@ -1273,6 +1296,7 @@ CAPTIONS = {"Нет": "none", "Имя файла": "name", "Номер и имя
 BORDER_COLORS = {"Белая": (255, 255, 255), "Чёрная": (0, 0, 0), "Серая": (128, 128, 128)}
 PAGES = {"Все листы": "all", "Только текущий лист": "current"}
 EXPORT_FORMATS = ["JPEG", "TIFF", "PNG", "PDF"]
+AI_MODES = {"Выкл": "off", "Быстрый": "fast", "Качественный": "quality", "Автоматический": "auto"}   # ИИ-увеличение малых фото
 PPI_CHOICES = ["Авто", "240", "300", "360", "600"]   # выше 600 лист не помещается в память (A4 при 1440 ≈ 200 Мпикс)
 MAX_PPI = 600
 PAPER_DRIVER = "Как в драйвере принтера"
@@ -1293,7 +1317,7 @@ PRINT_DEFAULTS = {
     "border": "0", "border_color": "Белая", "caption": "Нет", "bleed_on": True, "bleed": "0",
     "bleed_l": "", "bleed_t": "", "bleed_r": "", "bleed_b": "",
     "one_by_one": True, "job_pause": "2",
-    "icm_off": True, "ppi": "Авто",
+    "icm_off": True, "ppi": "Авто", "ai": "Выкл",
     "sharp": "0", "sharp_radius": "1.0", "sharp_thr": "2",
     "bright": "0", "contrast": "0", "sat": "0", "gamma": "1.0", "bw": False,
     "export_fmt": "JPEG", "proof": False,
@@ -1328,7 +1352,7 @@ def parse_print_opts(r):
         "caption": CAPTIONS.get(g("caption"), "none"), "bleed_on": bool(g("bleed_on")), "bleed": f("bleed", -10, 10),
         **{"bleed_" + k: (None if str(g("bleed_" + k)).strip() == "" else f("bleed_" + k, -10, 10)) for k in "ltrb"},
         "one_by_one": bool(g("one_by_one")), "job_pause": f("job_pause", 0, 60),
-        "icm_off": bool(g("icm_off")), "ppi": g("ppi"),
+        "icm_off": bool(g("icm_off")), "ppi": g("ppi"), "ai": AI_MODES.get(g("ai"), "off"),
         "sharp": f("sharp", 0, 500), "sharp_radius": f("sharp_radius", 0.1, 10), "sharp_thr": int(f("sharp_thr", 0, 255)),
         "bright": f("bright", -100, 100), "contrast": f("contrast", -100, 100), "sat": f("sat", -100, 100),
         "gamma": f("gamma", 0.2, 5), "bw": bool(g("bw")),
@@ -1745,8 +1769,9 @@ def _tile(ph, ppi, o, mode, fast, cache):
     st, paper = ph["st"], ph["paper"]
     o = merge_adj(o, st)
     sides = photo_sides(ph, o)
+    ai = "off" if fast else o.get("ai", "off")            # в быстром предпросмотре ИИ не запускаем
     key = (str(ph["path"]), st.cx, st.cy, st.scale, st.angle, st.rotation, paper, ppi, mode, fast, sides,
-           tuple(sorted(adj_full(o).items())))
+           tuple(sorted(adj_full(o).items())), ai)
     if cache is not None and key in cache:
         return cache[key]
     tw, th = max(1, mm2px(paper[0], ppi)), max(1, mm2px(paper[1], ppi))
@@ -1768,7 +1793,7 @@ def _tile(ph, ppi, o, mode, fast, cache):
         if ext is not None:
             out = ext
     if out is None:
-        out, _ = render(im, paper, st, mode, ppi, True)
+        out, _ = render(im, paper, st, mode, ppi, True, ai)
     src = _rgb_profile(icc)
     if src is not None:                           # листы всегда в sRGB: профиль фото -> sRGB
         try:
@@ -2910,9 +2935,10 @@ READONLY = {"list_icc_profiles", "analyze_photos", "contact_sheet", "compare_pho
             "list_printers", "driver_settings", "driver_capabilities", "get_print_options", "list_presets", "plan_print",
             "render_sheet", "preflight", "printer_status", "queue", "wait_queue", "jobs", "job_status", "print_configuration", "get_log"}
 
-ENUM_FIELDS = {"layout": LAYOUTS, "range": RANGES, "pages": PAGES, "orient": PRINT_ORIENTS, "align": ALIGNS,
+ENUM_FIELDS = {"ai": AI_MODES, "layout": LAYOUTS, "range": RANGES, "pages": PAGES, "orient": PRINT_ORIENTS, "align": ALIGNS,
                "caption": CAPTIONS, "border_color": BORDER_COLORS}
 ENUM_BY_FIELD = {   # поле -> {английский код -> русская подпись}
+    "ai": {"off": "Выкл", "fast": "Быстрый", "quality": "Качественный", "auto": "Автоматический"},
     "layout": {"single": "Одно фото на листе", "multi": "Несколько фото на листе"},
     "range": {"all": "Все фото", "current": "Текущее фото", "edited": "Изменённые (✎)"},
     "pages": {"all": "Все листы", "current": "Только текущий лист"},
@@ -4063,6 +4089,7 @@ class AgentSession:
                     "fill": "bool: fill sheet with copies of each photo", "rotate_fit": "bool", "marks": "bool: crop marks",
                     "border": "mm", "border_color": "white|black|gray", "caption": "none|name|name_n", "bleed_on": "true/false: apply the bleed/inset values (false = ignore them, values are kept)", "bleed": "mm (single layout)",
                     "icm_off": "bool: switch off Windows ICM", "ppi": "auto|240|300|360|600",
+                    "ai": "off|fast|quality|auto: AI upscaling of low-resolution photos before printing (needs the downloaded model; falls back to normal scaling)",
                     "sharp": "0..500 %", "sharp_radius": "px@300", "sharp_thr": "0..255", "bright/contrast/sat": "-100..100",
                     "gamma": "0.2..5", "bw": "bool", "export_fmt": "JPEG|TIFF|PNG|PDF", "proof": "bool"}}
 
@@ -7630,6 +7657,8 @@ class PrintDialog:
         self._spin(g, "sheet_copies", 1, 999, 1, 6).grid(row=3, column=1, sticky="w", padx=6, pady=(6, 0))
         ttk.Label(g, text="Передача в драйвер, ppi:").grid(row=4, column=0, sticky="w", pady=(6, 0))
         self._combo(g, "ppi", PPI_CHOICES, 8).grid(row=4, column=1, sticky="w", padx=6, pady=(6, 0))
+        ttk.Label(g, text="ИИ-увеличение малых фото:").grid(row=6, column=0, sticky="w", pady=(6, 0))
+        self._combo(g, "ai", list(AI_MODES), 16).grid(row=6, column=1, sticky="w", padx=6, pady=(6, 0))
         ob = ttk.Frame(g)
         ob.grid(row=5, column=0, columnspan=2, sticky="w", pady=(6, 0))
         ttk.Checkbutton(ob, text="Каждый лист — отдельным заданием, пауза, сек:", variable=self.v["one_by_one"]).pack(side="left")
