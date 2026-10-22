@@ -5270,6 +5270,7 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         for b in self.seg_pc_sel.group.buttons():
             b.setStyleSheet("padding:6px 5px;")
         self.l_pcorr = lbl("", "muted", wrap=True)
+        self.l_pc_prof = lbl("", "muted", wrap=True)
         body = vbox(
             hint("Подгоняет отпечаток под экран. На экране не видна, действует только при печати фото и документов, с профилем принтера и без него."),
             lbl("Нейтраль (серый)", "muted"), self.seg_pc_zone,
@@ -5282,7 +5283,7 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
             lbl("Общее", "muted"),
             self._pc_slider("Гамма", key_get("gamma"), key_set("gamma"), "темнее", "светлее"),
             self._pc_slider("Цвета", key_get("sat"), key_set("sat"), "бледнее", "ярче"),
-            self.l_pcorr,
+            self.l_pcorr, self.l_pc_prof,
             hbox(btn("Сбросить", self.pcorr_reset), btn("Тестовая страница", self.add_pcorr_test, ico="image"), None, spacing=6),
             spacing=6)
         self.w_pcorr_body = QWidget()
@@ -5305,6 +5306,8 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
                 val.setText("%+d" % v if v else "0")
             self.sw_pcorr.set(bool(c["on"]))
             self.w_pcorr_body.setEnabled(bool(c["on"]))
+            self.l_pc_prof.setText(trf("Относится к профилю печати: {t}", t=self.profile_title()) if self.pr.get("printer")
+                                   else tr("Принтер не выбран: поправка запомнится за связкой «принтер + формат + бумага» после выбора принтера."))
             self.l_pcorr.setText(tr("Поправка включена и будет применена при печати.") if pcr.active(c)
                                  else (tr("Включено, но все значения нулевые.") if c["on"] else tr("Выключена: печать без поправки.")))
         finally:
@@ -8530,6 +8533,7 @@ pc.EN.update({
     "Поправка включена и будет применена при печати.": "The correction is on and will be applied when printing.",
     "Включено, но все значения нулевые.": "On, but all values are zero.", "Выключена: печать без поправки.": "Off: printing without correction.",
     "Поправка принтера: включена": "Printer correction: on",
+    "Принтер не выбран: поправка запомнится за связкой «принтер + формат + бумага» после выбора принтера.": "No printer selected: the correction will be stored for the printer + size + paper combination once a printer is chosen.",
     "Оттенок": "Hue", "Насыщенность": "Saturation", "Яркость": "Brightness",
     "Серые и нейтральные цвета не затрагиваются.": "Greys and neutral colours are left alone.",
     "Пресет 1": "Preset 1", "Пресет 2": "Preset 2", "Пресет 3": "Preset 3", "Переименовать пресет": "Rename preset", "Сохранить": "Save", "Сохранённые настройки: нажмите, чтобы применить": "Saved settings: click to apply", "Пресет пуст: настройте ползунки и нажмите «Сохранить» под ним": "Preset is empty: set the sliders and press Save under it", "Запомнить текущие настройки ползунков в этот пресет. Он хранится, пока вы не сохраните в него другие.": "Store the current slider values in this preset. It stays until you save other values into it.", "Цвет на экране": "Colour on screen", "Профиль принтера": "Printer profile", "Выбрать профиль…": "Choose profile…",
@@ -8594,7 +8598,7 @@ pc.EN.update({
     "У вас последняя версия:": "You have the latest version:",
     "Не удалось проверить обновления. Проверьте подключение к интернету.": "Could not check for updates. Check your internet connection.",
 })
-pc.EN_FMT.update({"Пресет {n}": "Preset {n}", "Название пресета {n}": "Name of preset {n}", "Вход {a} → выход {b}": "Input {a} → output {b}", "Пресет {n} пока пуст. Настройте ползунки и нажмите «Сохранить» под ним.": "Preset {n} is empty. Set the sliders and press Save under it.", "Заменить сохранённый пресет {n} текущими настройками?": "Replace saved preset {n} with the current settings?", "Применён пресет {n}": "Preset {n} applied", "Пресет {n} сохранён": "Preset {n} saved", "Страниц: {n}": "Pages: {n}", "Открыть документ «{name}»": "Open document “{name}”"})
+pc.EN_FMT.update({"Относится к профилю печати: {t}": "Belongs to the print profile: {t}", "Пресет {n}": "Preset {n}", "Название пресета {n}": "Name of preset {n}", "Вход {a} → выход {b}": "Input {a} → output {b}", "Пресет {n} пока пуст. Настройте ползунки и нажмите «Сохранить» под ним.": "Preset {n} is empty. Set the sliders and press Save under it.", "Заменить сохранённый пресет {n} текущими настройками?": "Replace saved preset {n} with the current settings?", "Применён пресет {n}": "Preset {n} applied", "Пресет {n} сохранён": "Preset {n} saved", "Страниц: {n}": "Pages: {n}", "Открыть документ «{name}»": "Open document “{name}”"})
 pc.EN.update({"Бумага: фото, листов": "Paper: photos, sheets", "Бумага: документы, листов": "Paper: documents, sheets", "Тип": "Type"})
 pc.EN.update({
     "Документ": "Document", "PDF, Word, Excel, PowerPoint и другие офисные файлы": "PDF, Word, Excel, PowerPoint and other office files",
@@ -8904,6 +8908,31 @@ def selftest(app):
             raise RuntimeError("сброс должен обнулить значения и оставить переключатель")
         win.s["pcorr"] = pcr.default()
         win.pcorr_sync()
+        # поправка живёт в профиле печати связки «принтер + формат + бумага» и переключается вместе с ним
+        fmts = list(pc.FORMATS)
+        old_pr, old_fmt, old_profs = win.pr["printer"], win.s["format"], dict(win.settings.get("print_profiles", {}))
+        try:
+            win.pr["printer"] = "Тестовый принтер"
+            win.settings["print_profiles"] = {}
+            win.s["format"] = fmts[0]
+            win.s["pcorr"] = pcr.norm({"on": True, "tone": {"mids": [11, 0]}})
+            win.profile_save()
+            win.s["format"] = fmts[1]
+            win.s["pcorr"] = pcr.norm({"on": True, "tone": {"mids": [-7, 0]}})
+            win.profile_save()
+            win.s["format"] = fmts[0]
+            win.profile_apply()
+            if win.s["pcorr"]["tone"]["mids"][0] != 11 or win._pc_rows[0][0].value() != 11:
+                raise RuntimeError("поправка не вернулась вместе с профилем первого формата: %r" % win.s["pcorr"])
+            win.s["format"] = fmts[1]
+            win.profile_apply()
+            if win.s["pcorr"]["tone"]["mids"][0] != -7:
+                raise RuntimeError("поправка не переключилась вместе с профилем второго формата")
+        finally:
+            win.pr["printer"], win.s["format"] = old_pr, old_fmt
+            win.settings["print_profiles"] = old_profs
+            win.s["pcorr"] = pcr.default()
+            win.pcorr_sync()
     step("поправка принтера: ползунки, зоны, сохранение, тестовая страница", printer_correction_flow)
     def levels_curves_selcol():
         win.adj_replace({}, [win.files[win.idx]])
