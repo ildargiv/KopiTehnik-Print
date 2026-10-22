@@ -1,5 +1,5 @@
 ; Установщик KopiTehnik Print: одна программа, установка для текущего пользователя, без прав администратора.
-; Сборка: ISCC.exe /DAppVersion=1.4.0 installer\PhotoCrop.iss  (PhotoCropQt.exe должен лежать в dist\)
+; Сборка: ISCC.exe /DAppVersion=1.4.0 installer\PhotoCrop.iss  (папка программы dist\PhotoCropQt\ с PhotoCropQt.exe внутри; сборка onedir)
 #ifndef AppVersion
   #define AppVersion "1.4.0"
 #endif
@@ -44,7 +44,11 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 Name: "mcp"; Description: "{cm:TaskMcp}"; GroupDescription: "{cm:GroupAgent}"
 
 [Files]
-Source: "..\dist\PhotoCropQt.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\dist\PhotoCropQt\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+
+[InstallDelete]
+; при обновлении убираем библиотеки прошлой версии, чтобы не копились лишние файлы
+Type: filesandordirs; Name: "{app}\_internal"
 
 [Icons]
 Name: "{group}\KopiTehnik Print"; Filename: "{app}\PhotoCropQt.exe"

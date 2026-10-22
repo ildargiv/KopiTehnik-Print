@@ -23,24 +23,30 @@ a = Analysis(
 )
 pyz = PYZ(a.pure)
 
+# onedir: Qt (LGPL) лежит отдельными DLL в папке программы, их можно заменить своей сборкой
 exe = EXE(
     pyz,
     a.scripts,
-    a.binaries,
-    a.datas,
     [],
+    exclude_binaries=True,
     name='PhotoCropQt',
     icon='brand/app_icon.ico',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
-    upx=True,
-    upx_exclude=[],
-    runtime_tmpdir=None,
+    upx=False,
     console=False,
     disable_windowed_traceback=False,
     argv_emulation=False,
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
+)
+coll = COLLECT(
+    exe,
+    a.binaries,
+    a.datas,
+    strip=False,
+    upx=False,
+    name='PhotoCropQt',
 )

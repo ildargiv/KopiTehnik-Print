@@ -24,8 +24,12 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Build PhotoCropQt.exe
+      - name: Build PhotoCropQt (folder build)
         run: pyinstaller --noconfirm PhotoCropQt.spec
+
+      - name: Zip the portable folder
+        shell: pwsh
+        run: Compress-Archive -Path dist\PhotoCropQt\* -DestinationPath dist\PhotoCropQt-portable.zip
 
       - name: Build the installer (Inno Setup)
         shell: pwsh
@@ -44,7 +48,7 @@ jobs:
         with:
           name: PhotoCrop-windows
           path: |
-            dist/PhotoCropQt.exe
+            dist/PhotoCropQt-portable.zip
             dist/KopiTehnikPrint-Setup-*.exe
 
       - name: Publish GitHub Release
@@ -52,6 +56,6 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            dist/PhotoCropQt.exe
+            dist/PhotoCropQt-portable.zip
             dist/KopiTehnikPrint-Setup-*.exe
           body_path: RELEASE_NOTES.md
