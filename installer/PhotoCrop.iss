@@ -1,7 +1,7 @@
 ; Установщик КопиТехник Принт (PhotoCrop): одна программа, установка для текущего пользователя, без прав администратора.
-; Сборка: ISCC.exe /DAppVersion=1.1.0 installer\PhotoCrop.iss  (PhotoCropQt.exe должен лежать в dist\)
+; Сборка: ISCC.exe /DAppVersion=1.2.0 installer\PhotoCrop.iss  (PhotoCropQt.exe должен лежать в dist\)
 #ifndef AppVersion
-  #define AppVersion "1.1.0"
+  #define AppVersion "1.2.0"
 #endif
 
 [Setup]
