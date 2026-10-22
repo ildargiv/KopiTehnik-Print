@@ -62,9 +62,15 @@ Double-click `run_qt.bat` (installs Pillow, pillow-heif, PySide6 and starts `pho
 
 The YuNet / YOLOX models (~36 MB) are not included in the repository; they are downloaded on first use (or with `python smart_crop.py setup`) to `%APPDATA%\PhotoCrop\models`.
 
-## AI-agent mode and MCP
+## Built-in MCP server: let your AI agent run the print desk
 
-Run `mcp_config.bat` (or `python photo_crop.py mcp-config`) to get the config block, add it to `claude_desktop_config.json` (`%APPDATA%\Claude\`), then restart Claude Desktop. For the built exe the `mcpServers.photocrop` block looks like this:
+KopiTehnik Print has an MCP server built into the app. Connect Claude Desktop (or another MCP client) and your agent can open a folder of photos, set the print format, crop, correct colour, lay out sheets, run the pre-flight check and print. Documents (PDF, Word, Excel, PowerPoint) are supported too.
+
+The agent works in the same window you see: changes appear live, Ctrl+Z undoes them, and a badge shows that the AI agent is working. Your own agent handles the conversation and the orders; the program does the preparation and printing.
+
+**Connect Claude Desktop:** the installer offers to connect the AI agent (MCP) to Claude Desktop, or do it later in the program Settings. Then restart Claude Desktop.
+
+**Other MCP clients:** run `mcp_config.bat` (or `python photo_crop.py mcp-config`) to get the config block and add it to your client's config (for Claude Desktop: `%APPDATA%\Claude\claude_desktop_config.json`). For the built exe the `mcpServers.photocrop` block looks like this:
 
 ```json
 {
@@ -77,9 +83,13 @@ Run `mcp_config.bat` (or `python photo_crop.py mcp-config`) to get the config bl
 }
 ```
 
-Main commands: `open_folder`, `set_format`, `auto_crop`, `set_crop`, `set_adjust`, `select_printer`, `plan_print`, `render_sheet`, `preflight`, `print`.
+**You stay in control.** In Settings you choose whether the agent may print, the maximum sheets per print job, and whether it must ask before printing. `PHOTOCROP_AGENT_DRYRUN=1` forbids real printing, and `PHOTOCROP_AGENT_ROOTS` limits the folders the agent can use. Sheets printed by the agent are counted in the print counter.
 
-Command line: `python photo_crop.py agent set_format format=10x15`; `python photo_crop.py agent --list` lists all commands. State is stored in `%APPDATA%\PhotoCrop\agent_state.json`. Setting `PHOTOCROP_AGENT_DRYRUN=1` forbids real printing.
+Example prompts: "Open the folder Client_Ivanov, set 10x15, check the photos and print 3 copies of each." / "Print this PDF on A4."
+
+Main commands: `open_folder`, `set_format`, `auto_crop`, `set_crop`, `set_adjust`, `select_printer`, `plan_print`, `render_sheet`, `preflight`, `print`. The full list is in [AGENT.md](AGENT.md) (in Russian).
+
+Command line: `python photo_crop.py agent set_format format=10x15`; `python photo_crop.py agent --list` lists all commands. State is stored in `%APPDATA%\PhotoCrop\agent_state.json`.
 
 ## Building exe files
 
