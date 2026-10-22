@@ -4,7 +4,7 @@
 
 Програма для Windows: кадрування та друк фотографій (10×15 см та інші формати), розумне кадрування, корекція кольору, колірні профілі, розкладка друку та режим ШІ-агента.
 
-**License: [PolyForm Noncommercial 1.0.0](LICENSE)**
+**License: [KopiTehnik Print Licence](LICENSE)**
 
 ## Screenshots
 
@@ -68,4 +68,4 @@
 
 ## Ліцензія
 
-License: [PolyForm Noncommercial 1.0.0](LICENSE)
+License: [KopiTehnik Print Licence](LICENSE)

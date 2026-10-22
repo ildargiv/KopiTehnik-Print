@@ -4,7 +4,7 @@
 
 Programa para Windows para recortar e imprimir fotos (10×15 cm y otros formatos), con recorte inteligente, corrección de color, perfiles de color, diseño de impresión y modo de agente de IA.
 
-**License: [PolyForm Noncommercial 1.0.0](LICENSE)**
+**License: [KopiTehnik Print Licence](LICENSE)**
 
 ## Screenshots
 
@@ -68,4 +68,4 @@ Línea de comandos: `python photo_crop.py agent set_format format=10x15`; `pytho
 
 ## Licencia
 
-License: [PolyForm Noncommercial 1.0.0](LICENSE)
+License: [KopiTehnik Print Licence](LICENSE)

@@ -4,7 +4,7 @@
 
 फ़ोटो को क्रॉप और प्रिंट करने (10×15 सेमी व अन्य आकार) के लिए Windows प्रोग्राम: स्मार्ट क्रॉपिंग, रंग सुधार, रंग प्रोफ़ाइल, प्रिंट लेआउट और AI-एजेंट मोड के साथ।
 
-**License: [PolyForm Noncommercial 1.0.0](LICENSE)**
+**License: [KopiTehnik Print Licence](LICENSE)**
 
 ## Screenshots
 
@@ -68,4 +68,4 @@ YuNet / YOLOX मॉडल (~36 MB) रिपॉज़िटरी में श
 
 ## लाइसेंस
 
-License: [PolyForm Noncommercial 1.0.0](LICENSE)
+License: [KopiTehnik Print Licence](LICENSE)

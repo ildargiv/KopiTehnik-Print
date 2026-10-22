@@ -4,7 +4,7 @@
 
 Fotoğrafları kırpmak ve yazdırmak (10×15 cm ve diğer boyutlar) için bir Windows programı: akıllı kırpma, renk düzeltme, renk profilleri, baskı düzeni ve yapay zekâ ajanı modu.
 
-**License: [PolyForm Noncommercial 1.0.0](LICENSE)**
+**License: [KopiTehnik Print Licence](LICENSE)**
 
 ## Screenshots
 
@@ -68,4 +68,4 @@ Komut satırı: `python photo_crop.py agent set_format format=10x15`; `python ph
 
 ## Lisans
 
-License: [PolyForm Noncommercial 1.0.0](LICENSE)
+License: [KopiTehnik Print Licence](LICENSE)

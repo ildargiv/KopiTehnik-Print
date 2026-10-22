@@ -4,7 +4,7 @@
 
 Program dla Windows do kadrowania i drukowania zdjęć (10×15 cm i inne formaty) z inteligentnym kadrowaniem, korekcją kolorów, profilami barwnymi, układem wydruku i trybem agenta AI.
 
-**License: [PolyForm Noncommercial 1.0.0](LICENSE)**
+**License: [KopiTehnik Print Licence](LICENSE)**
 
 ## Screenshots
 
@@ -68,4 +68,4 @@ Wiersz poleceń: `python photo_crop.py agent set_format format=10x15`; `python p
 
 ## Licencja
 
-License: [PolyForm Noncommercial 1.0.0](LICENSE)
+License: [KopiTehnik Print Licence](LICENSE)

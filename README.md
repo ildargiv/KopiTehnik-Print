@@ -87,4 +87,4 @@ Command line: `python photo_crop.py agent set_format format=10x15`; `python phot
 
 ## License
 
-License: [KopiTehnik Print Free-Use License](LICENSE) (draft): free for personal use and for a business with one workstation at one location; more workstations, chains and resale need a commercial licence.
+License: [KopiTehnik Print Licence](LICENSE): free for personal use and for a business with one workstation at one location; more workstations, chains and resale need a commercial licence.
