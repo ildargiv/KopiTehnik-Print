@@ -2239,7 +2239,11 @@ def run_sheets_job(c, progress, cancel):
     def sheet_image(k):
         img = compose_sheet(c["plan"], k, c["photos"], c["ppi"], o, c["mode"], cache=cache)
         img = shrink_sheet(img, o.get("shrink_pct"))
-        return apply_printer_profile(img, None, c["cm"]) if c["cm"] else img
+        img = apply_printer_profile(img, None, c["cm"]) if c["cm"] else img
+        if c.get("kind") == "print" and c.get("pcorr"):           # поправка принтера: только на печать, после профиля, экран не затрагивает
+            import printer_corr
+            img = printer_corr.apply(img, c["pcorr"])
+        return img
 
     def counted(k, copies=1):
         """Журнал печати (print_stats): лист k ушёл на принтер."""

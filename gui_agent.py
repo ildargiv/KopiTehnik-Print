@@ -15,6 +15,7 @@ from pathlib import Path
 import agent_bridge as ab
 import agent_guide as guide
 import photo_crop as pc
+import printer_corr as pcr
 
 # Диалоги окна во время команды агента не показываются: сообщения копятся здесь и возвращаются в ответе (notes).
 CTX = {"active": False, "notes": []}
@@ -36,6 +37,16 @@ GUI_SPEC = {
                 [("level", "integer", "1 = Enhance, 2 = Super (default 1)."),
                  ("photo", "any", "Photo ref, list of refs, \"all\" or \"checked\". Default: the current photo.")]),
     "auto_levels": ("«Auto» in the levels editor: stretch levels of the current photo to the edges of its histogram.", []),
+    "printer_correction": ("Printer correction: a soft colour adjustment applied only when printing (after the printer profile, with or without it) "
+                           "to match the print to the screen. It is stored per printer + sheet size + paper type and is never shown on screen. "
+                           "Without arguments it only reads the current values.",
+                           [("on", "boolean", "Switch the correction on or off for the current paper."),
+                            ("tone", "object", "Neutral grey per zone, each [warm_cool, green_magenta] from -100 to 100: "
+                                               "{\"shadows\": [0, 0], \"mids\": [10, -5], \"lights\": [0, 0]}. Positive = warmer / more magenta."),
+                            ("sel", "any", "By colour: 6 rows [hue, saturation, brightness] (-100..100) for red, yellow, green, cyan, blue, magenta."),
+                            ("gamma", "number", "-100 darker .. 100 lighter."), ("sat", "number", "-100 paler .. 100 more vivid."),
+                            ("reset", "boolean", "Set all values to zero (keeps the on/off switch)."),
+                            ("test_page", "boolean", "Add the test page (grey steps, six colours, skin/sky/grass) to the open photos for a calibration print.")]),
     "color_presets": ("The three colour presets («Preset 1/2/3» buttons): which are saved and what they contain.", []),
     "color_preset_save": ("Remember the current photo's colour correction in preset n until it is replaced.", [("n", "integer", "1, 2 or 3.")]),
     "color_preset_apply": ("Apply colour preset n.", [("n", "integer", "1, 2 or 3."),
@@ -105,7 +116,7 @@ class GuiAgent:
                        "set_layout": self.c_set_layout, "set_view": self.c_set_view, "set_app_mode": self.c_set_app_mode,
                        "add_edge_test": self.c_edge_test, "print_status": self.c_print_status, "doc_open": self.c_doc_open,
                        "doc_info": self.c_doc_info, "doc_set": self.c_doc_set, "doc_convert": self.c_doc_convert,
-                       "app_settings": self.c_app_settings, "print_stats": self.c_print_stats, "check_update": self.c_check_update,
+                       "printer_correction": self.c_printer_correction, "app_settings": self.c_app_settings, "print_stats": self.c_print_stats, "check_update": self.c_check_update,
                        "undo": self.c_undo, "redo": self.c_redo}
 
     # ---------- ресурсы MCP: справка
@@ -352,6 +363,7 @@ class GuiAgent:
                 "printer": w.pr.get("printer") or None, "printing": bool(w.printing), "saving": bool(w.saving),
                 "print_copies_per_sheet": w.pr.get("copies"), "document": self.c_doc_info({}) if w.doc.get("src") else None,
                 "color_presets_saved": sorted(w.settings.get("adj_presets", {})),
+                "printer_correction": {"on": bool(w.s["pcorr"]["on"]), "active": pcr.active(w.s["pcorr"])},
                 "undo_steps": len(w._undo), "agent_permissions": policy(w.settings)}
 
     def c_app_guide(self, req):
@@ -403,6 +415,32 @@ class GuiAgent:
             raise pc.AgentError("Нет открытого фото.", "bad_photo")
         w.levels_auto()
         return {"levels": pc._jsonable(w.cur_adj().get("levels"))}
+
+    def c_printer_correction(self, req):
+        w = self.win
+        cur = pcr.norm(w.s["pcorr"])
+        if req.get("reset"):
+            cur = dict(pcr.default(), on=cur["on"])
+        if "on" in req:
+            cur["on"] = bool(req["on"])
+        if isinstance(req.get("tone"), dict):
+            for z, v in req["tone"].items():
+                if z not in pcr.ZONES:
+                    raise pc.AgentError(f"tone: зоны {', '.join(pcr.ZONES)}", "bad_value")
+                cur["tone"][z] = v
+        if req.get("sel") is not None:
+            if not isinstance(req["sel"], (list, tuple)) or len(req["sel"]) != 6:
+                raise pc.AgentError("sel: 6 строк [оттенок, насыщенность, яркость] (красный, жёлтый, зелёный, голубой, синий, пурпурный)", "bad_value")
+            cur["sel"] = [list(r) for r in req["sel"]]
+        for k in ("gamma", "sat"):
+            if k in req:
+                cur[k] = req[k]
+        w.s["pcorr"] = pcr.norm(cur)
+        w.pcorr_sync()
+        w.profile_save()
+        if req.get("test_page"):
+            w.add_pcorr_test()
+        return {"printer_correction": w.s["pcorr"], "active": pcr.active(w.s["pcorr"]), "for": w.profile_title()}
 
     def c_color_presets(self, req):
         return {"presets": pc._jsonable(self.win.settings.get("adj_presets", {})),

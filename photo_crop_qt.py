@@ -30,6 +30,7 @@ import agent_badge_neural as abn                           # noqa: E402  (пла
 import brand_datestamp as bd                               # noqa: E402  (фирменное начертание «Дата-штамп»: название и знак)
 import photo_crop as pc                                    # noqa: E402  (движок программы)
 import color_tools as ct                                   # noqa: E402  (уровни, кривые, выборочный цвет)
+import printer_corr as pcr                                 # noqa: E402  (поправка принтера: цвет на выходе, не на экране)
 import gui_agent as ga                                     # noqa: E402  (ИИ-агент внутри окна)
 import i18n                                                # noqa: E402  (переводы интерфейса)
 
@@ -4482,6 +4483,7 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
             "resize": bool(st.get("resize", True)), "filetype": first(pc.FILETYPES, st.get("filetype")),
             "quality": int(st.get("quality", 95)), "cm_on": bool(st.get("cm_on", False)), "icc": st.get("icc", ""),
             "intent": first(pc.INTENTS, st.get("intent")), "bpc": bool(st.get("bpc", False)), "embed": bool(st.get("embed", True)),
+            "pcorr": pcr.norm(st.get("pcorr")),
             "proof": False, "gamut": False, "adj_scope": "one",
             "nup": (int(st["nup"]) if str(st.get("nup", "")).isdigit() and 1 <= int(st["nup"]) <= NUP_MAX else 1), "borders": bool(st.get("borders", False)),
             "border_mm": ("%g" % float(st.get("border_mm", 3) or 3)), "fill": bool(st.get("sheet_fill", False)), "free": False,
@@ -5023,6 +5025,7 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         e_shrink.setToolTip(tr("Насколько уменьшить лист, чтобы принтер не срезал края при печати без полей. 0 — не менять."))
         e_shrink.textEdited.connect(lambda v: (pr.__setitem__("shrink", v), self.profile_save()))
         screen = card("Цвет на экране", row("Имитация печати на экране", self.sw_proof), row("Показать цвета вне охвата", self.sw_gamut))
+        corr = self._pcorr_card()
         proc = card("Обработка", row("Разрешение печати, ppi", self.cb_ppi),
                     hbox(lbl("Резкость"), sl, l_sh), row("Метки реза", sw_marks),
                     row("Уменьшить лист, %", e_shrink), row("Цвет Windows (ICM) отключён", sw_icm))
@@ -5037,7 +5040,7 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         self.l_queue = lbl("Нажмите «Обновить», чтобы увидеть очередь.", "muted", wrap=True)
         queue = card("Очередь печати", self.l_queue,
                      hbox(btn("Обновить", self.queue_refresh), btn("Очистить", self.queue_clear), spacing=6))
-        return self._scroll(printer, screen, proc, bleed, job, queue, btn("Старое окно печати…", self.open_print, "link"))
+        return self._scroll(printer, screen, corr, proc, bleed, job, queue, btn("Старое окно печати…", self.open_print, "link"))
 
     def reload_printers(self):
         self.printers = pc.list_printers()
@@ -5124,7 +5127,7 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
             self.profile_save()
 
     # ---------- профили печати: свои настройки для связки «принтер + формат + тип бумаги»
-    PROF_COLOR = ("cm_on", "icc", "intent", "bpc", "embed")          # лежат в self.s
+    PROF_COLOR = ("cm_on", "icc", "intent", "bpc", "embed", "pcorr")  # лежат в self.s
     PROF_PR = ("icm_off", "ppi", "sharp", "shrink")                  # лежат в self.pr
 
     def profile_key(self):
@@ -5143,6 +5146,7 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         if getattr(self, "_prof_lock", False) or self._building or not self.pr.get("printer") or not hasattr(self, "l_prof"):
             return
         prof = {k: self.s[k] for k in self.PROF_COLOR}
+        prof["pcorr"] = pcr.norm(self.s["pcorr"])
         prof.update({k: self.pr[k] for k in self.PROF_PR})
         if self.blob:
             prof["blob"] = base64.b64encode(self.blob).decode()
@@ -5167,7 +5171,9 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
                 self._building = True
                 for k in self.PROF_COLOR:
                     if k in prof:
-                        self.s[k] = prof[k]
+                        self.s[k] = pcr.norm(prof[k]) if k == "pcorr" else prof[k]
+                if "pcorr" not in prof:
+                    self.s["pcorr"] = pcr.default()
                 for k in self.PROF_PR:
                     if k in prof:
                         self.pr[k] = prof[k]
@@ -5179,6 +5185,7 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
                     self.sl_sharp.setValue(int(self.pr["sharp"]))
                     self.l_sharp.setText(str(int(self.pr["sharp"])))
                     self.e_shrink.setText(str(self.pr["shrink"]))
+                    self.pcorr_sync()
                 except (AttributeError, RuntimeError):
                     pass
                 self._building = False
@@ -5196,6 +5203,124 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
             self._building = False
             self._prof_lock = False
         self.profile_label(how if prof else None)
+
+    # ---------- поправка принтера: подгоняет отпечаток под экран, на экране не видна
+    PC_ZONES = (("shadows", "Тени"), ("mids", "Средние"), ("lights", "Света"))
+
+    def _pc_slider(self, label, get, setv, left="", right=""):
+        s = _ResetSlider(Qt.Horizontal)
+        s.setRange(-100, 100)
+        val = lbl("0", "muted")
+        val.setFixedWidth(34)
+        val.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+
+        def moved(v):
+            val.setText("%+d" % v if v else "0")
+            if getattr(self, "_pc_lock", False):
+                return
+            setv(float(v))
+            self.profile_save()
+        s.valueChanged.connect(moved)
+        s.reset.connect(lambda: s.setValue(0))
+        s.setToolTip(((left + " ← → " + right) if left else "") + ("\n" if left else "") + tr("Двойной щелчок — сбросить"))
+        self._pc_rows.append((s, get, val))
+        name = lbl(label)
+        name.setFixedWidth(70)
+        return hbox(name, s, val, spacing=6)
+
+    def _pcorr_card(self):
+        self._pc_rows, self._pc_zone, self._pc_sel, self._pc_lock = [], "mids", 0, False
+        pcv = lambda: self.s["pcorr"]
+
+        def tone_get(i):
+            return lambda: pcv()["tone"][self._pc_zone][i]
+
+        def tone_set(i):
+            def f(v):
+                pcv()["tone"][self._pc_zone][i] = v
+            return f
+
+        def sel_get(i):
+            return lambda: pcv()["sel"][self._pc_sel][i]
+
+        def sel_set(i):
+            def f(v):
+                pcv()["sel"][self._pc_sel][i] = v
+            return f
+
+        def key_get(k):
+            return lambda: pcv()[k]
+
+        def key_set(k):
+            def f(v):
+                pcv()[k] = v
+            return f
+        self.sw_pcorr = Switch(bool(pcv()["on"]))
+        self.sw_pcorr.toggled.connect(lambda on: (pcv().__setitem__("on", bool(on)), self.pcorr_sync(), self.profile_save()))
+        self.seg_pc_zone = Segmented([(n, z) for z, n in self.PC_ZONES], "mids")
+        self.seg_pc_zone.changed.connect(lambda z: (setattr(self, "_pc_zone", z), self.pcorr_sync()))
+        names = [("Красный", 0), ("Жёлтый", 1), ("Зелёный", 2), ("Голубой", 3), ("Синий", 4), ("Пурпурный", 5)]
+        self.seg_pc_sel = Segmented([(n, i) for n, i in names], 0)
+        self.seg_pc_sel.changed.connect(lambda i: (setattr(self, "_pc_sel", i), self.pcorr_sync()))
+        for b in self.seg_pc_sel.group.buttons():
+            b.setStyleSheet("padding:6px 5px;")
+        self.l_pcorr = lbl("", "muted", wrap=True)
+        body = vbox(
+            hint("Подгоняет отпечаток под экран. На экране не видна, действует только при печати, с профилем принтера и без него."),
+            lbl("Нейтраль (серый)", "muted"), self.seg_pc_zone,
+            self._pc_slider("Тепло", tone_get(0), tone_set(0), "холоднее", "теплее"),
+            self._pc_slider("Пурпур", tone_get(1), tone_set(1), "зеленее", "пурпурнее"),
+            lbl("По цветам", "muted"), self.seg_pc_sel,
+            self._pc_slider("Оттенок", sel_get(0), sel_set(0)),
+            self._pc_slider("Насыщ.", sel_get(1), sel_set(1)),
+            self._pc_slider("Яркость", sel_get(2), sel_set(2)),
+            lbl("Общее", "muted"),
+            self._pc_slider("Гамма", key_get("gamma"), key_set("gamma"), "темнее", "светлее"),
+            self._pc_slider("Цвета", key_get("sat"), key_set("sat"), "бледнее", "ярче"),
+            self.l_pcorr,
+            hbox(btn("Сбросить", self.pcorr_reset), btn("Тестовая страница", self.add_pcorr_test, ico="image"), None, spacing=6),
+            spacing=6)
+        self.w_pcorr_body = QWidget()
+        self.w_pcorr_body.setLayout(body)
+        body.setContentsMargins(0, 0, 0, 0)
+        c = card("Поправка принтера", row("Включить для этой бумаги", self.sw_pcorr), self.w_pcorr_body)
+        self.pcorr_sync()
+        return c
+
+    def pcorr_sync(self):
+        """Показать значения поправки текущей связки в ползунках (профиль печати подставил свои)."""
+        if not hasattr(self, "_pc_rows"):
+            return
+        c = self.s["pcorr"] = pcr.norm(self.s["pcorr"])
+        self._pc_lock = True
+        try:
+            for s_, get, val in self._pc_rows:
+                v = int(round(get()))
+                s_.setValue(v)
+                val.setText("%+d" % v if v else "0")
+            self.sw_pcorr.set(bool(c["on"]))
+            self.w_pcorr_body.setEnabled(bool(c["on"]))
+            self.l_pcorr.setText(tr("Поправка включена и будет применена при печати.") if pcr.active(c)
+                                 else (tr("Включено, но все значения нулевые.") if c["on"] else tr("Выключена: печать без поправки.")))
+        finally:
+            self._pc_lock = False
+
+    def pcorr_reset(self):
+        on = self.s["pcorr"]["on"]
+        self.s["pcorr"] = pcr.default()
+        self.s["pcorr"]["on"] = on
+        self.pcorr_sync()
+        self.profile_save()
+
+    def add_pcorr_test(self):
+        """Тестовая страница для подбора поправки: размера листа -> в список фото."""
+        short, long_, tag = pc.FORMATS[self.s["format"]]
+        w, h = (long_, short) if pc.ORIENTS[self.s["orient"]] == "landscape" else (short, long_)
+        d = Path(tempfile.gettempdir()) / "PhotoCrop"
+        d.mkdir(parents=True, exist_ok=True)
+        p = d / ("Тест_поправки_%s.png" % tag)
+        pcr.make_test_page(w, h, 300).save(p, dpi=(300, 300))
+        self.load_files([p], add=True)
 
     def profile_label(self, how="own"):
         if not hasattr(self, "l_prof"):
@@ -5215,7 +5340,7 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         key = self.profile_key()
         if key in self._profiles() and ask(self, "Забыть сохранённые настройки этой связки и вернуть стандартные?"):
             del self._profiles()[key]
-            self.s.update(cm_on=False, icc="", bpc=False, embed=True)
+            self.s.update(cm_on=False, icc="", bpc=False, embed=True, pcorr=pcr.default())
             self.pr.update(icm_off=True, ppi="Авто", sharp=0, shrink="0")
             self._prof_lock = True
             try:
@@ -5225,6 +5350,7 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
                 self.cb_ppi.setCurrentText(pc.PPI_CHOICES[0])
                 self.sl_sharp.setValue(0)
                 self.e_shrink.setText("0")
+                self.pcorr_sync()
             finally:
                 self._prof_lock = False
             self.cm_changed()
@@ -5324,6 +5450,8 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         total = len(plan["sheets"]) * int(pr["copies"])
         text = ("%s\n" % only.name if only is not None else "") + "%s: %s\n%s: %g×%g %s\n%s: %d" % (tr("Принтер"), pr["printer"], tr("Бумага в драйвере"), round(gw, 1), round(gh, 1), tr("мм"),
                                                  tr("Листов к печати"), total)
+        if pcr.active(self.s["pcorr"]):
+            text += "\n" + tr("Поправка принтера: включена")
         if cm:
             text += "\n%s: %s" % (tr("Профиль принтера"), cm["name"])
             if not pr["icm_off"]:
@@ -5334,7 +5462,8 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         if (SOFT[0] or "⚠" in text) and not ask(self, text + "\n\n" + tr("Начать печать?")):       # без предупреждений печать идёт сразу
             return
         c = {"kind": "print", "printer": pr["printer"], "blob": blob, "title": "PhotoCrop", "o": o, "idxs": list(range(len(plan["sheets"]))),
-             "plan": plan, "photos": photos, "ppi": pc.resolve_ppi(o, geom), "mode": self.mode(), "cm": cm}
+             "plan": plan, "photos": photos, "ppi": pc.resolve_ppi(o, geom), "mode": self.mode(), "cm": cm,
+             "pcorr": pcr.norm(self.s["pcorr"]) if pcr.active(self.s["pcorr"]) else None}
         self.cancel.clear()
         self.printing = True
         self._print_files = files
@@ -7309,7 +7438,7 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         fresh.update(format=s["format"], orient=s["orient"], mode=s["mode"], recursive=s["recursive"], subfolder=s["subfolder"],
                      copies_in_name=s["copies_name"], resize=s["resize"], filetype=s["filetype"], quality=int(s["quality"]),
                      grid=s["grid"], out_mode=s["out_mode"], out_name=s["out_name"].strip() or pc.OUT_SUBDIR,
-                     cm_on=s["cm_on"], icc=s["icc"].strip(), intent=s["intent"], bpc=s["bpc"], embed=s["embed"],
+                     cm_on=s["cm_on"], icc=s["icc"].strip(), intent=s["intent"], bpc=s["bpc"], embed=s["embed"], pcorr=pcr.norm(s["pcorr"]),
                      snap=s["snap"], language=pc.get_language(), theme=self.theme_name,
                      nup=s["nup"], borders=s["borders"], border_mm=self.border_mm(), sheet_fill=s["fill"], qt_print=dict(self.pr),
                      cell_mode=s["cell_mode"], cell_w=self.cell_mm()[0], cell_h=self.cell_mm()[1],
@@ -8387,6 +8516,15 @@ pc.EN.update({
     "Щелчок по кривой — новая точка, двойной щелчок или правая кнопка — удалить точку.": "Click the curve to add a point; double-click or right-click a point to remove it.",
     "Кривые: перетаскивайте точки, результат сразу виден в главном окне. Канал RGB меняет все цвета, R, G, B — по одному.": "Curves: drag the points, the result shows at once in the main window. RGB changes all colours; R, G, B one at a time.",
     "Красный": "Red", "Жёлтый": "Yellow", "Зелёный": "Green", "Голубой": "Cyan", "Синий": "Blue", "Пурпурный": "Magenta",
+    "Поправка принтера": "Printer correction", "Включить для этой бумаги": "Enable for this paper",
+    "Подгоняет отпечаток под экран. На экране не видна, действует только при печати, с профилем принтера и без него.": "Matches the print to the screen. Not shown on screen, applied only when printing, with or without a printer profile.",
+    "Нейтраль (серый)": "Neutral (grey)", "По цветам": "By colour", "Общее": "General", "Тени": "Shadows", "Средние": "Midtones", "Света": "Highlights",
+    "Тепло": "Warmth", "Пурпур": "Magenta", "Оттенок": "Hue", "Насыщ.": "Sat.", "Яркость": "Brightness", "Гамма": "Gamma", "Цвета": "Colours",
+    "холоднее": "cooler", "теплее": "warmer", "зеленее": "greener", "пурпурнее": "more magenta", "темнее": "darker", "светлее": "lighter", "бледнее": "paler", "ярче": "more vivid",
+    "Двойной щелчок — сбросить": "Double-click to reset", "Сбросить": "Reset", "Тестовая страница": "Test page",
+    "Поправка включена и будет применена при печати.": "The correction is on and will be applied when printing.",
+    "Включено, но все значения нулевые.": "On, but all values are zero.", "Выключена: печать без поправки.": "Off: printing without correction.",
+    "Поправка принтера: включена": "Printer correction: on",
     "Оттенок": "Hue", "Насыщенность": "Saturation", "Яркость": "Brightness",
     "Серые и нейтральные цвета не затрагиваются.": "Greys and neutral colours are left alone.",
     "Пресет 1": "Preset 1", "Пресет 2": "Preset 2", "Пресет 3": "Preset 3", "Переименовать пресет": "Rename preset", "Сохранить": "Save", "Сохранённые настройки: нажмите, чтобы применить": "Saved settings: click to apply", "Пресет пуст: настройте ползунки и нажмите «Сохранить» под ним": "Preset is empty: set the sliders and press Save under it", "Запомнить текущие настройки ползунков в этот пресет. Он хранится, пока вы не сохраните в него другие.": "Store the current slider values in this preset. It stays until you save other values into it.", "Цвет на экране": "Colour on screen", "Профиль принтера": "Printer profile", "Выбрать профиль…": "Choose profile…",
@@ -8728,6 +8866,40 @@ def selftest(app):
         win.adj_replace({}, [win.files[win.idx]])
         win.sync_adj()
     step("пресеты коррекции: сохранить и применить", presets_flow)
+    def printer_correction_flow():
+        win.s["pcorr"] = pcr.default()
+        win.pcorr_sync()
+        if win.w_pcorr_body.isEnabled():
+            raise RuntimeError("выключенная поправка не должна давать менять ползунки")
+        win.sw_pcorr.set(True)
+        win.sw_pcorr.toggled.emit(True)
+        if not win.w_pcorr_body.isEnabled() or not win.s["pcorr"]["on"]:
+            raise RuntimeError("поправка не включилась")
+        win._pc_rows[0][0].setValue(40)                       # тепло, зона «средние»
+        win.seg_pc_zone.changed.emit("lights")
+        win._pc_rows[1][0].setValue(-25)                      # пурпур, зона «света»
+        win.seg_pc_sel.changed.emit(5)
+        win._pc_rows[3][0].setValue(-30)                      # насыщенность пурпурного
+        c = win.s["pcorr"]
+        if c["tone"]["mids"][0] != 40 or c["tone"]["lights"][1] != -25 or c["sel"][5][1] != -30 or c["tone"]["lights"][0] != 0:
+            raise RuntimeError("значения попали не в те зоны: %r" % c)
+        win.seg_pc_zone.changed.emit("mids")
+        if win._pc_rows[0][0].value() != 40:
+            raise RuntimeError("ползунок не показал значение выбранной зоны")
+        win.persist()
+        if pcr.norm(pc.load_settings().get("pcorr"))["tone"]["mids"][0] != 40:
+            raise RuntimeError("поправка не сохранилась в настройках")
+        before = len(win.files)
+        win.add_pcorr_test()
+        if len(win.files) != before + 1:
+            raise RuntimeError("тестовая страница не добавилась")
+        win.w_pcorr_body.parent().grab().save(str(out / "selftest_pcorr.png"))
+        win.pcorr_reset()
+        if not pcr.is_neutral(win.s["pcorr"]) or not win.s["pcorr"]["on"]:
+            raise RuntimeError("сброс должен обнулить значения и оставить переключатель")
+        win.s["pcorr"] = pcr.default()
+        win.pcorr_sync()
+    step("поправка принтера: ползунки, зоны, сохранение, тестовая страница", printer_correction_flow)
     def levels_curves_selcol():
         win.adj_replace({}, [win.files[win.idx]])
         win.sync_adj()
@@ -8834,6 +9006,15 @@ def selftest(app):
         if not r["ok"] or win.s["nup"] != 4 or not win.s["borders"]:
             raise RuntimeError("set_layout: %s" % r)
         tool("set_layout", nup=1, borders=False)
+        r = tool("printer_correction", on=True, tone={"mids": [30, -10]}, sat=15)
+        if not r["ok"] or win.s["pcorr"]["tone"]["mids"] != [30.0, -10.0] or not win.sw_pcorr.isChecked() or win._pc_rows[0][0].value() != 30:
+            raise RuntimeError("printer_correction агента не дошла до окна: %s" % r)
+        r = tool("printer_correction", tone={"nowhere": [1, 1]})
+        if r["ok"]:
+            raise RuntimeError("неверная зона поправки должна давать ошибку")
+        tool("printer_correction", reset=True, on=False)
+        if not pcr.is_neutral(win.s["pcorr"]) or win.s["pcorr"]["on"]:
+            raise RuntimeError("сброс поправки агентом не сработал")
         r = tool("set_format", format="13x18")
         if not r["ok"] or not win.s["format"].startswith("13"):
             raise RuntimeError("set_format агента не изменил формат окна: %s" % r)
