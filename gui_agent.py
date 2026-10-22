@@ -31,19 +31,23 @@ GUI_SPEC = {
                       ("only", "boolean", "Untick everything else first.")]),
     "remove_unchecked": ("Remove unticked photos from the list (files on disk are not touched).", []),
     "enhance": ("The «Enhance» (level 1) and «Super» (level 2) buttons: choose levels, curve, selective colour, vibrance, noise reduction "
-                "and sharpness for each photo separately, tuned for Epson photo printing. The photo's previous colour correction is reset.",
+                "and sharpness for each photo separately, tuned for Epson photo printing. The photo's previous colour correction is reset. "
+                "The owner prefers manual set_adjust: use this only when the owner asks for it.",
                 [("level", "integer", "1 = Enhance, 2 = Super (default 1)."),
                  ("photo", "any", "Photo ref, list of refs, \"all\" or \"checked\". Default: the current photo.")]),
     "auto_levels": ("«Auto» in the levels editor: stretch levels of the current photo to the edges of its histogram.", []),
-    "color_presets": ("The two colour presets («Preset 1/2» buttons): which are saved and what they contain.", []),
-    "color_preset_save": ("Remember the current photo's colour correction in preset n until it is replaced.", [("n", "integer", "1 or 2.")]),
-    "color_preset_apply": ("Apply colour preset n.", [("n", "integer", "1 or 2."),
+    "color_presets": ("The three colour presets («Preset 1/2/3» buttons): which are saved and what they contain.", []),
+    "color_preset_save": ("Remember the current photo's colour correction in preset n until it is replaced.", [("n", "integer", "1, 2 or 3.")]),
+    "color_preset_apply": ("Apply colour preset n.", [("n", "integer", "1, 2 or 3."),
                                                      ("photo", "any", "Photo ref, list, \"all\" or \"checked\". Default: the current photo.")]),
     "copy_adjust": ("Copy the colour correction of the current photo.", []),
     "paste_adjust": ("Paste the copied colour correction.", [("photo", "any", "Photo ref, list, \"all\" or \"checked\". Default: the current photo.")]),
     "set_layout": ("Sheet layout of the window: photos per sheet 1..30, white borders and their width, fill cells.",
                    [("nup", "integer", "Photos per sheet 1..30."), ("borders", "boolean", "White margin at the edge and between photos."),
-                    ("border_mm", "number", "Margin in mm."), ("fill", "boolean", "Fill cells by cropping.")]),
+                    ("border_mm", "number", "Margin in mm."), ("fill", "boolean", "Fill cells by cropping."),
+                    ("cell_w", "number", "Frame width in mm: switches the sheet to «by size» mode (as many such frames as fit)."),
+                    ("cell_h", "number", "Frame height in mm (use together with cell_w)."),
+                    ("by_size", "boolean", "false — back to «by number» (nup).")]),
     "set_view": ("Window view: crop (one photo with its frame) or sheet (layout of the sheets).", [("view", "string", "crop | sheet")]),
     "set_app_mode": ("PHOTO / DOCUMENT switch.", [("mode", "string", "photo | doc")]),
     "add_edge_test": ("Add the edge-test sheet (for borderless printing) of the current paper size to the open photos.", []),
@@ -137,6 +141,8 @@ class GuiAgent:
             if name not in self.spec:
                 raise pc.AgentError(f"Неизвестная команда «{name}». Список: app_guide", "unknown_command")
             self.last_request = time.time()
+            if name == "batch":
+                return self.run_batch(req, t0)
             with self.lock:
                 if name in self.native:
                     res, notes = self.on_gui(lambda: self.native[name](req))
@@ -160,6 +166,33 @@ class GuiAgent:
         except Exception:
             pass
         return out
+
+    def run_batch(self, req, t0):
+        """batch: несколько команд (и движка, и окна) за один вызов; каждая выполняется как обычная."""
+        items = req.get("commands")
+        if isinstance(items, str):
+            try:
+                items = json.loads(items)
+            except ValueError:
+                items = None
+        if not isinstance(items, list) or not items or len(items) > 60:
+            return {"ok": False, "cmd": "batch", "error": {"code": "bad_value", "message": "commands: непустой список [{cmd, ...}], не больше 60"}}
+        stop = req.get("stop_on_error", True) not in (False, "false", 0, "0")
+        res, stopped = [], None
+        for i, it in enumerate(items):
+            if isinstance(it, (list, tuple)) and it:
+                it = {"cmd": it[0], **(it[1] if len(it) > 1 and isinstance(it[1], dict) else {})}
+            if not isinstance(it, dict) or str(it.get("cmd") or "") in ("", "batch"):
+                out = {"ok": False, "error": {"code": "bad_request", "message": "элемент: {cmd, ...}, вложенный batch нельзя"}}
+            else:
+                out = self.execute(dict(it))
+                if isinstance(out.get("result"), dict):
+                    out["result"] = {k: v for k, v in out["result"].items() if k != "_image_b64"}
+            res.append(out)
+            if not out.get("ok") and stop:
+                stopped = i
+                break
+        return {"ok": True, "cmd": "batch", "result": {"done": len(res), "of": len(items), "stopped_at": stopped, "results": res}}
 
     # ---------- команды движка над состоянием окна
     def states_key(self):
@@ -299,7 +332,7 @@ class GuiAgent:
         if w.idx >= 0:
             f = w.files[w.idx]
             st = w.states[f]
-            cur = {"index": w.idx, "name": f.name, "path": str(f), "rotation": st.rotation, "copies": st.copies, "edited": st.edited,
+            cur = {"index": w.idx, "name": f.name, "path": str(f), "rotation": pc.rot_deg(st.rotation), "flip_h": bool(pc.rot_flips(st.rotation)[0]), "flip_v": bool(pc.rot_flips(st.rotation)[1]), "copies": st.copies, "edited": st.edited,
                    "size": list(w.img_size), "adjust": self._adj_summary()}
         try:
             sheets = w.sheet_count() if w.files else 0
@@ -377,16 +410,16 @@ class GuiAgent:
     def c_preset_save(self, req):
         w = self.win
         n = int(req.get("n") or 0)
-        if n not in (1, 2):
-            raise pc.AgentError("n: 1 или 2", "bad_value")
+        if n not in (1, 2, 3):
+            raise pc.AgentError("n: 1, 2 или 3", "bad_value")
         w.preset_save(n)
         return {"saved": n in [int(k) for k in w.settings.get("adj_presets", {})]}
 
     def c_preset_apply(self, req):
         w = self.win
         n = int(req.get("n") or 0)
-        if n not in (1, 2):
-            raise pc.AgentError("n: 1 или 2", "bad_value")
+        if n not in (1, 2, 3):
+            raise pc.AgentError("n: 1, 2 или 3", "bad_value")
         if str(n) not in w.settings.get("adj_presets", {}):
             raise pc.AgentError(f"Пресет {n} пуст.", "preset_empty")
         files = self.files_of(req)
@@ -416,6 +449,19 @@ class GuiAgent:
                 raise pc.AgentError("nup: 1..30", "bad_value")
             w.seg_nup.set(n)
             w._layout_set("nup", n)
+        if "cell_w" in req or "cell_h" in req:
+            for k in ("cell_w", "cell_h"):
+                if k in req:
+                    v = float(req[k])
+                    if not 10 <= v <= 1000:
+                        raise pc.AgentError(f"{k}: 10..1000 мм", "bad_value")
+                    w.e_cell[k].setText("%g" % v)
+                    w.s[k] = "%g" % v
+            w.seg_cell.set(True)
+            w._layout_set("cell_mode", True)
+        if "by_size" in req and not req["by_size"]:
+            w.seg_cell.set(False)
+            w._layout_set("cell_mode", False)
         if "borders" in req:
             on = bool(req["borders"])
             w.sw_borders.setChecked(on)
@@ -427,7 +473,8 @@ class GuiAgent:
         if "fill" in req:
             w.s["fill"] = bool(req["fill"])
             w.redraw()
-        return {"nup": w.s["nup"], "borders": w.s["borders"], "border_mm": w.border_mm(), "fill": w.s["fill"], "sheets": w.sheet_count()}
+        return {"nup": w.s["nup"], "borders": w.s["borders"], "border_mm": w.border_mm(), "fill": w.s["fill"], "sheets": w.sheet_count(),
+                "by_size": bool(w.s.get("cell_mode")), "cell_mm": list(w.cell_mm())}
 
     def c_set_view(self, req):
         v = str(req.get("view") or "").lower()

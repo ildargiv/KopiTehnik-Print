@@ -9,10 +9,12 @@ INSTRUCTIONS = (
     "Start with app_state (what is open, current settings, your permissions) and app_guide (full list of features and which "
     "tool does what; topics: overview, photos, color, sheet, print, documents, settings, tips). Every command returns numbers, so "
     "you can check work without seeing the screen; preview_photo / render_sheet with inline=true return a picture. "
-    "Typical flow: open_folder → set_format / set_layout → auto_crop or set_crop → enhance or set_adjust → set_color_profile → "
+    "Typical flow: open_folder → set_format / set_layout → set_crop (or auto_crop as a starting point) → set_adjust → set_color_profile → "
     "print_photos (the window's own print, same as the Print button) or the lower-level plan_print → render_sheet → preflight → print. "
     "You have full rights, including printing; the owner may limit printing in the programme settings (app_state shows the limits). "
-    "Paper is loaded by the owner as needed: do not print test pages unprompted, and prefer one real print over many trials.")
+    "Paper is loaded by the owner as needed: do not print test pages unprompted, and prefer one real print over many trials. "
+    "The owner prefers MANUAL work: set frames, colour (set_adjust: levels, curves, r/g/b…) and everything else yourself, photo by photo, "
+    "and avoid the automatic helpers (enhance «Enhance/Super», auto_adjust, auto_levels, auto/smart crop) unless the owner asks for them.")
 
 OVERVIEW = """# PhotoCrop — обзор
 
@@ -35,7 +37,7 @@ PHOTOS = """# Фото: открыть, выбрать, кадрировать
   Форматы: JPG, PNG, TIFF, BMP, WEBP, HEIC (нужна pillow-heif). Папки с результатами программы («Готовые», «Печать») пропускаются.
 * **Выбрать**: select_photo(photo) — какое фото показано; check_photos(photos, on) — отметки «+» (что печатать и сохранять);
   remove_unchecked — убрать неотмеченные из списка (файлы на диске не трогаются). photo — индекс с 0, имя файла или его часть.
-* **Рамка**: set_crop(cx, cy, scale, angle, orient, rotation, copies), move_crop, reset_crop, rotate_photo(90/180/270), set_copies.
+* **Рамка**: set_crop(cx, cy, scale, angle, orient, rotation, copies), move_crop, reset_crop, rotate_photo(90/180/270), flip_photo(h|v), set_copies.
   cx, cy — центр рамки в долях фото; scale — размер относительно наибольшей вписанной рамки; angle — наклон в градусах.
 * **Автоматическая рамка**: auto_crop(method=center|focus|fill|smart). smart — умная рамка: находит лица, людей, питомцев и не режет их;
   результат по каждому фото: ok / note / check / manual и причины. Модели (~36 МБ) скачиваются при первом использовании.
@@ -60,13 +62,22 @@ COLOR = """# Цвет
   - **selcol** — 6 строк (красный, жёлтый, зелёный, голубой, синий, пурпурный) по [оттенок, насыщенность, яркость] от −100 до 100;
     оттенок ±100 = ±30°; серые тона почти не меняются.
   reset=true очищает коррекцию.
+* **Быстро и точно:**
+  - **batch(commands=[{cmd, ...}, ...])** — несколько команд за один вызов (рамки и коррекция десятков фото за раз); при ошибке останавливается.
+  - **contact_sheet** — одна картинка со всеми кадрами (номера, пометки A/F/R); **compare_photo** — «до / после» рядом с числами; **analyze_photos** — таблица яркости, баланса RGB, клиппинга и резкости по всей серии (находит выбивающиеся кадры без просмотра картинок).
+  - **white_balance(photo, point=[x,y] | region=[x0,y0,x1,y1])** — укажите место, которое должно быть серым или белым (карта, серая стена, белая бумага): ползунки r/g/b выставятся по формуле движка, яркость не меняется. Повторный вызов на том же месте ничего не меняет.
+  - **set_adjust(..., relative=true)** — прибавить к текущему значению (bright=+5), а не задать.
+  - **flip_photo(photo, axis="h"|"v")** — зеркально отразить фото (перевёрнутые надписи, сканы); повторный вызов отменяет отражение. rotate_photo — только повороты.
+  - **list_icc_profiles(query)** — установленные в Windows ICC-профили; set_color_profile принимает имя («Photo Glossy»), если оно однозначно.
+  - Без параметра photo команды работают с текущим фото (select_photo меняет его); в ответах всегда есть имя и индекс.
+* **Правило владельца: настраивайте цвет вручную (set_adjust), автоматику не применяйте без просьбы.** enhance, auto_adjust и auto_levels ниже — только по явному запросу.
 * **enhance(level, photos)** — кнопки «Улучшить» (1) и «Супер» (2): подбирает коррекцию под фотопечать на струйном принтере Epson для
   каждого фото отдельно. Уровни (чёрная и белая точки по краям гистограммы, гамма вместо яркости), мягкая S-кривая, выборочный цвет
   по составу кадра (небо, зелень, кожа), красочность, шумоподавление, резкость. **Прежняя коррекция фото сбрасывается целиком.**
   Если цвета выходят за охват принтера, красочность уменьшается. После enhance можно донастроить set_adjust, а увидеть результат —
   analyze_photo / preview_photo.
 * auto_levels — «Авто» в уровнях (растяжение по краям гистограммы). auto_adjust — осторожные яркость и контраст по статистике.
-* **Пресеты цвета** (кнопки «Пресет 1/2»): color_preset_save(n) запоминает текущую коррекцию, color_preset_apply(n) применяет,
+* **Пресеты цвета** (кнопки «Пресет 1/2/3»; названия пользователь может менять): color_preset_save(n) запоминает текущую коррекцию, color_preset_apply(n) применяет,
   color_presets показывает. Хранятся в настройках программы до следующего сохранения.
 * copy_adjust / paste_adjust(all) — скопировать коррекцию с фото и вставить в другое или во все отмеченные.
 * **Цветовой профиль принтера (ICC)**: set_color_profile(on, icc, intent, bpc, embed), get_color_profile. Экранная имитация печати в окне
@@ -128,6 +139,7 @@ TIPS = """# Советы
 * Начинайте с app_state: он показывает режим, открытые фото, текущий формат, права и ограничения.
 * Результат проверяйте числами (analyze_photo, photo_info, preflight), картинкой — реже (preview_photo inline=true).
 * Любую серию правок человек может отменить Ctrl+Z; это обычные шаги отмены окна.
+* Предпочитайте ручную настройку: рамки (set_crop / move_crop), цвет (set_adjust: уровни, кривые, r/g/b, баланс), параметры листа и печати задавайте сами и по каждому фото отдельно. Автоматику (enhance «Улучшить / Супер», auto_adjust, auto_levels, auto_crop, умная рамка) без просьбы владельца не используйте: она сбрасывает уже сделанную коррекцию и подбирает усреднённо.
 * Не меняйте то, о чём не просили: если человек правил фото руками, enhance сбросит его коррекцию — предупредите.
 * Печать расходует бумагу и чернила: сначала plan_print / preflight, потом печать; для проверки раскладки хватит render_sheet.
 * Ошибки команд имеют код и сообщение; ответ ok=false не означает сбой программы.

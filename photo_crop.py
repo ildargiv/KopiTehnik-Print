@@ -206,7 +206,7 @@ def _sanitize_state(st):
             v = float(getattr(st, k))
             setattr(st, k, v if math.isfinite(v) else (1.0 if k == "scale" else 0.0 if k == "angle" else 0.5))
         st.copies = max(1, min(99, int(st.copies)))
-        st.rotation = int(st.rotation) % 360 if int(st.rotation) % 90 == 0 else 0
+        st.rotation = int(st.rotation) if (int(st.rotation) % 90 == 0 and 0 <= int(st.rotation) < 1080) else 0
         st.adj = clean_adj(st.adj if isinstance(st.adj, dict) else {})
         st.edited = bool(st.edited)
         normalize(st)
@@ -309,6 +309,49 @@ def to_rgb(img, icc=None):
 _SIZE_CACHE = {}
 
 
+def rot_deg(r):
+    """Поворот фото по часовой в градусах (0/90/180/270). Число rotation хранит и зеркалирование: +360 — по горизонтали, +720 — по вертикали."""
+    return int(r) % 360
+
+
+def rot_flips(r):
+    r = int(r)
+    return (r // 360) % 2, (r // 720) % 2
+
+
+def rot_make(deg, fh=0, fv=0):
+    return int(deg) % 360 + 360 * int(bool(fh)) + 720 * int(bool(fv))
+
+
+def rot_add(r, deg):
+    """Повернуть уже показанное фото ещё на deg градусов (зеркалирование сохраняется)."""
+    fh, fv = rot_flips(r)
+    return rot_make(rot_deg(r) + deg, fh, fv)
+
+
+def rot_flip(r, axis):
+    """Отразить показанное фото: axis «h» — слева направо, «v» — сверху вниз."""
+    fh, fv = rot_flips(r)
+    if axis == "h":
+        fh ^= 1
+    else:
+        fv ^= 1
+    return rot_make(-rot_deg(r), fh, fv)             # зеркало после поворота = зеркало до поворота в обратную сторону
+
+
+def orient_img(im, r):
+    """Применить rotation (зеркалирование, потом поворот) к картинке PIL."""
+    fh, fv = rot_flips(r)
+    if fh:
+        im = ImageOps.mirror(im)
+    if fv:
+        im = ImageOps.flip(im)
+    d = rot_deg(r)
+    if d:
+        im = im.rotate(-d, expand=True)
+    return im
+
+
 def true_size(path, rotation):
     """Реальные размеры снимка с учётом EXIF-ориентации и поворота, без полной загрузки (результат кэшируется)."""
     try:
@@ -335,7 +378,7 @@ def _true_size(path, rotation):
             o = 1
     if o in (5, 6, 7, 8):
         W, H = H, W
-    if rotation in (90, 270):
+    if rot_deg(rotation) in (90, 270):
         W, H = H, W
     return W, H
 
@@ -347,7 +390,7 @@ def load_preview(path, rotation):
         was_cmyk = im.mode == "CMYK"
         im = ImageOps.exif_transpose(im)
         if rotation:
-            im = im.rotate(-rotation, expand=True)
+            im = orient_img(im, rotation)
         im = to_rgb(im, icc)
         if was_cmyk:
             icc = None                                # после конвертации это уже sRGB
@@ -688,7 +731,7 @@ def jpeg_draft(im0, st, mode, dpi, paper=None, fmt=None, orient=None):
     try:
         rw, rh = im0.size
         ori = im0.getexif().get(0x0112, 1)
-        swap = (ori in (5, 6, 7, 8)) != (st.rotation in (90, 270))
+        swap = (ori in (5, 6, 7, 8)) != (rot_deg(st.rotation) in (90, 270))
         W, H = (rh, rw) if swap else (rw, rh)
         if paper is None:
             paper = paper_size(fmt, orient, W, H)
@@ -920,7 +963,7 @@ def process_file(path, st, o, dest=None):
     except Exception:
         pass
     if st.rotation:
-        im = im.rotate(-st.rotation, expand=True)
+        im = orient_img(im, st.rotation)
     im = to_rgb(im, icc)
     if cmyk:
         icc = None                                # CMYK уже переведён в sRGB
@@ -1713,7 +1756,7 @@ def _tile(ph, ppi, o, mode, fast, cache):
         jpeg_draft(im0, st, mode, ppi, paper=paper)
         im = ImageOps.exif_transpose(im0)
     if st.rotation:
-        im = im.rotate(-st.rotation, expand=True)
+        im = orient_img(im, st.rotation)
     im = to_rgb(im, icc)
     if cmyk:
         icc = None
@@ -2558,6 +2601,42 @@ def _hue_shares(im):
         return 0.0, 0.0, 0.0
 
 
+def wb_solve(prev, adj, reg, strength=1.0):
+    """Баланс белого по эталону. prev — показанное фото (PIL), adj — текущая коррекция фото, reg — [x0,y0,x1,y1] доли 0..1.
+    Возвращает {"set": {r,g,b}, "before": [R,G,B], "box": (...), "tile": картинка эталона} или бросает ValueError."""
+    from PIL import ImageStat
+    W, H = prev.size
+    x0, y0, x1, y1 = [min(1.0, max(0.0, float(v))) for v in reg]
+    box = (int(x0 * W), int(y0 * H), max(int(x0 * W) + 2, int(x1 * W)), max(int(y0 * H) + 2, int(y1 * H)))
+    tile = to_rgb(prev.crop(box))
+    if max(tile.size) > 300:
+        tile.thumbnail((300, 300), RESAMPLE_FAST)
+    meas = adjust_tile(tile, merge_adj({}, type("S", (), {"adj": adj})()), 300) if adj else tile    # меряем то, что видно сейчас
+    mean = ImageStat.Stat(meas).mean[:3]
+    if min(mean) < 8 or max(mean) > 252:
+        raise ValueError("Эталон слишком тёмный или пересвечен (%s): выберите место со средней яркостью, не блик и не тень." % [round(v) for v in mean])
+    target = sum(mean) / 3.0
+    dg = [target / max(1.0, m) for m in mean]
+    gm = (dg[0] * dg[1] * dg[2]) ** (1 / 3.0)
+    dg = [1 + (g / gm - 1) * strength for g in dg]                   # общая яркость не меняется
+    full = adj_full(adj)
+    new = {}
+    for k, g in zip(("r", "g", "b"), dg):
+        gain = (1 + 0.30 * full[k] / 100.0) * g
+        new[k] = round(max(-100.0, min(100.0, (gain - 1) / 0.30 * 100.0)), 1)
+    return {"set": new, "before": [round(v, 1) for v in mean], "box": box, "tile": tile}
+
+
+def _font_px(px):
+    """Шрифт для подписей на служебных картинках."""
+    for name in ("segoeui.ttf", "arial.ttf", "DejaVuSans.ttf"):
+        try:
+            return ImageFont.truetype(name, px)
+        except Exception:
+            continue
+    return ImageFont.load_default()
+
+
 def analyze_image(img):
     from PIL import ImageStat
     im = to_rgb(img).copy()                          # не трогаем чужую картинку (предпросмотр на экране)
@@ -2731,6 +2810,7 @@ SPEC = {
                    ("config", "object", "smart: extra SmartCrop settings.")]),
     "reset_crop": ("Reset frame (and optionally everything) of photo(s).", [PHOTOS, ("everything", "boolean", "Also copies, rotation, adjustments.")]),
     "rotate_photo": ("Rotate the photo itself by 90/180/270 degrees (resets the frame).", [PHOTOS, ("degrees", "integer", "90, -90, 180, 270")]),
+    "flip_photo": ("Mirror the photo itself (as shown): axis h = left-right, v = top-bottom (resets the frame). Call again to undo the mirror.", [PHOTOS, ("axis", "string", "h (default) | v")]),
     "set_copies": ("Number of copies to print per photo.", [PHOTOS, ("copies", "integer", "1..99")]),
     "set_adjust": ("Per-photo adjustments (QImage-style) for saving and printing: bright/contrast/sat/vib/temp/tint/r/g/b/shadows/highlights -100..100, gamma 0.2..5, auto contrast|color|off, bw/sepia bool, denoise 0..100, sharp 0..500 (%), sharp_radius, sharp_thr. 'photo' may be 'all'.",
                    [PHOTOS, ("bright", "number", ""), ("contrast", "number", ""), ("sat", "number", ""), ("gamma", "number", ""), ("bw", "boolean", ""),
@@ -2738,7 +2818,22 @@ SPEC = {
                     ("r", "number", "Red balance"), ("g", "number", "Green balance"), ("b", "number", "Blue balance"),
                     ("shadows", "number", "Lift shadows (+) / deepen (-)"), ("highlights", "number", "Brighten (+) / recover (-) highlights"),
                     ("auto", "string", "contrast | color | bw | off — auto levels (bw = automatic black-and-white with enhancement)"), ("sepia", "boolean", ""), ("denoise", "number", "Colour-noise reduction 0..100"),
-                    ("sharp", "number", ""), ("sharp_radius", "number", ""), ("sharp_thr", "integer", ""), ("reset", "boolean", "Clear adjustments first.")]),
+                    ("sharp", "number", ""), ("sharp_radius", "number", ""), ("sharp_thr", "integer", ""), ("reset", "boolean", "Clear adjustments first."),
+                    ("relative", "boolean", "true: numeric values are ADDED to the current ones (e.g. bright=+5), not set.")]),
+    "batch": ("Run several commands in ONE call (fewer round-trips): commands = [{cmd, ...params}, ...]; they run in order, stop at the first error unless stop_on_error=false. Pictures are not returned inside a batch.",
+              [("commands", "any", "List of {\"cmd\": name, ...params}"), ("stop_on_error", "boolean", "default true")]),
+    "white_balance": ("White balance from a reference: give a region [x0,y0,x1,y1] (fractions 0..1 of the shown photo) or a point [x,y] (+radius) that must be neutral grey/white; sets the r/g/b sliders so it becomes neutral (brightness unchanged). Returns the measured colour before/after.",
+                      [PHOTOS, ("region", "any", "[x0,y0,x1,y1] fractions of the photo"), ("point", "any", "[x,y] fractions"), ("radius", "number", "with point: half-size, default 0.02"),
+                       ("strength", "number", "0..1, default 1"), ("apply", "boolean", "false = measure only")]),
+    "list_icc_profiles": ("ICC profiles installed in Windows (printer profiles live in C:\\Windows\\System32\\spool\\drivers\\color) with description; set_color_profile accepts the name.",
+                          [("query", "string", "Filter by name, e.g. EPSON")]),
+    "analyze_photos": ("Compact statistics for many photos at once (brightness, RGB balance, clipping, sharpness, skin share): a fast look over the whole series.",
+                       [PHOTOS, ("adjusted", "boolean", "Measure with the current adjustments (default false: without)")]),
+    "contact_sheet": ("One picture with all frames (numbered, with flags A adjusted / F flipped / R rotated / xN copies). inline=true (default) returns the picture.",
+                      [PHOTOS, ("cols", "integer", ""), ("cell_px", "integer", "default 220"), ("offset", "integer", ""), ("limit", "integer", "default 48"),
+                       ("adjusted", "boolean", "Show with adjustments (default true)"), ("inline", "boolean", ""), ("path", "string", "")]),
+    "compare_photo": ("Before / after side by side (frame without and with the adjustments), with numeric analysis of both. inline=true (default) returns the picture.",
+                      [PHOTOS, ("max_px", "integer", "default 600"), ("inline", "boolean", ""), ("path", "string", "")]),
     "auto_adjust": ("Suggest (and by default apply) brightness/contrast from image statistics.",
                     [PHOTOS, ("strength", "number", "0..1.5, default 1"), ("apply", "boolean", "Default true.")]),
     "list_formats": ("Print formats, orientations, modes, intents, file types and print-option enums.", []),
@@ -2805,9 +2900,9 @@ SPEC = {
     "reload": ("Rescan the open folder; frames of photos that are still there are kept, new photos are added, missing ones dropped.",
                [("recursive", "boolean", "Default: as opened.")]),
 }
-UNDOABLE = {"set_crop", "move_crop", "auto_crop", "reset_crop", "rotate_photo", "set_copies", "set_adjust", "auto_adjust",
+UNDOABLE = {"white_balance", "set_crop", "move_crop", "auto_crop", "reset_crop", "rotate_photo", "flip_photo", "set_copies", "set_adjust", "auto_adjust",
             "set_format", "set_orientation", "set_mode"}
-READONLY = {"help", "status", "list_photos", "photo_info", "analyze_photo", "preview_photo", "list_formats", "get_color_profile",
+READONLY = {"list_icc_profiles", "analyze_photos", "contact_sheet", "compare_photo", "help", "status", "list_photos", "photo_info", "analyze_photo", "preview_photo", "list_formats", "get_color_profile",
             "list_printers", "driver_settings", "driver_capabilities", "get_print_options", "list_presets", "plan_print",
             "render_sheet", "preflight", "printer_status", "queue", "wait_queue", "jobs", "job_status", "print_configuration", "get_log"}
 
@@ -2889,7 +2984,7 @@ class AgentSession:
                      "copies_in_name": bool(s.get("copies_in_name", True))}
         self.cm = {"on": bool(s.get("cm_on", False)), "icc": s.get("icc", ""),
                    "intent": s.get("intent") if s.get("intent") in INTENTS else "Относительный колориметрический",
-                   "bpc": bool(s.get("bpc", True)), "embed": bool(s.get("embed", False))}
+                   "bpc": bool(s.get("bpc", False)), "embed": bool(s.get("embed", False))}
         self.popts = dict(PRINT_DEFAULTS)
         self.popts.update({k: v for k, v in s.get("print", {}).items() if k in PRINT_DEFAULTS})
         self._undo, self._redo = [], []                  # откат команд агента (рамки, поворот, копии, коррекция, формат)
@@ -3077,7 +3172,8 @@ class AgentSession:
                 "paper_mm": [round(paper[0], 1), round(paper[1], 1)],
                 "orientation": "portrait" if paper[0] < paper[1] else "landscape",
                 "crop": {"cx": round(st.cx, 4), "cy": round(st.cy, 4), "scale": round(st.scale, 4), "angle": round(st.angle, 2),
-                         "orient": st.orient, "rotation": st.rotation, "copies": st.copies, "adjust": dict(st.adj), "edited": st.edited},
+                         "orient": st.orient, "rotation": rot_deg(st.rotation), "flip_h": bool(rot_flips(st.rotation)[0]), "flip_v": bool(rot_flips(st.rotation)[1]),
+                         "copies": st.copies, "adjust": dict(st.adj), "edited": st.edited},
                 "frame_px": {"center": [round(g[0], 1), round(g[1], 1)], "width": round(g[2], 1), "height": round(g[3], 1)},
                 "frame_corners": [[round(x / W, 4), round(y / H, 4)] for x, y in cs],
                 "frame_inside_photo": frame_inside(W, H, g),
@@ -3481,7 +3577,7 @@ class AgentSession:
             except Exception:
                 W = H = None
             out.append({"index": i, "name": f.name, "size_px": [W, H], "edited": st.edited, "copies": st.copies,
-                        "orient": st.orient, "rotation": st.rotation, "crop": [round(st.cx, 3), round(st.cy, 3), round(st.scale, 3), round(st.angle, 1)],
+                        "orient": st.orient, "rotation": rot_deg(st.rotation), "flip_h": bool(rot_flips(st.rotation)[0]), "flip_v": bool(rot_flips(st.rotation)[1]), "crop": [round(st.cx, 3), round(st.cy, 3), round(st.scale, 3), round(st.angle, 1)],
                         "adjusted": bool(st.adj)})
         return {"total": len(self.files), "offset": off, "photos": out}
 
@@ -3527,7 +3623,8 @@ class AgentSession:
             dest = AGENT_DIR / "preview" / (f.stem + "_preview.png")
         dest.parent.mkdir(parents=True, exist_ok=True)
         img.save(dest, "PNG")
-        res = {"photo": f.name, "file": str(dest), "size_px": list(img.size), "analysis": analyze_image(img)}
+        res = {"photo": f.name, "index": self.files.index(f), "file": str(dest), "size_px": list(img.size), "analysis": analyze_image(img),
+               "note": "Без параметра photo берётся текущее фото (select_photo): в ответе всегда имя и индекс."}
         if self._flag(a, "inline", False):
             res["_image_b64"] = self._jpeg_b64(img, 640)
         return res
@@ -3548,6 +3645,7 @@ class AgentSession:
             rotation = int(fnum(a["rotation"], 0)) % 360
             if rotation % 90:
                 raise AgentError("rotation: 0, 90, 180 или 270", "bad_value")
+            rotation = (rotation, a)       # градусы; зеркалирование каждого фото сохраняется ниже
         orient = False
         if "orient" in a:
             o = a["orient"]
@@ -3567,8 +3665,8 @@ class AgentSession:
         copies = int(fnum(a["copies"], 1, 1, 99)) if a.get("copies") is not None else None
         for f in fl:
             st = self.states[f]
-            if rotation is not None and rotation != st.rotation:
-                st.rotation = rotation
+            if rotation is not None and rotation[0] != rot_deg(st.rotation):
+                st.rotation = rot_make(rotation[0], *rot_flips(st.rotation))
                 st.cx = st.cy = 0.5
                 st.scale, st.angle = 1.0, 0.0
             for k, v in nums.items():
@@ -3692,11 +3790,24 @@ class AgentSession:
         fl = self._many(a)
         for f in fl:
             st = self.states[f]
-            st.rotation = (st.rotation + deg) % 360
+            st.rotation = rot_add(st.rotation, deg)
             st.cx = st.cy = 0.5
             st.scale, st.angle, st.orient = 1.0, 0.0, None
             self._mark(f)
         return self._crop_info(fl[0]) if len(fl) == 1 else {"rotated": len(fl)}
+
+    def cmd_flip_photo(self, a):
+        axis = str(a.get("axis") or "h").strip().lower()[:1]
+        if axis not in ("h", "v"):
+            raise AgentError("axis: h (слева направо) или v (сверху вниз)", "bad_value")
+        fl = self._many(a)
+        for f in fl:
+            st = self.states[f]
+            st.rotation = rot_flip(st.rotation, axis)
+            st.cx = st.cy = 0.5
+            st.scale, st.angle, st.orient = 1.0, 0.0, None
+            self._mark(f)
+        return self._crop_info(fl[0]) if len(fl) == 1 else {"flipped": len(fl), "axis": axis}
 
     def cmd_set_copies(self, a):
         n = int(fnum(a.get("copies"), 1, 1, 99))
@@ -3730,13 +3841,193 @@ class AgentSession:
                         v = _truthy(v)
                     else:
                         try:
-                            float(str(v).replace(",", "."))
+                            fv = float(str(v).replace(",", "."))
                         except ValueError:
                             raise AgentError(f"{k}: нужно число, получено «{v}»", "bad_value")
+                        if self._flag(a, "relative", False) and k not in ("auto",):
+                            v = float(st.adj.get(k, NEUTRAL_ADJ[k])) + fv           # относительная правка: +5 к текущему значению
                     upd[k] = v
             st.adj = clean_adj({**st.adj, **upd})
             self._mark(f)
         return {"photos": len(fl), "adjust": dict(self.states[fl[0]].adj)}
+
+    # ================= команды для быстрой и точной работы агента
+    def cmd_batch(self, a):
+        """Несколько команд за один вызов (меньше обращений): выполняются по порядку, при ошибке остановка (stop_on_error=false — продолжать)."""
+        items = a.get("commands")
+        if isinstance(items, str):
+            try:
+                items = json.loads(items)
+            except ValueError:
+                raise AgentError("commands: нужен JSON-список [{cmd, ...параметры}, ...]", "bad_value")
+        if not isinstance(items, list) or not items:
+            raise AgentError("commands: непустой список [{cmd, ...параметры}, ...]", "bad_value")
+        if len(items) > 60:
+            raise AgentError("commands: не больше 60 команд за раз", "bad_value")
+        stop = self._flag(a, "stop_on_error", True)
+        res, stopped = [], None
+        for i, it in enumerate(items):
+            if isinstance(it, (list, tuple)) and it:
+                it = {"cmd": it[0], **(it[1] if len(it) > 1 and isinstance(it[1], dict) else {})}
+            if not isinstance(it, dict) or str(it.get("cmd") or "") in ("", "batch"):
+                out = {"ok": False, "error": {"code": "bad_request", "message": "элемент: {cmd, ...}, вложенный batch нельзя"}}
+            else:
+                out = self.execute(dict(it))
+                out = {k: v for k, v in out.items() if k != "notes"}
+                if isinstance(out.get("result"), dict):
+                    out["result"] = {k: v for k, v in out["result"].items() if k != "_image_b64"}      # картинки в batch не возвращаем
+            res.append(out)
+            if not out.get("ok") and stop:
+                stopped = i
+                break
+        return {"done": len(res), "of": len(items), "stopped_at": stopped, "results": res}
+
+    ICC_DIRS = [r"C:\Windows\System32\spool\drivers\color"]
+
+    def _icc_list(self, query=""):
+        out, q = [], str(query or "").strip().lower()
+        dirs = [Path(d) for d in self.ICC_DIRS] + [Path(os.environ.get("WINDIR", "C:\\Windows")) / "System32" / "spool" / "drivers" / "color"]
+        seen = set()
+        for d in dirs:
+            if not d.is_dir():
+                continue
+            for f in sorted(d.iterdir()):
+                if f.suffix.lower() in (".icc", ".icm") and f not in seen:
+                    seen.add(f)
+                    if q and q not in f.name.lower():
+                        continue
+                    row = {"name": f.stem, "file": f.name, "path": str(f)}
+                    try:
+                        desc, space, ok = profile_info(f)
+                        row.update(description=desc, space=space)
+                    except Exception:
+                        pass
+                    out.append(row)
+        return out
+
+    def cmd_list_icc_profiles(self, a):
+        rows = self._icc_list(a.get("query"))
+        return {"count": len(rows), "profiles": rows[:200], "hint": "set_color_profile(icc=<name or path>): the name is enough when it is unique."}
+
+    def _resolve_icc(self, v):
+        v = str(v)
+        if not v.strip() or Path(v).expanduser().is_file():
+            return v
+        rows = self._icc_list(v)
+        exact = [r for r in rows if r["name"].lower() == v.strip().lower() or r["file"].lower() == v.strip().lower()]
+        rows = exact or rows
+        if len(rows) == 1:
+            return rows[0]["path"]
+        if len(rows) > 1:
+            raise AgentError("icc: подходит несколько профилей: " + ", ".join(r["file"] for r in rows[:8]) + "; уточните имя", "bad_value")
+        return v
+
+    def cmd_analyze_photos(self, a):
+        """Короткая сводка по многим фото сразу (яркость, баланс RGB, клиппинг, резкость): быстрый обзор серии."""
+        a = dict(a)
+        a.setdefault("photo", "all")
+        fl = self._many(a)
+        adj = self._flag(a, "adjusted", False)
+        res = []
+        for f in fl[:200]:
+            an = analyze_image(self._preview_img(f, 360, adjust=adj))
+            st = self.states[f]
+            res.append({"index": self.files.index(f), "name": f.name, "mean_luma": an["mean_luma"], "mean_rgb": an["mean_rgb"],
+                        "warmth_r_minus_b": an["warmth_r_minus_b"], "p1": an["p1"], "p99": an["p99"],
+                        "shadow_clip_pct": an["shadow_clip_pct"], "highlight_clip_pct": an["highlight_clip_pct"],
+                        "saturation": an["saturation"], "sharpness": an["sharpness"], "skin_share": an["skin_share"],
+                        "adjusted": bool(st.adj), "flip_h": bool(rot_flips(st.rotation)[0]), "flip_v": bool(rot_flips(st.rotation)[1])})
+        return {"count": len(res), "measured": "with adjustments" if adj else "frame without adjustments", "photos": res}
+
+    def cmd_white_balance(self, a):
+        """Баланс белого по эталону: область/точка, которая должна быть нейтральной. Выставляет ползунки r, g, b."""
+        f = self._one(a.get("photo"))
+        st = self.states[f]
+        prev, _ = load_preview(f, st.rotation)
+        W, H = prev.size
+        reg = a.get("region")
+        if isinstance(reg, str):
+            try:
+                reg = json.loads(reg)
+            except ValueError:
+                raise AgentError("region: [x0, y0, x1, y1] — доли 0..1 от показанного фото", "bad_value")
+        if reg is None and a.get("point") is not None:
+            pt = a["point"]
+            if isinstance(pt, str):
+                pt = json.loads(pt)
+            rad = fnum(a.get("radius"), 0.02, 0.002, 0.3)
+            reg = [pt[0] - rad, pt[1] - rad, pt[0] + rad, pt[1] + rad]
+        if not (isinstance(reg, (list, tuple)) and len(reg) == 4):
+            raise AgentError("Нужна region [x0,y0,x1,y1] (доли 0..1) или point [x,y] (+ radius): место, которое должно быть серым/белым.", "bad_value")
+        try:
+            r_ = wb_solve(prev, st.adj, reg, fnum(a.get("strength"), 1.0, 0.0, 1.0))
+        except ValueError as ex:
+            raise AgentError(str(ex), "bad_region")
+        new, before, box, tile = r_["set"], r_["before"], r_["box"], r_["tile"]
+        if self._flag(a, "apply", True):
+            st.adj = clean_adj({**st.adj, **new})
+            self._mark(f)
+            from PIL import ImageStat
+            after = [round(v, 1) for v in ImageStat.Stat(adjust_tile(tile, merge_adj({}, st), 300)).mean[:3]]
+        else:
+            after = None
+        sat = [k for k, v in new.items() if abs(v) >= 99.5]
+        return {"photo": f.name, "index": self.files.index(f), "sample_box_px": list(box), "sample_rgb_before": before, "sample_rgb_after": after,
+                "set": new, "applied": self._flag(a, "apply", True),
+                "note": ("ползунок упёрся в предел (%s): цветовой сдвиг больше, чем можно убрать; добавьте temp/tint" % ",".join(sat)) if sat else "ok"}
+
+    def cmd_contact_sheet(self, a):
+        """Одна картинка со всеми кадрами (с номерами и пометками): быстрый общий взгляд на серию."""
+        a = dict(a)
+        a.setdefault("photo", "all")
+        fl = self._many(a)
+        off, lim = int(fnum(a.get("offset"), 0, 0)), int(fnum(a.get("limit"), 48, 1, 120))
+        fl = fl[off:off + lim]
+        cell = int(fnum(a.get("cell_px"), 220, 80, 500))
+        cols = int(fnum(a.get("cols"), 0, 0, 12)) or min(6, max(1, len(fl)))
+        rows = -(-len(fl) // cols)
+        pad = 8
+        sheet = Image.new("RGB", (cols * (cell + pad) + pad, rows * (cell + 22 + pad) + pad), (24, 25, 28))
+        d = ImageDraw.Draw(sheet)
+        font = _font_px(13)
+        for n, f in enumerate(fl):
+            im = self._preview_img(f, cell, adjust=self._flag(a, "adjusted", True)).copy()
+            im.thumbnail((cell, cell), RESAMPLE_FAST)
+            x, y = pad + (n % cols) * (cell + pad), pad + (n // cols) * (cell + 22 + pad)
+            sheet.paste(to_rgb(im), (x + (cell - im.width) // 2, y + (cell - im.height) // 2))
+            st = self.states[f]
+            flags = ("A" if st.adj else "") + ("F" if any(rot_flips(st.rotation)) else "") + ("R" if rot_deg(st.rotation) else "") + ("x%d" % st.copies if st.copies != 1 else "")
+            d.text((x, y + cell + 3), "%d %s %s" % (self.files.index(f), f.name[:22], flags), fill=(200, 202, 208), font=font)
+        dest = self._path(a["path"], "path") if a.get("path") else AGENT_DIR / "preview" / "contact_sheet.png"
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        sheet.save(dest, "PNG")
+        res = {"file": str(dest), "photos": [{"index": self.files.index(f), "name": f.name} for f in fl], "size_px": list(sheet.size),
+               "legend": "A = есть коррекция, F = отражено, R = повёрнуто, xN = копий N"}
+        if self._flag(a, "inline", True):
+            res["_image_b64"] = self._jpeg_b64(sheet, 1400)
+        return res
+
+    def cmd_compare_photo(self, a):
+        """До / после рядом: кадр без коррекции и с коррекцией."""
+        f = self._one(a.get("photo"))
+        px = int(fnum(a.get("max_px"), 600, 200, 1600))
+        left, right = to_rgb(self._preview_img(f, px, adjust=False)), to_rgb(self._preview_img(f, px, adjust=True))
+        w, h = left.size
+        out = Image.new("RGB", (w * 2 + 12, h + 24), (24, 25, 28))
+        out.paste(left, (0, 24))
+        out.paste(right, (w + 12, 24))
+        d = ImageDraw.Draw(out)
+        font = _font_px(14)
+        d.text((4, 4), "до", fill=(200, 202, 208), font=font)
+        d.text((w + 16, 4), "после", fill=(255, 160, 60), font=font)
+        dest = self._path(a["path"], "path") if a.get("path") else AGENT_DIR / "preview" / (f.stem + "_compare.png")
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        out.save(dest, "PNG")
+        res = {"photo": f.name, "index": self.files.index(f), "file": str(dest), "size_px": list(out.size),
+               "before": analyze_image(left), "after": analyze_image(right)}
+        if self._flag(a, "inline", True):
+            res["_image_b64"] = self._jpeg_b64(out, 1400)
+        return res
 
     def cmd_auto_adjust(self, a):
         fl = self._many(a)
@@ -3823,7 +4114,7 @@ class AgentSession:
     def cmd_set_color_profile(self, a):
         c = self.cm
         if a.get("icc") is not None:
-            c["icc"] = str(self._path(a["icc"], "icc")) if str(a["icc"]).strip() else ""
+            c["icc"] = str(self._path(self._resolve_icc(a["icc"]), "icc")) if str(a["icc"]).strip() else ""
         if a.get("intent") is not None:
             v = str(a["intent"]).strip()
             c["intent"] = INTENT_CODES.get(v.lower()) or (v if v in INTENTS else None)
@@ -4288,7 +4579,9 @@ MCP_INSTRUCTIONS = (
     "layout, image statistics), so you can verify work without seeing the screen; render_sheet/preview_photo with inline=true "
     "return a picture. Flow: open_folder → set_format → crop/adjust → set_color_profile → select_printer → set_driver_settings → "
     "set_print_options → plan_print → render_sheet → preflight → print(wait=false) → job_status / wait_queue / queue. "
-    "Printing wastes paper: always run preflight first and check the checks list.")
+    "Printing wastes paper: always run preflight first and check the checks list. "
+    "The owner prefers MANUAL work: set frames and colour (set_crop, set_adjust: levels, curves, r/g/b) yourself, photo by photo, and avoid the "
+    "automatic helpers (auto_adjust, auto levels, auto/smart crop) unless the owner asks for them.")
 
 
 MCP_VERSIONS = ("2025-06-18", "2025-03-26", "2024-11-05")
@@ -4582,7 +4875,7 @@ def make_thumb(path, rotation=0, size=THUMB):
         icc = im0.info.get("icc_profile")
         im = ImageOps.exif_transpose(im0)
         if rotation:
-            im = im.rotate(-rotation, expand=True)
+            im = orient_img(im, rotation)
         im = to_rgb(im, icc)
         im.thumbnail((size, size), RESAMPLE_FAST)
     bg = Image.new("RGB", (size, size), (32, 32, 32))
@@ -5385,7 +5678,7 @@ class App:
         self.v_cm_on = tk.BooleanVar(value=s.get("cm_on", False))
         self.v_icc = tk.StringVar(value=s.get("icc", ""))
         self.v_intent = tk.StringVar(value=s.get("intent") if s.get("intent") in INTENTS else next(iter(INTENTS)))
-        self.v_bpc = tk.BooleanVar(value=s.get("bpc", True))
+        self.v_bpc = tk.BooleanVar(value=s.get("bpc", False))
         self.v_embed = tk.BooleanVar(value=s.get("embed", True))
         self.v_proof = tk.BooleanVar(value=False)
         self.v_gamut = tk.BooleanVar(value=False)
@@ -7118,9 +7411,6 @@ class AdjustPanel:
         if level and str(a.v_dpi.get()).replace(",", ".").strip() not in ("360", "720"):
             a.v_dpi.set("360")                                              # родное разрешение печати Epson (5760 = 16 × 360)
             notes.append("разрешение сохранения 360 dpi")
-        if a.v_cm_on.get() and not a.v_bpc.get():
-            a.v_bpc.set(True)
-            notes.append("включена компенсация точки чёрного")
         self.sync()
         msg = f"Готово: {len(mapping)} фото" + (f", не удалось {bad}" if bad else "")
         self.lbl_enh.config(text=msg + (". " + "; ".join(notes) if notes else "") + ".", foreground="#1a8f2e")
@@ -7536,7 +7826,7 @@ class PrintDialog:
             self.app.v_icc.set(cm.get("icc", ""))
             if cm.get("intent") in INTENTS:
                 self.app.v_intent.set(cm["intent"])
-            self.app.v_bpc.set(bool(cm.get("bpc", True)))
+            self.app.v_bpc.set(bool(cm.get("bpc", False)))
             self.app.v_embed.set(bool(cm.get("embed", False)))
         if p.get("printer") in self.printers:
             self.v_printer.set(p["printer"])
