@@ -6,6 +6,8 @@
 
 **Free, legal, no cracks, no malware.** Free for personal use and for a single workstation: copy shop, studio, workshop or independent printer. [Download for Windows](https://github.com/ildargiv/KopiTehnik-Print/releases/latest) · 15 interface languages · no Python needed
 
+<p align="center"><img src="docs/screenshots/main-window.png" width="900" alt="KopiTehnik Print: a photo in the crop frame, the print format and the printer profile in one window"></p>
+
 ## Why KopiTehnik Print
 
 - **Colour as on screen.** Printing through the printer's ICC profile for natural colours without manual guesswork.
@@ -22,8 +24,6 @@ License: free for personal use and for a business with one workstation at one lo
 ## Screenshots
 
 <p align="center"><img src="docs/promo.gif" alt="KopiTehnik Print animated overview" width="760"></p>
-
-![KopiTehnik Print main window: crop frame on a demo photo](docs/screenshots/main-window.png)
 
 ![Colour adjustments page](docs/screenshots/color-adjustments.png)
 

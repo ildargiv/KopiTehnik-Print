@@ -6,6 +6,8 @@
 
 **Легально, без взломов и вирусов.** Бесплатно для личного использования и для одного рабочего места. [Скачать для Windows](https://github.com/ildargiv/KopiTehnik-Print/releases/latest) · 15 языков интерфейса · Python не нужен
 
+<p align="center"><img src="docs/screenshots/main-window.png" width="900" alt="KopiTehnik Print: фото в рамке кадрирования, формат печати и профиль принтера в одном окне"></p>
+
 ## Почему KopiTehnik Print
 
 - **Цвет как на экране.** Печать через цветовой профиль принтера (ICC), натуральные цвета без подбора вручную.
@@ -21,9 +23,7 @@
 
 <p align="center"><img src="docs/promo-ru.gif" alt="KopiTehnik Print: анимированный обзор" width="760"></p>
 
-![KopiTehnik Print: главное окно, рамка кадрирования на демо-фото](docs/screenshots/main-window.png)
-
-![Colour adjustments page](docs/screenshots/color-adjustments.png)
+![Настройка цвета](docs/screenshots/color-adjustments.png)
 
 ![Print sheet with 4 photos per sheet](docs/screenshots/print-sheet.png)
 
