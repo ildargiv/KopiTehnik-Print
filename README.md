@@ -2,6 +2,8 @@
 
 # KopiTehnik Print
 
+[![license](https://img.shields.io/badge/license-free%20for%20one%20workstation-2E7D32.svg)](https://github.com/ildargiv/KopiTehnik-Print/blob/main/LICENSE) [![release](https://img.shields.io/github/v/release/ildargiv/KopiTehnik-Print?label=release)](https://github.com/ildargiv/KopiTehnik-Print/releases/latest) ![Windows](https://img.shields.io/badge/Windows-10%20%7C%2011-0078D4) ![MCP](https://img.shields.io/badge/MCP-server-6E4AFF)
+
 **Photo quality on compatible ink.** Print software for Windows: accurate colour, borderless printing, smart cropping and order preparation for small copy centers, photo desks and professional printers. Every print costs less.
 
 **Free, legal, no cracks, no malware.** Free for personal use and for a single workstation: copy shop, studio, workshop or independent printer. [Download for Windows](https://github.com/ildargiv/KopiTehnik-Print/releases/latest) · 15 interface languages · no Python needed

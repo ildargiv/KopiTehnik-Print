@@ -2,6 +2,8 @@
 
 # KopiTehnik Print
 
+[![license](https://img.shields.io/badge/license-free%20for%20one%20workstation-2E7D32.svg)](https://github.com/ildargiv/KopiTehnik-Print/blob/main/LICENSE) [![release](https://img.shields.io/github/v/release/ildargiv/KopiTehnik-Print?label=release)](https://github.com/ildargiv/KopiTehnik-Print/releases/latest) ![Windows](https://img.shields.io/badge/Windows-10%20%7C%2011-0078D4) ![MCP](https://img.shields.io/badge/MCP-server-6E4AFF)
+
 **Фотокачество на совместимых чернилах.** Программа печати для Windows: точный цвет, печать без полей, умное кадрирование и подготовка заказов для небольших копицентров, фотосалонов и профессиональных печатников. Каждый отпечаток дешевле.
 
 **Легально, без взломов и вирусов.** Бесплатно для личного использования и для одного рабочего места. [Скачать для Windows](https://github.com/ildargiv/KopiTehnik-Print/releases/latest) · 15 языков интерфейса · Python не нужен
