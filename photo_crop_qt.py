@@ -8510,7 +8510,7 @@ class SettingsDialog(QDialog):
         sw_conf.toggled.connect(lambda on: (st.__setitem__("confirm_actions", bool(on)), SOFT.__setitem__(0, bool(on))))
         sw_multi = Switch(bool(st.get("multi_enabled", False)))
         sw_multi.toggled.connect(lambda on: (st.__setitem__("multi_enabled", bool(on)), app.multi_refresh()))
-        general = card("Общие", row("Печать на нескольких принтерах (кнопка «Принтеры…» рядом с «Печать»)", sw_multi), row("Язык интерфейса", seg_lang), row("Папка, с которой начинается «Открыть»", seg_dir),
+        general = card("Общие", row("Язык интерфейса", seg_lang), row("Папка, с которой начинается «Открыть»", seg_dir),
                        row("Спрашивать подтверждение обычных действий (сброс, применение ко всем, печать)", sw_conf))
         sw_snap = Switch(app.s["snap"])
         sw_snap.toggled.connect(lambda on: app.s.__setitem__("snap", bool(on)))
@@ -8574,7 +8574,9 @@ class SettingsDialog(QDialog):
 
         first = section("Интерфейс", "settings", [("Оформление", [look]), ("Язык и общие", [general])])
         section("Фото", "image", [("Кадрирование", [crop]), ("Сохранение", [self._save_card()])])
-        section("Печать", "print", [("Профили печати", [self._profiles_card()]),
+        multi_card = card("Несколько принтеров", row("Печать на нескольких принтерах (кнопка «Принтеры…» рядом с «Печать»)", sw_multi),
+                          lbl("Листы расходятся между отмеченными принтерами. Отметить принтеры можно кнопкой «Принтеры…» рядом с «Печать».", "muted", wrap=True))
+        section("Печать", "print", [("Несколько принтеров", [multi_card]), ("Профили печати", [self._profiles_card()]),
                                     ("Счётчик печати", [self._counter_card()])])
         section("ИИ-агент (MCP)", "sparkle", [("Подключение и права", [self._agent_card()])])
         section("О программе", "doc", [("Версия и обновления", [upd_card])])
