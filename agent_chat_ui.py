@@ -9,7 +9,7 @@ import threading
 from pathlib import Path
 
 from PySide6.QtCore import Qt, Signal, QObject
-from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QTextBrowser, QLineEdit, QPushButton, QLabel,
+from PySide6.QtWidgets import (QPlainTextEdit, QWidget, QVBoxLayout, QHBoxLayout, QTextBrowser, QLineEdit, QPushButton, QLabel,
                                QMessageBox, QFileDialog, QComboBox)
 
 import agent_chat as ac
@@ -113,6 +113,9 @@ class ChatDock(QWidget):
             seg.group.button(5).setVisible(on)
         if getattr(win, "b_chat", None) is not None:
             win.b_chat.setVisible(on)
+        if getattr(win, "quick_chat", None) is not None:
+            win.quick_chat.setVisible(on)
+            win.quick_chat.restyle()
         if not on:
             self.agent = None
             if getattr(win, "pages", None) is not None and win.pages.currentIndex() == 5:
@@ -185,8 +188,8 @@ class ChatDock(QWidget):
         self.sig.status.emit("%s: %s" % (what, name))
 
     # ---------- чат
-    def send(self):
-        text = self.edit.text().strip()
+    def send(self, text=None):
+        text = (text if isinstance(text, str) else self.edit.text()).strip()
         st = self.win.settings
         if not text or self.busy:
             return
@@ -218,9 +221,15 @@ class ChatDock(QWidget):
         self.b_stop.setEnabled(False)
         self.l_status.setText("")
         self._add("agent", text)
+        q = getattr(self.win, "quick_chat", None)
+        if q is not None:
+            q.show_reply(text)
 
     def _on_status(self, text):
         self.l_status.setText(text)
+        q = getattr(self.win, "quick_chat", None)
+        if q is not None:
+            q.show_status(text)
 
     def _add(self, who, text):
         name = _tr("Вы") if who == "you" else _tr(TITLE)
@@ -288,3 +297,65 @@ def settings_card(dlg):
                   q.hbox(q.btn("Создать папку", make_folder), q.btn("Выбрать…", pick_folder), spacing=6), l_note,
                   q.lbl("По умолчанию агент выключен и ничего никуда не передаёт. Запросы уходят только на указанный адрес модели. "
                         "Агент видит только рабочую папку, папку программы и папки, которые вы разрешили.", "muted", wrap=True))
+
+
+class QuickChat(QWidget):
+    """Маленькое окно агента на две строки под вкладками: писать можно с любой вкладки. Enter отправляет, Shift+Enter — новая строка.
+    Ответ коротко показан под полем, вся история во вкладке «Агент»."""
+
+    def __init__(self, chat):
+        super().__init__()
+        self.chat = chat
+        self.edit = _QuickEdit(self)
+        self.edit.setPlaceholderText(_tr("Агенту: напишите задание…"))
+        self.edit.setFixedHeight(52)
+        self.b = QPushButton()
+        self.b.setFixedSize(34, 34)
+        self.b.setToolTip(_tr("Отправить агенту (Enter)"))
+        self.b.clicked.connect(self.submit)
+        self.l = QLabel("")
+        self.l.setWordWrap(True)
+        self.l.setProperty("role", "muted")
+        self.l.setMaximumHeight(34)
+        top = QHBoxLayout()
+        top.setContentsMargins(0, 0, 0, 0)
+        top.addWidget(self.edit, 1)
+        top.addWidget(self.b, 0, Qt.AlignBottom)
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(4)
+        lay.addLayout(top)
+        lay.addWidget(self.l)
+
+    def restyle(self):
+        import photo_crop_qt as q
+        self.edit.setStyleSheet("QPlainTextEdit { background: %s; color: %s; border: 1px solid %s; border-radius: 8px; padding: 4px 6px; }"
+                                % (q.T["surface"], q.T["text"], q.T["border"]))
+        self.b.setIcon(q.icon("sparkle", q.T["accent_text"]))
+        self.b.setStyleSheet("QPushButton { background: %s; color: %s; border: 1px solid %s; border-radius: 8px; font-size: 16px; }"
+                             "QPushButton:hover { border-color: %s; }" % (q.T["accent"], q.T["accent_text"], q.T["accent"], q.T["text"]))
+
+    def submit(self):
+        text = self.edit.toPlainText().strip()
+        if text and not self.chat.busy:
+            self.edit.clear()
+            self.chat.send(text)
+
+    def show_status(self, text):
+        self.l.setText(text)
+
+    def show_reply(self, text):
+        self.l.setText(text.replace("\n", " ")[:160])
+        self.l.setToolTip(text)
+
+
+class _QuickEdit(QPlainTextEdit):
+    def __init__(self, owner):
+        super().__init__()
+        self.owner = owner
+
+    def keyPressEvent(self, e):
+        if e.key() in (Qt.Key_Return, Qt.Key_Enter) and not (e.modifiers() & Qt.ShiftModifier):
+            self.owner.submit()
+            return
+        super().keyPressEvent(e)

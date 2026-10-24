@@ -5034,7 +5034,7 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         self.l_prog.hide()
         self.b_cancel = btn("Отменить печать", self.cancel.set, "link")
         self.b_cancel.hide()
-        self.b_save = btn("Сохранить отмеченные", lambda: self.save(True), big=True, ico="save", tip="Ctrl+Shift+S; Ctrl+S — только текущее фото")
+        self.b_save = btn("Сохранить", lambda: self.save(True), big=True, ico="save", tip="Сохранить отмеченные. Ctrl+Shift+S; Ctrl+S — только текущее фото")
         self.b_print = PrintButton(tr("Печать"))
         self.b_print.setProperty("kind", "primary")
         self.b_print.setProperty("big", "true")
@@ -5043,8 +5043,11 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         self.b_print.setToolTip("Ctrl+P")
         self.b_print.setCursor(Qt.PointingHandCursor)
         self.b_print.clicked.connect(lambda _=False: self.print_now())
-        lay = vbox(hbox(self.seg_page, margins=(0, 0, 16, 0)), self.pages, self.progress, self.l_prog, self.b_cancel, self.b_save, self.b_print,
-                   spacing=10, margins=(4, 12, 14, 12))
+        self.quick_chat = acu.QuickChat(self.chat_dock)      # маленькое окно агента на две строки: писать можно с любой вкладки
+        self.quick_chat.setVisible(bool(self.settings.get("chat_enabled", False)))
+        self.b_save.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
+        lay = vbox(hbox(self.seg_page, margins=(0, 0, 16, 0)), self.pages, self.progress, self.l_prog, self.b_cancel, self.quick_chat,
+                   hbox(self.b_save, self.b_print, spacing=8), spacing=10, margins=(4, 12, 14, 12))
         lay.setStretch(1, 1)
         w.setLayout(lay)
         QTimer.singleShot(0, self.reload_printers)
@@ -6120,7 +6123,7 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         if hasattr(self, "left_w"):
             self.left_w.setVisible(not doc)
             for i, b in enumerate(self.seg_page.group.buttons()):   # кнопки вкладок: Макет, Цвет, Умная рамка, Принтер, Документ
-                b.setVisible((i >= 3) if doc else (i < 4))
+                b.setVisible(bool(self.settings.get("chat_enabled", False)) if i == 5 else (i >= 3) if doc else (i < 4))
             self.b_save.setVisible(not doc)
             for w in self._photo_only:
                 w.setVisible(not doc and not (self.compact and w in self._caps))
@@ -6666,8 +6669,8 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         else:
             self.l_sheet.setText(tr("Одно фото на лист, без полей"))
             self.l_sheet2.setText(trf("Листов к печати: {n}", n=ns))
-        self.b_save.setText((trf("Сохранить листы · {n}", n=ns) if self.sheet_mode() else trf("Сохранить отмеченные · {n}", n=len(chk)))
-                            if self.files else tr("Сохранить отмеченные"))
+        self.b_save.setText(trf("Сохранить · {n}", n=ns if self.sheet_mode() else len(chk)) if self.files else tr("Сохранить"))
+        self.b_save.setToolTip(tr("Сохранить листы") if self.sheet_mode() else tr("Сохранить отмеченные"))
         self.b_undo.setEnabled(bool(self._undo))
         self.b_redo.setEnabled(bool(self._redo))
         if not cur:
@@ -8852,7 +8855,7 @@ pc.EN_FMT.update({
     "{n} фото на листе, ячейка {w}×{h} мм": "{n} photos per sheet, cell {w}×{h} mm", "Белое поле {m} мм вокруг каждого фото": "White border {m} mm around each photo",
     "Листов к печати: {n}": "Sheets to print: {n}", "Сохранить листы · {n}": "Save sheets · {n}", "Сохраняю листы: {n}": "Saving sheets: {n}",
     "Готовлю листы к печати: {n}": "Preparing sheets for print: {n}",
-    "{n} из {m} отмечено": "{n} of {m} checked", "Сохранить отмеченные · {n}": "Save checked · {n}",
+    "{n} из {m} отмечено": "{n} of {m} checked", "Сохранить отмеченные · {n}": "Save checked · {n}", "Сохранить · {n}": "Save · {n}", "Сохранить": "Save",
     "Сохраняю: {n}": "Saving: {n}", "Готово: {n} файл(ов)": "Done: {n} file(s)", "На печать: {n} фото": "To print: {n} photos",
 })
 
