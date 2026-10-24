@@ -37,7 +37,7 @@ PHOTOS = """# Фото: открыть, выбрать, кадрировать
   Форматы: JPG, PNG, TIFF, BMP, WEBP, HEIC (нужна pillow-heif). Папки с результатами программы («Готовые», «Печать») пропускаются.
 * **Выбрать**: select_photo(photo) — какое фото показано; check_photos(photos, on) — отметки «+» (что печатать и сохранять);
   remove_unchecked — убрать неотмеченные из списка (файлы на диске не трогаются). photo — индекс с 0, имя файла или его часть.
-* **Рамка**: set_crop(cx, cy, scale, angle, orient, rotation, copies), move_crop, reset_crop, rotate_photo(90/180/270), flip_photo(h|v), set_copies.
+* **Рамка**: set_crop(cx, cy, scale, angle, orient, rotation, copies, mode), mode=crop|fit|auto — «кадрировать / вписать» только для этих фото (auto — как задано общим set_mode), move_crop, reset_crop, rotate_photo(90/180/270), flip_photo(h|v), set_copies.
   cx, cy — центр рамки в долях фото; scale — размер относительно наибольшей вписанной рамки; angle — наклон в градусах.
 * **Автоматическая рамка**: auto_crop(method=center|focus|fill|smart). smart — умная рамка: находит лица, людей, питомцев и не режет их;
   результат по каждому фото: ok / note / check / manual и причины. Модели (~36 МБ) скачиваются при первом использовании.

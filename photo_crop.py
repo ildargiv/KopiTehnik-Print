@@ -111,7 +111,7 @@ SETTINGS_PATH = Path(os.environ.get("APPDATA", str(Path.home()))) / "PhotoCrop" 
 
 class CropState:
     """Положение рамки для одного снимка (в долях, не зависит от формата)."""
-    __slots__ = ("cx", "cy", "scale", "angle", "orient", "rotation", "edited", "copies", "adj")
+    __slots__ = ("cx", "cy", "scale", "angle", "orient", "rotation", "edited", "copies", "adj", "mode")
 
     def __init__(self):
         self.cx = 0.5        # центр рамки, доля ширины
@@ -119,6 +119,7 @@ class CropState:
         self.scale = 1.0     # размер рамки относительно максимально вписанной
         self.angle = 0.0     # наклон рамки по часовой стрелке, градусы
         self.orient = None   # None = как выбрано глобально; "portrait" / "landscape"
+        self.mode = None     # None = как выбрано глобально; "crop" (кадрировать) / "fit" (вписать целиком) только для этого снимка
         self.rotation = 0    # поворот самого фото по часовой: 0/90/180/270
         self.edited = False
         self.copies = 1      # сколько копий печатать
@@ -209,11 +210,12 @@ def _sanitize_state(st):
         st.rotation = int(st.rotation) if (int(st.rotation) % 90 == 0 and 0 <= int(st.rotation) < 1080) else 0
         st.adj = clean_adj(st.adj if isinstance(st.adj, dict) else {})
         st.edited = bool(st.edited)
+        st.mode = st.mode if st.mode in ("crop", "fit") else None
         normalize(st)
     except Exception:
         for k, v in zip(("cx", "cy", "scale", "angle", "copies", "rotation"), (0.5, 0.5, 1.0, 0.0, 1, 0)):
             setattr(st, k, v)
-        st.adj = {}
+        st.adj, st.mode = {}, None
 
 
 def angle_from_mouse(cx, cy, mx, my, snap_step=None):
@@ -250,7 +252,13 @@ def frame_resize_edge(anchor, edge, mouse, ang, r, maxw):
     return anchor[0] + dx, anchor[1] + dy, w / maxw
 
 
+def photo_mode(st, mode):
+    """Режим «кадрировать / вписать» для снимка: личный, если задан, иначе общий."""
+    return st.mode if getattr(st, "mode", None) in ("crop", "fit") else mode
+
+
 def effective_dpi(W, H, paper, st, mode):
+    mode = photo_mode(st, mode)
     if mode == "fit":
         return min(W / (paper[0] / 25.4), H / (paper[1] / 25.4))
     _, _, w, _, _ = frame_geom(W, H, paper, st)
@@ -555,6 +563,7 @@ def render_frame(img, g, tw=None, th=None):
 
 def render(img, paper, st, mode, dpi, resize):
     """Готовое изображение для печати и его DPI."""
+    mode = photo_mode(st, mode)
     W, H = img.size
     pw, ph = paper
     if mode == "fit" and not resize:                 # без пересчёта: снимок как есть на белом поле нужной формы
@@ -726,6 +735,7 @@ def merge_adj(o, st):
 def jpeg_draft(im0, st, mode, dpi, paper=None, fmt=None, orient=None):
     """Ускоряет чтение JPEG: декодер сразу уменьшает снимок в 2/4/8 раз, но не ниже, чем нужно для печати
     (с учётом размера рамки), поэтому качество результата не страдает."""
+    mode = photo_mode(st, mode)
     if im0.format != "JPEG" or im0.mode not in ("RGB", "L"):
         return
     try:
@@ -1743,6 +1753,7 @@ def photo_sides(ph, o):
 
 def _tile(ph, ppi, o, mode, fast, cache):
     st, paper = ph["st"], ph["paper"]
+    mode = photo_mode(st, mode)
     o = merge_adj(o, st)
     sides = photo_sides(ph, o)
     key = (str(ph["path"]), st.cx, st.cy, st.scale, st.angle, st.rotation, paper, ppi, mode, fast, sides,
@@ -2799,9 +2810,9 @@ SPEC = {
                       [PHOTO, ("region", "string", "\"frame\" (default) or \"full\".")]),
     "preview_photo": ("Render the cropped result (with adjustments). Saves a PNG and returns analysis; inline=true also returns a small JPEG.",
                       [PHOTO, ("path", "string", "Where to save the PNG."), ("max_px", "integer", "Long side, default 800."), ("inline", "boolean", "")]),
-    "set_crop": ("Set crop frame values (any subset). cx,cy = frame centre as fractions 0..1 of the photo; scale = frame size relative to the largest inscribed frame (0.05..3); angle = degrees clockwise; orient = portrait|landscape|auto; rotation = photo rotation 0/90/180/270; copies = print copies.",
+    "set_crop": ("Set crop frame values (any subset). cx,cy = frame centre as fractions 0..1 of the photo; scale = frame size relative to the largest inscribed frame (0.05..3); angle = degrees clockwise; orient = portrait|landscape|auto; rotation = photo rotation 0/90/180/270; copies = print copies; mode = crop|fit|auto: crop/fit for these photos only, auto = as set globally by set_mode.",
                  [PHOTOS, ("cx", "number", ""), ("cy", "number", ""), ("scale", "number", ""), ("angle", "number", ""),
-                  ("orient", "string", ""), ("rotation", "integer", ""), ("copies", "integer", "")]),
+                  ("orient", "string", ""), ("rotation", "integer", ""), ("copies", "integer", ""), ("mode", "string", "")]),
     "move_crop": ("Relative frame change: dx,dy in fractions of the photo, dscale multiplies the size, dangle adds degrees.",
                   [PHOTOS, ("dx", "number", ""), ("dy", "number", ""), ("dscale", "number", ""), ("dangle", "number", "")]),
     "auto_crop": ("Automatic frame. method: center | focus (centre on the sharpest/most detailed area) | fill (largest frame, centred) | "
@@ -3176,7 +3187,7 @@ class AgentSession:
                 "paper_mm": [round(paper[0], 1), round(paper[1], 1)],
                 "orientation": "portrait" if paper[0] < paper[1] else "landscape",
                 "crop": {"cx": round(st.cx, 4), "cy": round(st.cy, 4), "scale": round(st.scale, 4), "angle": round(st.angle, 2),
-                         "orient": st.orient, "rotation": rot_deg(st.rotation), "flip_h": bool(rot_flips(st.rotation)[0]), "flip_v": bool(rot_flips(st.rotation)[1]),
+                         "orient": st.orient, "mode": st.mode, "rotation": rot_deg(st.rotation), "flip_h": bool(rot_flips(st.rotation)[0]), "flip_v": bool(rot_flips(st.rotation)[1]),
                          "copies": st.copies, "adjust": dict(st.adj), "edited": st.edited},
                 "frame_px": {"center": [round(g[0], 1), round(g[1], 1)], "width": round(g[2], 1), "height": round(g[3], 1)},
                 "frame_corners": [[round(x / W, 4), round(y / H, 4)] for x, y in cs],
@@ -3581,7 +3592,7 @@ class AgentSession:
             except Exception:
                 W = H = None
             out.append({"index": i, "name": f.name, "size_px": [W, H], "edited": st.edited, "copies": st.copies,
-                        "orient": st.orient, "rotation": rot_deg(st.rotation), "flip_h": bool(rot_flips(st.rotation)[0]), "flip_v": bool(rot_flips(st.rotation)[1]), "crop": [round(st.cx, 3), round(st.cy, 3), round(st.scale, 3), round(st.angle, 1)],
+                        "orient": st.orient, "mode": st.mode, "rotation": rot_deg(st.rotation), "flip_h": bool(rot_flips(st.rotation)[0]), "flip_v": bool(rot_flips(st.rotation)[1]), "crop": [round(st.cx, 3), round(st.cy, 3), round(st.scale, 3), round(st.angle, 1)],
                         "adjusted": bool(st.adj)})
         return {"total": len(self.files), "offset": off, "photos": out}
 
@@ -3659,6 +3670,15 @@ class AgentSession:
                 orient = str(o).lower()
             else:
                 raise AgentError("orient: portrait | landscape | auto", "bad_value")
+        pmode = False
+        if "mode" in a:
+            m = a["mode"]
+            if m in (None, "", "auto", "Авто"):
+                pmode = None
+            elif str(m).lower() in ("crop", "fit"):
+                pmode = str(m).lower()
+            else:
+                raise AgentError("mode: crop | fit | auto", "bad_value")
         nums = {}
         for k, lo, hi in (("cx", 0, 1), ("cy", 0, 1), ("scale", MIN_SCALE, MAX_SCALE), ("angle", -3600, 3600)):
             if a.get(k) is not None:
@@ -3677,6 +3697,8 @@ class AgentSession:
                 setattr(st, k, v)
             if orient is not False:
                 st.orient = orient
+            if pmode is not False:
+                st.mode = pmode
             if copies is not None:
                 st.copies = copies
             normalize(st)

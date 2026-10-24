@@ -1098,6 +1098,8 @@ class ThumbDelegate(QStyledItemDelegate):
         badge = ""
         if st is not None:
             badge = ("×%d" % st.copies) if st.copies > 1 else ""
+            if st.mode is not None:
+                badge = (("▭ " if st.mode == "fit" else "▣ ") + badge).strip()      # у фото свой режим: вписано / кадрировано
             marks = [m for m, on in (("кадр", st.edited and not st.adj), ("цвет", bool(st.adj))) if on]
             if st.adj:
                 badge = ("◐ " + badge).strip()
@@ -1231,7 +1233,7 @@ class CropCanvas(QWidget):
         app = self.app
         cur = app.cur()
         b.adjustSize()
-        y = 12 + (34 if (cur and app.mode() != "fit" and app.smart_banner_shown(cur[0])) else 0)
+        y = 12 + (34 if (cur and app.photo_mode(cur[0]) != "fit" and app.smart_banner_shown(cur[0])) else 0)
         x = max(8, self.width() - b.width() - 12)
         if b.x() != x or b.y() != y:
             b.move(x, y)
@@ -1366,7 +1368,7 @@ class CropCanvas(QWidget):
         f, st, W, H, paper = cur
         pm = app.preview_pm
         uh = ch - self.PILL_ZONE
-        if app.mode() == "fit":
+        if app.photo_mode(f) == "fit":
             pad = 18
             k = min((cw - 2 * pad) / paper[0], (uh - 2 * pad) / paper[1])
             PW, PH = paper[0] * k, paper[1] * k
@@ -2644,6 +2646,7 @@ class SheetView(QWidget):
         r2 = hbox(ibtn("rot_l", "Повернуть фото влево на 90°", lambda: self._act(lambda: a.rotate_photo(270)), 30, isize=17),
                   ibtn("rot_r", "Повернуть фото вправо на 90°", lambda: self._act(lambda: a.rotate_photo(90)), 30, isize=17),
                   ibtn("swap", "Повернуть место на листе: ширина ⇄ высота", self.flip_slot, 30, isize=17),
+                  ibtn("image", "Только это фото: кадрировать ⇄ вписать целиком (остальные не меняются)", lambda: self._act(a.toggle_photo_mode), 30, isize=17),
                   ibtn("tilt_l", "Наклонить фото влево", lambda: self._act(lambda: a.tilt(-0.5)), 30, isize=17),
                   ibtn("tilt_r", "Наклонить фото вправо", lambda: self._act(lambda: a.tilt(0.5)), 30, isize=17),
                   ibtn("zoom_in", "Крупнее", lambda: self._act(lambda: a.zoom(1 / 1.06)), 30, isize=17),
@@ -2783,7 +2786,7 @@ class SheetView(QWidget):
         app = self.app
         W, H, paper, rot = app.slot_paper(slot["f"], slot["rect"])
         r = self._rect(slot["rect"])
-        return cell_transform(W, H, paper, app.states[slot["f"]], app.mode(), rot, r.center().x(), r.center().y(), self.g[2]), W, H
+        return cell_transform(W, H, paper, app.states[slot["f"]], app.photo_mode(slot["f"]), rot, r.center().x(), r.center().y(), self.g[2]), W, H
 
     def _grip(self, r):
         return QPointF(r.center().x(), r.top() + 20)
@@ -2900,7 +2903,7 @@ class SheetView(QWidget):
         app.select_file(slot["f"])
         self._place_panel(True)
         if kind == "pan":
-            if app.mode() != "crop":
+            if app.photo_mode(slot["f"]) != "crop":
                 self.update()
                 return
             t, W, H = self._transform(slot)
@@ -4952,6 +4955,9 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
 
         def ib(name, tip, slot):
             return ibtn(name, tip, slot, sz, False, None, isz)
+        self.b_pmode = ib("image", "Только это фото: вписать целиком", self.toggle_photo_mode)
+        self.b_pmode.setCheckable(True)
+        self.b_pmode.setStyleSheet("QToolButton:checked{background:%s;border-radius:8px;}" % mix(T["raised"], T["select"], 0.45))
         self.b_undo = ib("undo", "Отменить (Ctrl+Z)", self.undo)
         self.b_redo = ib("redo", "Повторить (Ctrl+Y)", self.redo)
         pill.setLayout(hbox(
@@ -4960,7 +4966,7 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
             ib("rot_r", "Повернуть фото вправо на 90°", lambda: self.rotate_photo(90)),
             ib("mirror_h", "Отразить фото слева направо", lambda: self.flip_photo("h")),
             ib("mirror_v", "Отразить фото сверху вниз", lambda: self.flip_photo("v")),
-            ib("flip", "Рамка: книжная ⇄ альбомная (R)", self.flip_frame), vsep(),
+            ib("flip", "Рамка: книжная ⇄ альбомная (R)", self.flip_frame), self.b_pmode, vsep(),
             ib("tilt_l", "Наклонить рамку влево на 0,1° (Shift+колесо — на 1°)", lambda: self.tilt(-0.1)), self.l_angle,
             ib("tilt_r", "Наклонить рамку вправо на 0,1°", lambda: self.tilt(0.1)),
             ib("level", "Выровнять рамку (0°)", lambda: self.tilt(None)), vsep(),
@@ -6163,6 +6169,41 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
     def mode(self):
         return pc.MODES[self.s["mode"]]
 
+    def photo_mode(self, f):
+        """«Кадрировать / Вписать» для фото f: личный выбор, если он есть, иначе общий."""
+        st = self.states.get(f)
+        return pc.photo_mode(st, self.mode()) if st is not None else self.mode()
+
+    def toggle_photo_mode(self):
+        """Кнопка «Только это фото»: у открытого фото режим становится противоположным общему, повторное нажатие возвращает «как у всех»."""
+        cur = self.cur()
+        if not cur:
+            return
+        f, st = cur[0], cur[1]
+        self.push_undo([f])
+        st.mode = None if st.mode is not None else ("fit" if self.mode() == "crop" else "crop")
+        self.mark(f)
+        self.redraw()
+        self.sync_photo_mode_btn()
+
+    def sync_photo_mode_btn(self):
+        b = getattr(self, "b_pmode", None)
+        if b is None:
+            return
+        cur = self.cur()
+        own = bool(cur and cur[1].mode is not None)
+        g = self.mode()
+        other = tr("Вписать целиком") if g == "crop" else tr("Кадрировать")
+        same = tr("Кадрировать") if g == "crop" else tr("Вписать целиком")
+        b.blockSignals(True)
+        b.setChecked(own)
+        b.blockSignals(False)
+        if own:
+            now = tr("Вписать целиком") if cur[1].mode == "fit" else tr("Кадрировать")
+            b.setToolTip(trf("Только это фото: {m}. Нажмите, чтобы вернуть «как у всех» ({g})", m=now, g=same))
+        else:
+            b.setToolTip(trf("Только это фото: {m}. Остальные останутся как сейчас ({g})", m=other, g=same))
+
     def checked_files(self):
         if self._only is not None:
             return [self._only] if self._only in self.files else []
@@ -6675,7 +6716,7 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
                 self.l_info.setText(tr("Отмечено фото: 0"))
             return
         f, st, W, H, paper = cur
-        mode = self.mode()
+        mode = self.photo_mode(f)
         dpi = pc.effective_dpi(W, H, paper, st, mode)
         if mode == "crop":
             g = pc.frame_geom(W, H, paper, st)
@@ -6689,6 +6730,7 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         self.l_pos.setText("%d / %d" % (chk.index(f) + 1, len(chk)))
         self.l_angle.setText(("%.1f°" % st.angle).replace(".", ","))
         self.l_copies.setText(str(st.copies))
+        self.sync_photo_mode_btn()
 
     def _thumbs_ready(self):
         self.thumbs_view.viewport().update()
@@ -6758,7 +6800,7 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
 
     def zoom(self, factor):
         cur = self.cur()
-        if not cur or self.mode() != "crop":
+        if not cur or self.photo_mode(cur[0]) != "crop":
             return
         f, st, W, H, paper = cur
         self.push_undo([f], ("zoom", f), 0.8)
@@ -6769,7 +6811,7 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
 
     def tilt(self, delta):
         cur = self.cur()
-        if not cur or self.mode() != "crop":
+        if not cur or self.photo_mode(cur[0]) != "crop":
             return
         f, st, W, H, paper = cur
         self.push_undo([f], ("tilt", f) if delta is not None else None, 0.8)
@@ -8940,6 +8982,31 @@ def selftest(app):
         finally:
             win.settings["print"] = old_print
     step("подрезка на рамке поворачивается вместе с кадром", bleed_overlay_rotates)
+
+    def photo_mode_one_only():
+        if len(win.files) < 2:
+            raise RuntimeError("для проверки нужно хотя бы два фото")
+        win.show_photo(0)
+        glob = win.mode()
+        f0, f1 = win.files[0], win.files[1]
+        want = "fit" if glob == "crop" else "crop"
+        win.toggle_photo_mode()
+        if win.states[f0].mode != want or win.states[f1].mode is not None:
+            raise RuntimeError("режим должен смениться только у открытого фото: %r / %r" % (win.states[f0].mode, win.states[f1].mode))
+        if win.photo_mode(f0) != want or win.photo_mode(f1) != glob or win.mode() != glob:
+            raise RuntimeError("общий режим не должен меняться")
+        if not win.b_pmode.isChecked():
+            raise RuntimeError("кнопка «Только это фото» не показывает личный режим")
+        win.canvas.repaint()                                   # рисование в личном режиме не падает
+        shot("photo_mode")
+        win.undo()
+        if win.states[f0].mode is not None:
+            raise RuntimeError("отмена не вернула режим «как у всех»")
+        win.redo()
+        win.toggle_photo_mode()                                # повторное нажатие — снова «как у всех»
+        if win.states[f0].mode is not None or win.b_pmode.isChecked():
+            raise RuntimeError("повторное нажатие должно вернуть режим «как у всех»")
+    step("режим «кадрировать / вписать» только для открытого фото", photo_mode_one_only)
     step("отмена и повтор", lambda: (win.undo(), win.redo()))
     step("снять отметку", lambda: win.toggle_check(0))
     step("снять все", lambda: win.check_all(False))
