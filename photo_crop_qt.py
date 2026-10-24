@@ -31,6 +31,7 @@ import brand_datestamp as bd                               # noqa: E402  (фир
 import photo_crop as pc                                    # noqa: E402  (движок программы)
 import color_tools as ct                                   # noqa: E402  (уровни, кривые, выборочный цвет)
 import printer_corr as pcr                                 # noqa: E402  (поправка принтера: цвет на выходе, не на экране)
+import multi_print as mp                                   # noqa: E402  (печать на нескольких принтерах: общая очередь листов)
 import gui_agent as ga                                     # noqa: E402  (ИИ-агент внутри окна)
 import i18n                                                # noqa: E402  (переводы интерфейса)
 
@@ -49,7 +50,7 @@ try:
                                    QListView, QStyledItemDelegate, QStyle, QScrollArea, QStackedWidget, QDialog, QFileDialog,
                                    QMessageBox, QProgressBar, QProgressDialog, QAbstractItemView, QGraphicsDropShadowEffect, QListWidget,
                                    QListWidgetItem, QTreeWidget, QTreeWidgetItem, QMenu, QSizePolicy, QAbstractButton, QTableWidget, QTableWidgetItem, QTabWidget,
-                                   QInputDialog)
+                                   QInputDialog, QCheckBox)
     from PySide6.QtSvg import QSvgRenderer
 except ImportError:
     sys.stderr.write("PhotoCrop: не установлена библиотека PySide6.\nВыполните в командной строке:  pip install PySide6\n")
@@ -5029,6 +5030,9 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         self.b_cancel = btn("Отменить печать", self.cancel.set, "link")
         self.b_cancel.hide()
         self.b_save = btn("Сохранить отмеченные", lambda: self.save(True), big=True, ico="save", tip="Ctrl+Shift+S; Ctrl+S — только текущее фото")
+        self.b_multi = btn("Принтеры…", self.multi_dialog, ico="print")
+        self.b_multi.setToolTip(tr("Печать на нескольких принтерах: отметьте больше одного, и листы разойдутся между ними"))
+        self.b_multi.setVisible(self.multi_enabled())
         self.b_print = PrintButton(tr("Печать"))
         self.b_print.setProperty("kind", "primary")
         self.b_print.setProperty("big", "true")
@@ -5037,7 +5041,7 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         self.b_print.setToolTip("Ctrl+P")
         self.b_print.setCursor(Qt.PointingHandCursor)
         self.b_print.clicked.connect(lambda _=False: self.print_now())
-        lay = vbox(hbox(self.seg_page, margins=(0, 0, 16, 0)), self.pages, self.progress, self.l_prog, self.b_cancel, self.b_save, self.b_print,
+        lay = vbox(hbox(self.seg_page, margins=(0, 0, 16, 0)), self.pages, self.progress, self.l_prog, self.b_cancel, self.b_save, self.b_multi, self.b_print,
                    spacing=10, margins=(4, 12, 14, 12))
         lay.setStretch(1, 1)
         w.setLayout(lay)
@@ -5466,9 +5470,9 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
             self._save_blob()
             self._fill_driver()
 
-    def _match_paper(self, PW, PH):
+    def _match_paper(self, PW, PH, caps=None):
         """Бумага драйвера того же размера, что и лист (с допуском 1,5 мм) -> код или None."""
-        for p_ in self.caps.get("papers", []):
+        for p_ in (self.caps if caps is None else caps).get("papers", []):
             w, h = p_.get("width_mm"), p_.get("height_mm")
             if w and h and abs(min(w, h) - PW) <= 1.5 and abs(max(w, h) - PH) <= 1.5:
                 return p_["code"]
@@ -5493,6 +5497,8 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         if not files:
             info(self, "Ни одно фото не отмечено. Отметьте нужные («+» в углу превью).")
             return
+        if len(self.multi_selected()) > 1:                # отмечено больше одного принтера: режим включается сам
+            return self._print_multi(files, only)
         pr = self.pr
         if not pr["printer"] or self.blob is None:
             self.show_page(2)
@@ -5560,6 +5566,161 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
                 self.sig.printed.emit("error", 0, "%s: %s" % (ex.__class__.__name__, ex))
         threading.Thread(target=work, daemon=True).start()
 
+    # ---------- печать на нескольких принтерах (режим включается в настройках; работает, если отмечено больше одного принтера)
+    def multi_enabled(self):
+        return bool(self.settings.get("multi_enabled", False))
+
+    def multi_selected(self):
+        """Отмеченные принтеры, которые есть в системе. Режим выключен в настройках -> пусто."""
+        if not self.multi_enabled():
+            return []
+        want = self.settings.get("multi_printers") or []
+        return [p_ for p_ in self.printers if p_ in want]
+
+    def multi_refresh(self):
+        self.b_multi.setVisible(self.multi_enabled())
+        n = len(self.multi_selected())
+        self.b_multi.setText(tr("Принтеры…") + (" (%d)" % n if n else ""))
+
+    def multi_dialog(self):
+        dlg = MultiPrinterDialog(self)
+        if dlg.exec():
+            self.settings["multi_printers"] = dlg.chosen()
+            try:
+                pc.save_settings(self.settings)
+            except Exception:
+                pass
+        self.multi_refresh()
+
+    def _multi_profile(self, printer):
+        """Сохранённый профиль принтера для текущего формата (или любой его профиль) -> dict | None."""
+        profs = self._profiles()
+        keys = [k for k in profs if k.split(" | ")[0] == printer]
+        keys.sort(key=lambda k: (len(k.split(" | ")) < 2 or k.split(" | ")[1] != self.s["format"]))
+        return profs[keys[0]] if keys else None
+
+    def _multi_ctx(self, printer, base, o, L):
+        """Всё, что нужно для печати на этом принтере: блоб драйвера, цвет, поправка, ppi. Вызывается в потоке окна."""
+        live = printer == self.pr["printer"]
+        prof = None if live else self._multi_profile(printer)
+        src_s = self.s if (live or prof is None) else {**self.s, **{k: prof[k] for k in self.PROF_COLOR if k in prof}}
+        src_p = self.pr if (live or prof is None) else {**self.pr, **{k: prof[k] for k in self.PROF_PR if k in prof}}
+        if live:
+            blob, caps = self.blob, self.caps
+        else:
+            blob = None
+            stored = (prof or {}).get("blob") or self.settings.get("print_devmodes", {}).get(printer)
+            if stored:
+                try:
+                    b = base64.b64decode(stored)
+                    blob = b if pc.devmode_valid(b) else None
+                except Exception:
+                    blob = None
+            if blob is None:
+                blob = pc.default_devmode(printer)
+            caps = pc.printer_capabilities(printer)
+        if blob is None:
+            raise RuntimeError(tr("Не удалось получить настройки драйвера этого принтера."))
+        if self.pr["paper_auto"]:
+            code = self._match_paper(L["PW"], L["PH"], caps)
+            blob = pc.devmode_write(blob, {"paper": code} if code is not None else {"paper_mm": [L["PW"], L["PH"]]})
+        blob = pc.prepare_blob(printer, blob, "portrait", {"paper": pc.PAPER_DRIVER, "icm_off": bool(src_p["icm_off"])})
+        geom = pc.printer_geometry(printer, blob, "portrait")
+        gw, gh = geom["paper"]
+        cm = pc.cm_build(src_s["icc"], src_s["intent"], src_s["bpc"], src_s["embed"]) if src_s["cm_on"] else None
+        num = lambda v, d: float(str(v).replace(",", ".")) if str(v).strip() else d
+        oo = dict(o, sharp=float(src_p["sharp"]), shrink_pct=num(src_p["shrink"], 0), ppi=src_p["ppi"])
+        return {"printer": printer, "blob": blob, "geom": geom, "cm": cm, "o": oo, "own": live or prof is not None,
+                "pcorr": pcr.norm(src_s["pcorr"]) if pcr.active(src_s["pcorr"]) else None,
+                "paper_ok": abs(min(gw, gh) - L["PW"]) <= 2 and abs(max(gw, gh) - L["PH"]) <= 2}
+
+    def _print_multi(self, files, only=None):
+        """Листы расходятся между отмеченными принтерами: освободившийся берёт следующий, сбойный выбывает."""
+        if self.saving or self.printing:
+            return
+        try:
+            self._only = only
+            try:
+                plan, photos, o, L = self.sheet_plan()
+            finally:
+                self._only = None
+            if not plan["sheets"]:
+                return
+            pr = self.pr
+            num = lambda v, d: float(str(v).replace(",", ".")) if str(v).strip() else d
+            o.update(sheet_copies=int(pr["copies"]), one_by_one=True, job_pause=0.0, marks=bool(pr["marks"]))
+            ctxs, skipped = {}, []
+            for name in self.multi_selected():
+                try:
+                    c = self._multi_ctx(name, pr, o, L)
+                except Exception as ex:
+                    skipped.append("%s: %s" % (name, ex))
+                    continue
+                if not c["paper_ok"]:
+                    skipped.append("%s: %s" % (name, tr("бумага в драйвере другого размера")))
+                    continue
+                ctxs[name] = c
+        except Exception as ex:
+            warn(self, tr("Не удалось подготовить печать") + ":\n%s" % ex)
+            return
+        if not ctxs:
+            warn(self, tr("Ни один из отмеченных принтеров не готов") + ":\n" + "\n".join(skipped))
+            return
+        n = len(plan["sheets"])
+        text = trf("Печать на нескольких принтерах. Листов: {n}, копий каждого: {k}.", n=n, k=int(pr["copies"])) + "\n"
+        for name, c in ctxs.items():
+            text += "\n• %s%s" % (name, "" if c["own"] else " — " + tr("нет своего профиля, настройки как в окне"))
+        if skipped:
+            text += "\n\n⚠ " + tr("Не участвуют") + ":\n" + "\n".join(skipped)
+        if not ask(self, text + "\n\n" + tr("Начать печать?")):
+            return
+        for c in ctxs.values():
+            c["job"] = {"kind": "print", "printer": c["printer"], "blob": c["blob"], "title": "PhotoCrop", "o": c["o"], "plan": plan,
+                        "photos": photos, "ppi": pc.resolve_ppi(c["o"], c["geom"]), "mode": self.mode(), "cm": c["cm"], "pcorr": c["pcorr"]}
+        self.cancel.clear()
+        self.printing = True
+        self._print_files = files
+        self._busy(n, tr("Подготовка…"), [], "print")
+        self.b_print.set_progress(0.0)
+        self.b_cancel.show()
+        sent = [0]
+
+        def send(printer, k):
+            job = dict(ctxs[printer]["job"], idxs=[k])
+            res = pc.run_sheets_job(job, lambda *_: None, self.cancel)
+            if res[0] != "done":
+                raise RuntimeError("cancelled")
+
+        def on_event(kind, printer, k, why):
+            if kind == "sent":
+                sent[0] += 1
+                self.sig.progress.emit(sent[0] - 1, n, "\x01%s: %s" % (printer, trf("лист {a} из {b}", a=sent[0], b=n)))
+
+        def work():
+            try:
+                names = list(ctxs)
+                for name in list(names):                       # офлайн-принтеры выбывают сразу, а не после двух ошибок
+                    try:
+                        st_ = pc.spooler_printer_status(name)
+                        if st_.get("offline"):
+                            names.remove(name)
+                    except Exception:
+                        pass
+                if not names:
+                    raise RuntimeError(tr("Ни один из отмеченных принтеров не готов"))
+                rep = mp.MultiRun(range(n), names, send, cancel=self.cancel, on_event=on_event).run()
+                self._multi_summary = mp.summarize(rep)
+                total = sum(len(v) for v in rep["sent"].values())
+                if rep["cancelled"]:
+                    self.sig.printed.emit("cancelled", total, "")
+                elif rep["failed"]:
+                    self.sig.printed.emit("error", total, trf("Не напечатано листов: {n}", n=len(rep["failed"])) + "\n" + "\n".join(self._multi_summary))
+                else:
+                    self.sig.printed.emit("done", total, "")
+            except Exception as ex:
+                self.sig.printed.emit("error", 0, "%s: %s" % (ex.__class__.__name__, ex))
+        threading.Thread(target=work, daemon=True).start()
+
     def _sheet_sent(self, i, n):
         """Лист i (с нуля) из n ушёл на принтер: первый — большая анимация в центре, остальные летят к кнопке «Печать»."""
         self.b_print.setText("%s · %d / %d" % (tr("Печать"), i + 1, n))
@@ -5597,8 +5758,9 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         self.b_print.setEnabled(True)
         self.b_cancel.hide()
         self.progress.hide()
+        multi, self._multi_summary = getattr(self, "_multi_summary", None), None
         if kind == "done":
-            self.l_prog.setText(trf("Отправлено на печать листов: {n}", n=n))
+            self.l_prog.setText(trf("Отправлено на печать листов: {n}", n=n) + (" (" + "; ".join(multi) + ")" if multi else ""))
             self.queue_refresh()
         elif kind == "cancelled":
             self.l_prog.setText(trf("Печать отменена, отправлено листов: {n}", n=n))
@@ -7518,7 +7680,7 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         s = self.s
         self._bleed_flush()
         fresh = pc.load_settings()                    # окно печати пишет свои разделы в тот же файл — не затираем их
-        for k in ("last_dir", "start_dir_mode", "snap_px", "anim", "icc_dir", "check_updates", "skip_update", "doc_paper", "doc_fit", "doc_margin", "doc_cm_on", "doc_icc", "converter_path", "adj_presets", "adj_preset_names", "confirm_actions", "agent_enabled", "agent_badge", "agent_lock", "agent_token", "agent_port", "agent_allow_print", "agent_max_sheets", "agent_confirm_print"):
+        for k in ("last_dir", "start_dir_mode", "snap_px", "anim", "icc_dir", "check_updates", "skip_update", "doc_paper", "doc_fit", "doc_margin", "doc_cm_on", "doc_icc", "converter_path", "adj_presets", "adj_preset_names", "confirm_actions", "agent_enabled", "agent_badge", "agent_lock", "agent_token", "agent_port", "agent_allow_print", "agent_max_sheets", "agent_confirm_print", "multi_enabled", "multi_printers"):
             if k in self.settings:
                 fresh[k] = self.settings[k]
         fresh.update(format=s["format"], orient=s["orient"], mode=s["mode"], recursive=s["recursive"], subfolder=s["subfolder"],
@@ -8289,6 +8451,31 @@ class AdminStatsDialog(QDialog):
             info(self, tr("Копия журнала") + ":\n" + str(bak))
 
 
+class MultiPrinterDialog(QDialog):
+    """Список всех принтеров: галочками отмечаются те, между которыми разойдутся листы."""
+
+    def __init__(self, app):
+        super().__init__(app)
+        self.setWindowTitle(tr("Принтеры для печати"))
+        want = app.settings.get("multi_printers") or []
+        self.boxes = []
+        lay = vbox(lbl(tr("Отметьте принтеры. Если отмечено больше одного, кнопка «Печать» распределит листы между ними: освободившийся принтер берёт следующий лист."), "muted", wrap=True), spacing=8, margins=(14, 14, 14, 14))
+        for name in app.printers:
+            cb = QCheckBox(name + ("" if app._multi_profile(name) or name == app.pr["printer"] else "  (" + tr("нет своего профиля") + ")"))
+            cb.setChecked(name in want)
+            cb.name = name
+            self.boxes.append(cb)
+            lay.addWidget(cb)
+        if not app.printers:
+            lay.addWidget(lbl(tr("Принтеры не найдены.")))
+        lay.addLayout(hbox(None, btn(tr("Отмена"), self.reject, "link"), btn(tr("Готово"), self.accept, "primary"), spacing=8))
+        self.setLayout(lay)
+        self.setMinimumWidth(420)
+
+    def chosen(self):
+        return [b.name for b in self.boxes if b.isChecked()]
+
+
 class SettingsDialog(QDialog):
     def __init__(self, app):
         super().__init__(app)
@@ -8317,7 +8504,9 @@ class SettingsDialog(QDialog):
         seg_dir.changed.connect(lambda v: st.__setitem__("start_dir_mode", v))
         sw_conf = Switch(SOFT[0])
         sw_conf.toggled.connect(lambda on: (st.__setitem__("confirm_actions", bool(on)), SOFT.__setitem__(0, bool(on))))
-        general = card("Общие", row("Язык интерфейса", seg_lang), row("Папка, с которой начинается «Открыть»", seg_dir),
+        sw_multi = Switch(bool(st.get("multi_enabled", False)))
+        sw_multi.toggled.connect(lambda on: (st.__setitem__("multi_enabled", bool(on)), app.multi_refresh()))
+        general = card("Общие", row("Печать на нескольких принтерах (кнопка «Принтеры…» рядом с «Печать»)", sw_multi), row("Язык интерфейса", seg_lang), row("Папка, с которой начинается «Открыть»", seg_dir),
                        row("Спрашивать подтверждение обычных действий (сброс, применение ко всем, печать)", sw_conf))
         sw_snap = Switch(app.s["snap"])
         sw_snap.toggled.connect(lambda on: app.s.__setitem__("snap", bool(on)))
@@ -9221,6 +9410,53 @@ def selftest(app):
             raise RuntimeError("документ не открыл раздел «Документ»")
         win.set_app_mode("photo")
     step("документ, брошенный в окно, открывает раздел «Документ»", drop_doc)
+    def multi_flow():
+        """Печать на нескольких принтерах без настоящих принтеров: подменяем драйвер и проверяем, что каждый лист ушёл один раз."""
+        saved = (win.settings.get("multi_enabled"), win.settings.get("multi_printers"), win.printers, win._multi_ctx, pc.run_sheets_job,
+                 pc.spooler_printer_status, globals()["ask"])
+        sent, lock = [], threading.Lock()
+        win.checked_files()
+        files = win.checked_files()
+        if not files:
+            raise RuntimeError("нет отмеченных фото для проверки")
+
+        def fake_ctx(printer, base, o, L):
+            return {"printer": printer, "blob": b"", "geom": {"dpi": (360, 360), "paper": (L["PW"], L["PH"])}, "cm": None, "o": dict(o, ppi="Авто", sharp=0, shrink_pct=0),
+                    "own": True, "pcorr": None, "paper_ok": True}
+
+        def fake_run(c, progress, cancel):
+            with lock:
+                sent.append((c["printer"], tuple(c["idxs"])))
+            return ("done", 1, None, [])
+        try:
+            win.settings["multi_enabled"], win.settings["multi_printers"], win.printers = True, ["Принтер A", "Принтер B"], ["Принтер A", "Принтер B"]
+            win._multi_ctx, pc.run_sheets_job = fake_ctx, fake_run
+            pc.spooler_printer_status = lambda name: {"offline": False}
+            globals()["ask"] = lambda *a, **k: True
+            win.multi_refresh()
+            if not win.b_multi.isVisibleTo(win):
+                raise RuntimeError("кнопка «Принтеры…» не показана при включённом режиме")
+            n_sheets = len(win.sheet_plan()[0]["sheets"])
+            win.print_now()
+            t_end = time.time() + 20
+            while win.printing and time.time() < t_end:
+                app.processEvents()
+                time.sleep(0.01)
+            app.processEvents()
+            if win.printing:
+                raise RuntimeError("печать не завершилась")
+            idx = sorted(i for _, ix in sent for i in ix)
+            if idx != list(range(n_sheets)):
+                raise RuntimeError("листы ушли неверно: %s из %d" % (idx, n_sheets))
+            win.settings["multi_enabled"] = False
+            win.multi_refresh()
+            if win.b_multi.isVisibleTo(win) or win.multi_selected():
+                raise RuntimeError("режим выключен, а кнопка или выбор остались")
+        finally:
+            win.settings["multi_enabled"], win.settings["multi_printers"], win.printers, win._multi_ctx, pc.run_sheets_job, pc.spooler_printer_status = saved[:6]
+            globals()["ask"] = saved[6]
+            win.multi_refresh()
+    step("печать на нескольких принтерах (с подменой драйвера)", multi_flow)
     step("вкладка «Принтер»", lambda: (win.show_page(2), shot("printer"), win.show_page(0)))
     step("параметры сохранения", lambda: win.options() or (_ for _ in ()).throw(RuntimeError("options() вернул пусто")))
     text = "PhotoCrop Qt selftest  %s\nPySide6 %s, Python %s\n\n%s\n" % (
