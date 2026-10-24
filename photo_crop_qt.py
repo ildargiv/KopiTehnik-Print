@@ -8464,7 +8464,10 @@ class MultiPrinterDialog(QDialog):
         want = app.settings.get("multi_printers") or []
         self.boxes = []
         lay = vbox(lbl(tr("Отметьте принтеры. Если отмечено больше одного, кнопка «Печать» распределит листы между ними: освободившийся принтер берёт следующий лист."), "muted", wrap=True), spacing=8, margins=(14, 14, 14, 14))
+        virtual = ("pdf", "xps", "onenote", "fax", "anydesk", "cutepdf", "send to")        # виртуальные принтеры спрашивают «куда сохранить» на каждый лист
         for name in app.printers:
+            if any(v in name.lower() for v in virtual):
+                continue
             cb = QCheckBox(name + ("" if app._multi_profile(name) or name == app.pr["printer"] else "  (" + tr("нет своего профиля") + ")"))
             cb.setChecked(name in want)
             cb.name = name
