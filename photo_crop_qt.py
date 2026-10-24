@@ -4703,9 +4703,6 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         outer.addLayout(main, 1)
         root.setLayout(outer)
         self.setCentralWidget(root)
-        import agent_chat_ui as acu
-        self.chat_dock = acu.ChatDock(self)                      # панель «Печатник»: видна, только если агент включён в настройках
-        self.addDockWidget(Qt.RightDockWidgetArea, self.chat_dock)
         self.fly = FlyOverlay(root)
         self._building = False
         self.center_stack.setCurrentIndex(1 if self.view == "sheet" else 0)
@@ -4894,6 +4891,8 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         self.seg_view = Segmented([("Кадр", "crop"), ("Лист", "sheet")], self.view)
         self.seg_view.changed.connect(self.set_view)
         self.seg_view.setFixedHeight(38)                         # та же высота и вид, что у вкладок справа, и по центру шапки
+        self.b_chat = ibtn("sparkle", "Агент «Печатник»", lambda: self.show_page(5))        # дублирует вкладку «Агент»
+        self.b_chat.setVisible(bool(self.settings.get("chat_enabled", False)))
         self.b_grid = ibtn("grid", "Сетка третей", self._toggle_grid, color=T["select"] if self.s["grid"] else T["muted"])
         more = ibtn("project", "Проект: открыть или сохранить рамки и настройки")
         menu = QMenu(more)
@@ -4902,7 +4901,7 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         more.setMenu(menu)
         more.setPopupMode(QToolButton.InstantPopup)
         l = hbox(logo, name, 10, btn("Открыть", self.open_any, "primary", ico="open", tip="Открыть фото или папку (Ctrl+O)"), 10,
-                 self.mode_switch, 10, cap("Бумага"), self.cb_format, 6,
+                 self.mode_switch, 10, cap("Бумага"), self.cb_format, 6, self.b_chat,
                  None, self.l_agent,
                  self.seg_view, 6, self.b_grid, more, ibtn("settings", "Настройки", self.open_settings),
                  spacing=8, margins=(16, 0, 12, 0))
@@ -5017,9 +5016,13 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         self.pages.addWidget(self._page_print())
         self.pages.addWidget(self._page_smart())
         self.pages.addWidget(self._page_doc())
-        self.seg_page = Segmented([("Макет", 0), ("Цвет", 1), ("Умная рамка", 3), ("Принтер", 2), ("Документ", 4)], 0)
+        import agent_chat_ui as acu
+        self.chat_dock = acu.ChatDock(self)                  # вкладка «Агент» (эксперимент): видна, только если агент включён в настройках
+        self.pages.addWidget(self.chat_dock)
+        self.seg_page = Segmented([("Макет", 0), ("Цвет", 1), ("Умная рамка", 3), ("Принтер", 2), ("Документ", 4), ("Агент", 5)], 0)
         self.seg_page.group.button(4).hide()                 # вкладка «Документ» видна только в режиме документа
-        self.seg_page.setStyleSheet('QPushButton[kind="seg"]{padding:6px 9px;}')       # пять вкладок должны уместиться в панели
+        self.chat_dock.sync()                                # вкладка «Агент» видна только при включённом агенте
+        self.seg_page.setStyleSheet('QPushButton[kind="seg"]{padding:6px 5px;}')       # пять вкладок должны уместиться в панели
         for b in self.seg_page.group.buttons():                 # вкладки делят ширину панели поровну: край в край с карточками
             b.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
             self.seg_page.layout().setStretchFactor(b, 1)

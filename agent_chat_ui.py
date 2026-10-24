@@ -9,7 +9,7 @@ import threading
 from pathlib import Path
 
 from PySide6.QtCore import Qt, Signal, QObject
-from PySide6.QtWidgets import (QDockWidget, QWidget, QVBoxLayout, QHBoxLayout, QTextBrowser, QLineEdit, QPushButton, QLabel,
+from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QTextBrowser, QLineEdit, QPushButton, QLabel,
                                QMessageBox, QFileDialog, QComboBox)
 
 import agent_chat as ac
@@ -57,11 +57,12 @@ class _Signals(QObject):
     status = Signal(str)
 
 
-class ChatDock(QDockWidget):
+class ChatDock(QWidget):
+    """Вкладка «Агент» правой панели (страница 5)."""
+
     def __init__(self, win):
-        super().__init__(_tr(TITLE), win)
+        super().__init__()
         self.win = win
-        self.setObjectName("chat_dock")
         self.agent = None
         self.busy = False
         self.sig = _Signals()
@@ -83,7 +84,7 @@ class ChatDock(QDockWidget):
         self.b_stop = QPushButton(_tr("Стоп"))
         self.b_stop.clicked.connect(self.stop)
         self.b_stop.setEnabled(False)
-        self.b_new = QPushButton(_tr("Новый диалог"))
+        self.b_new = QPushButton(_tr("Заново"))
         self.b_new.clicked.connect(self.reset)
         row = QHBoxLayout()
         row.addWidget(self.b_new)
@@ -94,20 +95,28 @@ class ChatDock(QDockWidget):
         lay.addWidget(self.l_status)
         lay.addWidget(self.edit)
         lay.addLayout(row)
-        self.setWidget(w)
-        self.setMinimumWidth(320)
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.addWidget(w)
         self.sync()
 
     # ---------- состояние
     def sync(self):
-        """Показывает панель, только если агент включён в настройках."""
+        """Показывает вкладку и кнопку в шапке, только если агент включён в настройках."""
         import photo_crop_qt as q
         self.log.setStyleSheet("QTextBrowser { background: %s; color: %s; border: 1px solid %s; border-radius: 8px; padding: 6px; }"
                                % (q.T["surface"], q.T["text"], q.T["border"]))
         on = bool(self.win.settings.get("chat_enabled", False))
-        self.setVisible(on)
+        win = self.win
+        seg = getattr(win, "seg_page", None)
+        if seg is not None:
+            seg.group.button(5).setVisible(on)
+        if getattr(win, "b_chat", None) is not None:
+            win.b_chat.setVisible(on)
         if not on:
             self.agent = None
+            if getattr(win, "pages", None) is not None and win.pages.currentIndex() == 5:
+                win.show_page(0)
 
     def reset(self):
         self.agent = None
