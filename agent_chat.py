@@ -59,12 +59,20 @@ class ToolGate:
         if name in PRINT_TOOLS:
             if not self.policy["allow_print"] or self.policy["print_mode"] == "off":
                 return "printing by the agent is disabled in settings"
+        bad = self.path_violation(args)
+        if bad:
+            return "path '%s' is outside the allowed folders" % bad[0]
+        return None
+
+    def path_violation(self, args):
+        """Пути из аргументов, которые лежат вне разрешённых папок."""
+        out = []
         for k in ("path", "paths", "folder"):
             v = args.get(k)
             for p in ([v] if isinstance(v, str) else v if isinstance(v, list) else []):
                 if isinstance(p, str) and not self.in_roots(p):
-                    return "path '%s' is outside the allowed folders" % p
-        return None
+                    out.append(p)
+        return out
 
     def in_roots(self, path):
         import os
@@ -87,9 +95,10 @@ def _fn(name, desc, params, required):
 class Agent:
     """Один диалог. confirm(text) -> bool вызывается перед печатью в режиме 'ask'; ask(question, options) -> str для ask_user."""
 
-    def __init__(self, provider, gate, execute, system="", confirm=None, ask=None, max_steps=MAX_STEPS, log=None):
+    def __init__(self, provider, gate, execute, system="", confirm=None, ask=None, max_steps=MAX_STEPS, log=None, allow_path=None):
         self.provider, self.gate, self.execute = provider, gate, execute
         self.confirm, self.ask, self.max_steps, self.log = confirm, ask, max_steps, log
+        self.allow_path = allow_path                             # allow_path(path) -> bool: человек разрешает новую папку
         self.messages = [{"role": "system", "content": system}] if system else []
         self.stopped = False
         self.printed_ok = 0
@@ -123,6 +132,11 @@ class Agent:
             return json.dumps({"ok": False, "error": "arguments must be valid JSON"})
         if not isinstance(args, dict):
             return json.dumps({"ok": False, "error": "arguments must be an object"})
+        if self.allow_path and name in self.gate.names:
+            for p in self.gate.path_violation(args):
+                if self.allow_path(p):
+                    import os
+                    self.gate.roots.append(p if os.path.isdir(p) else os.path.dirname(p))
         denied = self.gate.check(name, args)
         if denied:
             self._log(name, args, "denied: " + denied)

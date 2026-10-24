@@ -102,3 +102,51 @@ class ChatTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class AllowPathTest(unittest.TestCase):
+    def test_person_allows_new_folder(self):
+        root, other = tempfile.mkdtemp(), tempfile.mkdtemp()
+        ran = []
+        gate = ac.ToolGate(SPEC, roots=[root])
+        a = ac.Agent(Stub([("open_folder", {"path": other}), "ok"]), gate, lambda r: ran.append(r) or {"ok": True}, allow_path=lambda p: True)
+        a.say("x")
+        self.assertEqual(len(ran), 1)
+
+    def test_person_refuses_new_folder(self):
+        root, other = tempfile.mkdtemp(), tempfile.mkdtemp()
+        ran = []
+        gate = ac.ToolGate(SPEC, roots=[root])
+        a = ac.Agent(Stub([("open_folder", {"path": other}), "ok"]), gate, lambda r: ran.append(r) or {"ok": True}, allow_path=lambda p: False)
+        a.say("x")
+        self.assertEqual(ran, [])
+
+
+class ProviderTest(unittest.TestCase):
+    def test_openai_compatible_roundtrip(self):
+        import threading
+        from http.server import BaseHTTPRequestHandler, HTTPServer
+        seen = {}
+
+        class H(BaseHTTPRequestHandler):
+            def log_message(self, *a):
+                pass
+
+            def do_POST(self):
+                seen["path"], seen["auth"] = self.path, self.headers.get("Authorization")
+                seen["body"] = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+                out = json.dumps({"choices": [{"message": {"role": "assistant", "content": "hi"}}]}).encode()
+                self.send_response(200)
+                self.send_header("Content-Length", str(len(out)))
+                self.end_headers()
+                self.wfile.write(out)
+
+        srv = HTTPServer(("127.0.0.1", 0), H)
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+        try:
+            r = ac.OpenAICompatible("http://127.0.0.1:%d/v1" % srv.server_port, "m").chat([{"role": "user", "content": "x"}], [])
+        finally:
+            srv.shutdown()
+        self.assertEqual(r["content"], "hi")
+        self.assertEqual(seen["path"], "/v1/chat/completions")
+        self.assertIsNone(seen["auth"])

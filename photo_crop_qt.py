@@ -4703,6 +4703,9 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         outer.addLayout(main, 1)
         root.setLayout(outer)
         self.setCentralWidget(root)
+        import agent_chat_ui as acu
+        self.chat_dock = acu.ChatDock(self)                      # панель «Печатник»: видна, только если агент включён в настройках
+        self.addDockWidget(Qt.RightDockWidgetArea, self.chat_dock)
         self.fly = FlyOverlay(root)
         self._building = False
         self.center_stack.setCurrentIndex(1 if self.view == "sheet" else 0)
@@ -7518,7 +7521,7 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         s = self.s
         self._bleed_flush()
         fresh = pc.load_settings()                    # окно печати пишет свои разделы в тот же файл — не затираем их
-        for k in ("last_dir", "start_dir_mode", "snap_px", "anim", "icc_dir", "check_updates", "skip_update", "doc_paper", "doc_fit", "doc_margin", "doc_cm_on", "doc_icc", "converter_path", "adj_presets", "adj_preset_names", "confirm_actions", "agent_enabled", "agent_badge", "agent_lock", "agent_token", "agent_port", "agent_allow_print", "agent_max_sheets", "agent_confirm_print"):
+        for k in ("last_dir", "start_dir_mode", "snap_px", "anim", "icc_dir", "check_updates", "skip_update", "doc_paper", "doc_fit", "doc_margin", "doc_cm_on", "doc_icc", "converter_path", "adj_presets", "adj_preset_names", "confirm_actions", "agent_enabled", "agent_badge", "agent_lock", "agent_token", "agent_port", "agent_allow_print", "agent_max_sheets", "agent_confirm_print", "chat_enabled", "chat_url", "chat_model", "chat_key", "chat_dry", "chat_print_mode", "chat_folder", "chat_roots", "chat_confirmed", "chat_auto_offered"):
             if k in self.settings:
                 fresh[k] = self.settings[k]
         fresh.update(format=s["format"], orient=s["orient"], mode=s["mode"], recursive=s["recursive"], subfolder=s["subfolder"],
@@ -8384,6 +8387,8 @@ class SettingsDialog(QDialog):
         section("Печать", "print", [("Профили печати", [self._profiles_card()]),
                                     ("Счётчик печати", [self._counter_card()])])
         section("ИИ-агент (MCP)", "sparkle", [("Подключение и права", [self._agent_card()])])
+        import agent_chat_ui as acu
+        section("Агент «Печатник»", "sparkle", [("Модель, папки, печать", [acu.settings_card(self)])])
         section("О программе", "doc", [("Версия и обновления", [upd_card])])
         self.tree.currentItemChanged.connect(lambda cur, _prev: self.stack.setCurrentIndex(int(cur.data(0, Qt.UserRole) or 0)) if cur is not None else None)
         self.tree.setCurrentItem(first)
