@@ -84,6 +84,41 @@ class MultiPrint(unittest.TestCase):
         self.assertEqual(rep["failed"], [])
         self.assertEqual(sum(len(v) for v in rep["sent"].values()), 6)
 
+    def test_order_kept_when_other_printer_fails(self):
+        rep = mp.MultiRun(range(5), ["A", "B"], fake({"A": .005}, broken=("B",))).run()
+        self.assertEqual(rep["sent"]["A"], [0, 1, 2, 3, 4])
+
+    def test_last_printer_gets_retry(self):
+        n = {"c": 0}
+
+        def send(p, s):
+            if p == "A" and s == 3 and n["c"] < 1:
+                n["c"] += 1
+                raise OSError("разово")
+        rep = mp.MultiRun(range(5), ["A"], send, max_errors=2).run()
+        self.assertEqual(rep["failed"], [])
+
+    def test_cancelled_is_not_an_error(self):
+        def send(p, s):
+            raise mp.Cancelled()
+        rep = mp.MultiRun(range(3), ["A", "B"], send).run()
+        self.assertEqual(rep["errors"], {})
+        self.assertEqual(rep["excluded"], {})
+
+    def test_base_exception_does_not_hang(self):
+        def send(p, s):
+            if p == "A":
+                raise SystemExit(1)
+        rep = mp.MultiRun(range(4), ["A", "B"], send).run()
+        self.assertEqual(sorted(rep["sent"]["B"]), [0, 1, 2, 3])
+        self.assertIn("A", rep["excluded"])
+
+    def test_tuple_units_and_counter(self):
+        counts = []
+        units = [(k, r) for k in range(3) for r in range(2)]
+        mp.MultiRun(units, ["A", "B"], fake({}), on_event=lambda k, p, u, i: counts.append(i) if k == "sent" else None).run()
+        self.assertEqual(sorted(counts), list(range(1, 7)))
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -12,6 +12,10 @@ from collections import deque
 QUEUED, SENDING, SENT, FAILED = "queued", "sending", "sent", "failed"
 
 
+class Cancelled(Exception):
+    """send() прерван отменой: это не сбой принтера, лист возвращается в очередь."""
+
+
 class MultiRun:
     def __init__(self, sheets, printers, send, cancel=None, max_errors=2, serialize=False, on_event=None):
         """sheets — идентификаторы листов в порядке печати; printers — имена; send(printer, sheet) блокирует
@@ -24,11 +28,12 @@ class MultiRun:
         self.cancel = cancel or threading.Event()
         self.max_errors = max(1, int(max_errors))
         self.on_event = on_event
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
         self._send_lock = threading.Lock() if serialize else None      # драйверы, не терпящие параллельной отправки
         self._queue = deque(self.sheets)
+        self._cond = threading.Condition(self._lock)
         self.state = {s: QUEUED for s in self.sheets}
-        self.tried = {s: set() for s in self.sheets}                   # принтеры, на которых лист уже не удался
+        self.tries = {s: {p: 0 for p in self.printers} for s in self.sheets}   # неудачные попытки листа на принтере
         self.done = {p: [] for p in self.printers}
         self.errors = {p: [] for p in self.printers}
         self.excluded = {}                                             # принтер -> причина
@@ -42,36 +47,35 @@ class MultiRun:
             except Exception:
                 pass
 
+    def _eligible(self, s, printer):
+        return self.tries[s][printer] < self.max_errors
+
+    def _dead(self, s):
+        """Листу больше некуда идти: на каждом живом принтере исчерпаны попытки."""
+        return not any(p in self._alive and self._eligible(s, p) for p in self.printers)
+
     def _take(self, printer):
-        """Следующий лист для принтера (не тот, что на нём уже падал) или None."""
-        with self._lock:
-            for _ in range(len(self._queue)):
-                s = self._queue.popleft()
-                if printer in self.tried[s]:
-                    self._queue.append(s)
-                    continue
+        """Следующий по порядку лист для принтера или None. Порядок очереди сохраняется."""
+        for i, s in enumerate(self._queue):
+            if self._eligible(s, printer):
+                del self._queue[i]
                 self.state[s] = SENDING
                 return s
-            return None
-
-    def _pending(self, printer):
-        with self._lock:
-            return any(printer not in self.tried[s] for s in self._queue)
+        return None
 
     def _worker(self, printer):
         streak = 0
-        while not self.cancel.is_set():
-            s = self._take(printer)
-            if s is None:
-                with self._lock:
-                    busy = any(v == SENDING for v in self.state.values())
-                    left = any(printer not in self.tried[x] for x in self._queue)
-                if left:
-                    continue
-                if not busy:
-                    return
-                time.sleep(0.01)                  # другой принтер может вернуть лист в очередь
-                continue
+        while True:
+            with self._cond:
+                s = None
+                while s is None:
+                    if self.cancel.is_set():
+                        return
+                    s = self._take(printer)
+                    if s is None:
+                        if not any(v in (QUEUED, SENDING) for v in self.state.values()):
+                            return
+                        self._cond.wait(0.05)                     # другой принтер может вернуть лист в очередь
             t0 = time.time()
             try:
                 if self._send_lock:
@@ -79,38 +83,41 @@ class MultiRun:
                         self.send(printer, s)
                 else:
                     self.send(printer, s)
-            except Exception as ex:
+            except Cancelled:
+                with self._cond:
+                    self.state[s] = QUEUED
+                    self._queue.appendleft(s)
+                    self._cond.notify_all()
+                return
+            except BaseException as ex:                        # SystemExit и т.п.: лист не должен остаться в SENDING навсегда
                 streak += 1
-                with self._lock:
+                with self._cond:
                     self.errors[printer].append((s, "%s: %s" % (ex.__class__.__name__, ex)))
-                    self.tried[s].add(printer)
-                    if all(p in self.tried[s] or p in self.excluded for p in self.printers):
-                        self.state[s] = FAILED
-                    else:
-                        self.state[s] = QUEUED
-                        self._queue.appendleft(s)
-                    drop = streak >= self.max_errors
+                    self.tries[s][printer] += 1
+                    drop = streak >= self.max_errors or not isinstance(ex, Exception)
                     if drop:
-                        self.excluded[printer] = str(ex)
+                        self.excluded[printer] = str(ex) or ex.__class__.__name__
                         self._alive.discard(printer)
-                        for x in self.sheets:                       # у листов, которым больше некуда идти, исход известен
-                            if self.state[x] == QUEUED and all(p in self.tried[x] or p in self.excluded for p in self.printers):
-                                self.state[x] = FAILED
-                                try:
-                                    self._queue.remove(x)
-                                except ValueError:
-                                    pass
+                    self.state[s] = QUEUED
+                    self._queue.appendleft(s)
+                    for x in list(self._queue):                 # исход листов, которым больше некуда идти, известен
+                        if self._dead(x):
+                            self.state[x] = FAILED
+                            self._queue.remove(x)
+                    self._cond.notify_all()
                 self._emit("error", printer, s, str(ex))
                 if drop:
                     self._emit("excluded", printer, None, str(ex))
                     return
                 continue
             streak = 0
-            with self._lock:
+            with self._cond:
                 self.state[s] = SENT
                 self.done[printer].append(s)
                 self.seconds[printer] += time.time() - t0
-            self._emit("sent", printer, s, None)
+                count = sum(len(v) for v in self.done.values())
+                self._cond.notify_all()
+            self._emit("sent", printer, s, count)
 
     def run(self):
         threads = [threading.Thread(target=self._worker, args=(p,), daemon=True) for p in self.printers]

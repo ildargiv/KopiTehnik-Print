@@ -5580,7 +5580,7 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
     def multi_refresh(self):
         self.b_multi.setVisible(self.multi_enabled())
         n = len(self.multi_selected())
-        self.b_multi.setText(tr("Принтеры…") + (" (%d)" % n if n else ""))
+        self.b_multi.setText(tr("Принтеры…") + (" (%d)" % n if n > 1 else ""))
 
     def multi_dialog(self):
         dlg = MultiPrinterDialog(self)
@@ -5648,7 +5648,8 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
                 return
             pr = self.pr
             num = lambda v, d: float(str(v).replace(",", ".")) if str(v).strip() else d
-            o.update(sheet_copies=int(pr["copies"]), one_by_one=True, job_pause=0.0, marks=bool(pr["marks"]))
+            copies = max(1, int(pr["copies"]))
+            o.update(sheet_copies=1, one_by_one=True, job_pause=0.0, marks=bool(pr["marks"]))      # копия листа — отдельная единица работы
             ctxs, skipped = {}, []
             for name in self.multi_selected():
                 try:
@@ -5666,8 +5667,9 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         if not ctxs:
             warn(self, tr("Ни один из отмеченных принтеров не готов") + ":\n" + "\n".join(skipped))
             return
-        n = len(plan["sheets"])
-        text = trf("Печать на нескольких принтерах. Листов: {n}, копий каждого: {k}.", n=n, k=int(pr["copies"])) + "\n"
+        units = [(k, r) for k in range(len(plan["sheets"])) for r in range(copies)]
+        n = len(units)
+        text = trf("Печать на нескольких принтерах. Листов: {n}, копий каждого: {k}.", n=len(plan["sheets"]), k=copies) + "\n"
         for name, c in ctxs.items():
             text += "\n• %s%s" % (name, "" if c["own"] else " — " + tr("нет своего профиля, настройки как в окне"))
         if skipped:
@@ -5683,18 +5685,20 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         self._busy(n, tr("Подготовка…"), [], "print")
         self.b_print.set_progress(0.0)
         self.b_cancel.show()
-        sent = [0]
 
-        def send(printer, k):
-            job = dict(ctxs[printer]["job"], idxs=[k])
+        def send(printer, unit):
+            k, r = unit
+            title = "PhotoCrop — %s %d" % (tr("лист"), k + 1) + (" (%s %d)" % (tr("копия"), r + 1) if copies > 1 else "")
+            job = dict(ctxs[printer]["job"], idxs=[k], title=title)
             res = pc.run_sheets_job(job, lambda *_: None, self.cancel)
             if res[0] != "done":
-                raise RuntimeError("cancelled")
+                raise mp.Cancelled()
 
-        def on_event(kind, printer, k, why):
+        def on_event(kind, printer, unit, info):
             if kind == "sent":
-                sent[0] += 1
-                self.sig.progress.emit(sent[0] - 1, n, "\x01%s: %s" % (printer, trf("лист {a} из {b}", a=sent[0], b=n)))
+                self.sig.progress.emit(info - 1, n, "\x01%s: %s" % (printer, trf("лист {a} из {b}", a=info, b=n)))
+            elif kind == "excluded":
+                self.sig.progress.emit(0, n, tr("Принтер выбыл") + ": " + printer)
 
         def work():
             try:
@@ -5708,7 +5712,7 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
                         pass
                 if not names:
                     raise RuntimeError(tr("Ни один из отмеченных принтеров не готов"))
-                rep = mp.MultiRun(range(n), names, send, cancel=self.cancel, on_event=on_event).run()
+                rep = mp.MultiRun(units, names, send, cancel=self.cancel, on_event=on_event).run()
                 self._multi_summary = mp.summarize(rep)
                 total = sum(len(v) for v in rep["sent"].values())
                 if rep["cancelled"]:
