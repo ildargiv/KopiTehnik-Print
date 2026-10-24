@@ -7,6 +7,7 @@
 с внешним MCP-агентом.
 """
 import json
+import urllib.error
 import urllib.request
 
 MAX_STEPS = 30
@@ -175,6 +176,27 @@ class OpenAICompatible:
         if self.api_key:
             hdr["Authorization"] = "Bearer " + self.api_key
         req = urllib.request.Request(self.base_url + "/chat/completions", data=json.dumps(body).encode("utf-8"), headers=hdr, method="POST")
-        with urllib.request.urlopen(req, timeout=self.timeout) as r:
-            d = json.loads(r.read().decode("utf-8"))
-        return d["choices"][0]["message"]
+        # Модель обычно в своей сети (имя без точек или частный адрес): системный прокси для неё не нужен и часто рвёт соединение.
+        opener = urllib.request.build_opener(urllib.request.ProxyHandler({})) if _is_local(self.base_url) else urllib.request.build_opener()
+        try:
+            with opener.open(req, timeout=self.timeout) as r:
+                d = json.loads(r.read().decode("utf-8"))
+        except urllib.error.HTTPError as ex:
+            raise RuntimeError("model server answered HTTP %d: %s" % (ex.code, ex.read().decode("utf-8", "replace")[:500])) from None
+        try:
+            return d["choices"][0]["message"]
+        except (KeyError, IndexError, TypeError):
+            raise RuntimeError("unexpected model reply: %s" % json.dumps(d, ensure_ascii=False)[:500]) from None
+
+
+def _is_local(url):
+    import ipaddress
+    import urllib.parse
+    host = urllib.parse.urlparse(url).hostname or ""
+    if "." not in host:
+        return True                                              # localhost, имя из локальной сети
+    try:
+        ip = ipaddress.ip_address(host)
+        return ip.is_private or ip.is_loopback
+    except ValueError:
+        return host.endswith((".local", ".lan", ".home", ".internal"))
