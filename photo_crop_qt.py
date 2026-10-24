@@ -5702,18 +5702,22 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
 
         def work():
             try:
-                names = list(ctxs)
-                for name in list(names):                       # офлайн-принтеры выбывают сразу, а не после двух ошибок
+                names, pre = list(ctxs), []
+                for name in list(names):                       # офлайн и «печать в файл» выбывают сразу, а не после двух ошибок
                     try:
                         st_ = pc.spooler_printer_status(name)
-                        if st_.get("offline"):
-                            names.remove(name)
                     except Exception:
-                        pass
+                        continue
+                    if st_.get("offline"):
+                        names.remove(name)
+                        pre.append("%s — %s" % (name, tr("офлайн")))
+                    elif str(st_.get("port") or "").upper().startswith("FILE"):
+                        names.remove(name)
+                        pre.append("%s — %s" % (name, tr("порт FILE: (печать в файл), на каждый лист спросит имя файла; смените порт в свойствах принтера")))
                 if not names:
-                    raise RuntimeError(tr("Ни один из отмеченных принтеров не готов"))
+                    raise RuntimeError(tr("Ни один из отмеченных принтеров не готов") + (":\n" + "\n".join(pre) if pre else ""))
                 rep = mp.MultiRun(units, names, send, cancel=self.cancel, on_event=on_event).run()
-                self._multi_summary = mp.summarize(rep)
+                self._multi_summary = pre + mp.summarize(rep)
                 total = sum(len(v) for v in rep["sent"].values())
                 if rep["cancelled"]:
                     self.sig.printed.emit("cancelled", total, "")
