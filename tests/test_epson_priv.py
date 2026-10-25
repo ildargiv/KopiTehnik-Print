@@ -24,9 +24,12 @@ class EpsonPrivTests(unittest.TestCase):
         e = ep.EpsonPriv("EPSON L18050 Series")
         b = blob()
         self.assertTrue(e.supported("quality"))
-        self.assertFalse(e.supported("border"))
-        self.assertEqual(e.set(b, "border", True), b)
-        self.assertIsNone(e.get(b, "border"))
+        self.assertTrue(e.supported("border"))
+        self.assertFalse(e.supported("maint"))
+        e2 = ep.EpsonPriv("EPSON L3250 Series")
+        self.assertFalse(e2.supported("border"))
+        self.assertEqual(e2.set(b, "border", True), b)
+        self.assertIsNone(e2.get(b, "border"))
 
     def test_border_roundtrip(self):
         e = ep.EpsonPriv("EPSON L8050 Series")
