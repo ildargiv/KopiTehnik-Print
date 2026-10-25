@@ -22,6 +22,25 @@ PROFILES = {
     "L18050": {"quality": 7788, "border": 7700, "ccor": 188},
 }
 
+PAPER_CODE_OFFSET = 2088   # priv+2088: 0x00 — простая бумага, 0x10 — глянцевая фотобумага
+
+# байты режима качества (priv+offset: значение) и публичные поля (dmPrintQuality/dmYResolution @90/96),
+# снятые с драйвера через его диалог. Ключ: (бумага, значение селектора priv+7788).
+_PHOTO = {
+    (("photo", 1)): {"priv": {124: 0x03, 150: 0x03, 154: 0x20, 2200: 0x00, 7765: 0x00, 7766: 0x00}},
+    (("photo", 2)): {"priv": {124: 0x05, 150: 0x04, 154: 0x21, 2200: 0x00, 7765: 0x00, 7766: 0x00}},
+}
+QUALITY_SETS = {
+    "L8050": {**_PHOTO, **{
+        ("plain", 1): {"priv": {124: 0x02, 150: 0x03, 154: 0x2B, 2200: 0x01, 7765: 0xC0, 7766: 0x01}},
+        ("plain", 2): {"priv": {124: 0x03, 150: 0x04, 154: 0x22, 2200: 0x00, 7765: 0x00, 7766: 0x00}},
+    }},
+    "L18050": {**_PHOTO, **{
+        ("photo", 0): {"priv": {124: 0x02, 150: 0x01, 154: 0x01, 2200: 0x00, 7765: 0x40, 7766: 0x00},
+                       "pub": {90: 0x68, 91: 0x01, 96: 0x68, 97: 0x01}},
+    }},
+}
+
 # режимы качества по моделям: (значение байта, название). У L8050 в драйвере нет «Черновика».
 QUALITY_MODES = {
     "L8050": [(1, "Стандарт"), (2, "Высокое")],
@@ -60,6 +79,13 @@ class EpsonPriv:
 
     def supported(self, feature):
         return feature in self.map
+
+    def _quality_patch(self, blob, value):
+        """Набор байтов режима качества из реальных снимков драйвера: драйвер выводит байт 7788 из зеркальных
+        байтов (+124, +150, +154 ...), поэтому одного селектора мало — иначе merge вернёт прежнее качество."""
+        sets = QUALITY_SETS.get(self.model, {})
+        paper = "plain" if blob[self._private_start(blob) + PAPER_CODE_OFFSET] == 0 else "photo"
+        return sets.get((paper, value)) or sets.get(("photo", value)) or {}
 
     def quality_modes(self):
         return QUALITY_MODES.get(self.model, []) if self.supported("quality") else []
@@ -100,6 +126,14 @@ class EpsonPriv:
             struct.pack_into("<H", ba, DM_DEFAULTSOURCE_OFFSET, SRC_BORDERLESS if value else SRC_NORMAL)
             struct.pack_into("<I", ba, DM_FIELDS_OFFSET, struct.unpack_from("<I", ba, DM_FIELDS_OFFSET)[0] | DM_DEFAULTSOURCE_FLAG)
         else:
+            if feature == "quality":
+                start = self._private_start(blob)
+                patch = self._quality_patch(blob, int(value))
+                for off, val in patch.get("priv", {}).items():
+                    if start + off < len(ba):
+                        ba[start + off] = val
+                for off, val in patch.get("pub", {}).items():
+                    ba[off] = val
             ba[pos] = int(value) & 0xFF
         return bytes(ba)
 
