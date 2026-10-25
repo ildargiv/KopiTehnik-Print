@@ -5075,9 +5075,8 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         self.cb_quality = QComboBox()
         shrinkable_combo(self.cb_quality, 110, 200)
         self.cb_quality.activated.connect(lambda _i: self._epson_set("quality", self.cb_quality.currentData()))
-        self.w_quality = QWidget()
-        self.w_quality.setLayout(row("Качество печати", self.cb_quality))
-        self.w_epson.setLayout(vbox(self.w_quality, row("Печать без полей", self.sw_border), row("Отключить цветокоррекцию драйвера", self.sw_ccor), spacing=6, margins=(0, 0, 0, 0)))
+        self.l_quality = WrapLabel(tr("Качество печати"))
+        self.w_epson.setLayout(vbox(row(self.l_quality, self.cb_quality), row("Печать без полей", self.sw_border), row("Отключить цветокоррекцию драйвера", self.sw_ccor), spacing=6, margins=(0, 0, 0, 0)))
         self.w_maint = QWidget()
         self.w_maint.setLayout(hbox(btn("Проверка дюз", lambda: self._epson_maint("nozzle_check"), ico="settings"),
                                     btn("Прочистка головки", lambda: self._epson_maint("clean"), ico="settings"), spacing=6))
@@ -5481,7 +5480,8 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
                 for v, name in e.quality_modes():
                     self.cb_quality.addItem(tr(name), v)
                 self.cb_quality.setCurrentIndex(max(0, self.cb_quality.findData(e.get(self.blob, "quality"))))
-                self.w_quality.setVisible(e.supported("quality"))
+                self.l_quality.setVisible(e.supported("quality"))
+                self.cb_quality.setVisible(e.supported("quality"))
                 self.sw_border.setVisible(e.supported("border"))
                 self.sw_ccor.setVisible(e.supported("ccor"))
         except ValueError:
