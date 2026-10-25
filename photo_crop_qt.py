@@ -31,6 +31,7 @@ import brand_datestamp as bd                               # noqa: E402  (фир
 import photo_crop as pc                                    # noqa: E402  (движок программы)
 import color_tools as ct                                   # noqa: E402  (уровни, кривые, выборочный цвет)
 import printer_corr as pcr                                 # noqa: E402  (поправка принтера: цвет на выходе, не на экране)
+import epson_priv as ep                                    # noqa: E402  (без полей и цветокоррекция драйвера Epson)
 import gui_agent as ga                                     # noqa: E402  (ИИ-агент внутри окна)
 import i18n                                                # noqa: E402  (переводы интерфейса)
 
@@ -5064,6 +5065,13 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         self.w_paper.hide()                                             # выбор бумаги драйвера открывается только по «Изменить…»
         self.b_paper_edit = btn("Изменить…", lambda: self.w_paper.setVisible(not self.w_paper.isVisible()), "link",
                                 tip="Выбрать бумагу драйвера вручную (например, вариант «без полей»). По умолчанию она подбирается по размеру листа сверху.")
+        self.sw_border = Switch(False)
+        self.sw_border.toggled.connect(lambda on: self._epson_set("border", on))
+        self.sw_ccor = Switch(False)
+        self.sw_ccor.toggled.connect(lambda on: self._epson_set("ccor", on))
+        self.w_epson = QWidget()
+        self.w_epson.setLayout(vbox(row("Печать без полей", self.sw_border), row("Отключить цветокоррекцию драйвера", self.sw_ccor), spacing=6, margins=(0, 0, 0, 0)))
+        self.w_epson.hide()
         self.l_prof = lbl("", wrap=True)
         self.b_prof_reset = btn("Сбросить к стандарту", self.profile_reset, "link", tip="Забыть сохранённые настройки этой связки (принтер, формат, тип бумаги)")
         self.sw_cm2 = Switch(self.s["cm_on"])
@@ -5074,7 +5082,7 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
                        row("Тип бумаги", self.cb_media), self.l_paper_drv, hbox(self.b_paper_edit, None), self.w_paper, row("Подача", self.cb_source),
                        hbox(btn("Свойства драйвера…", self.driver_props, ico="settings"),
                             ibtn("reset", "Обновить список принтеров", self.reload_printers, 34, True), spacing=6),
-                       self.l_drv, self.l_prof, hbox(self.b_prof_reset, None),
+                       self.w_epson, self.l_drv, self.l_prof, hbox(self.b_prof_reset, None),
                        row("Профиль принтера", self.sw_cm2), self.l_icc2,
                        btn("Выбрать профиль…", self.open_cm_dialog, ico="profile"))
         self.cb_ppi = QComboBox()
@@ -5186,6 +5194,7 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
             self.l_drv.setText(tr("Тип бумаги, качество и печать без полей этот драйвер отдаёт только через «Свойства драйвера». Настройки запоминаются."))
         else:
             self.l_drv.setText(tr("Качество и печать без полей задаются в «Свойствах драйвера». Настройки запоминаются."))
+        self._fill_epson()
         self.l_icc2.setText(self.l_icc.text())
         if self.pr["paper_auto"] or self.cb_paper.currentData() is None:
             self.l_paper_drv.setText(trf("Бумага в драйвере: подбирается автоматически по размеру листа ({f})", f=self.s["format"]))
@@ -5444,6 +5453,37 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
             self._save_blob()
         except Exception as ex:
             warn(self, str(ex))
+        self._fill_driver()
+
+    def _epson(self):
+        return ep.EpsonPriv(self.pr.get("printer", ""), ep.load_profiles(str(pc.AGENT_DIR / "epson_profiles.json")))
+
+    def _fill_epson(self):
+        """Переключатели «без полей» и «цветокоррекция» видны, только если для модели известны смещения."""
+        e = self._epson()
+        ok = self.blob is not None and (e.supported("border") or e.supported("ccor"))
+        try:
+            if ok:
+                self.sw_border.set(bool(e.get(self.blob, "border")))
+                self.sw_ccor.set(bool(e.color_correction_off(self.blob)))
+        except ValueError:
+            ok = False
+        self.w_epson.setVisible(ok)
+
+    def _epson_set(self, feature, on):
+        if self.blob is None or getattr(self, "_prof_lock", False):
+            return
+        e = self._epson()
+        try:
+            if feature == "ccor":
+                nb = e.set_color_correction_off(self.blob, on)
+            else:
+                nb = e.set(self.blob, feature, on)
+            self.blob = pc.merge_devmode(self.pr["printer"], nb)
+            self._save_blob()
+        except Exception as ex:
+            warn(self, str(ex))
+        pc.clear_geom_cache()
         self._fill_driver()
 
     def _paper_changed(self):
