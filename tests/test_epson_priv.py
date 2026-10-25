@@ -23,6 +23,7 @@ class EpsonPrivTests(unittest.TestCase):
     def test_unknown_model_changes_nothing(self):
         e = ep.EpsonPriv("EPSON L18050 Series")
         b = blob()
+        self.assertTrue(e.supported("quality"))
         self.assertFalse(e.supported("border"))
         self.assertEqual(e.set(b, "border", True), b)
         self.assertIsNone(e.get(b, "border"))
@@ -42,6 +43,14 @@ class EpsonPrivTests(unittest.TestCase):
         self.assertTrue(e.color_correction_off(b))
         self.assertFalse(e.color_correction_off(e.set_color_correction_off(b, False)))
 
+    def test_quality(self):
+        e = ep.EpsonPriv("EPSON L18050 Series")
+        b = blob()
+        for v in (2, 1, 0):
+            b = e.set(b, "quality", v)
+            self.assertEqual(e.get(b, "quality"), v)
+        self.assertEqual(b[220 + 7788], 0)
+
     def test_short_devmode_raises(self):
         e = ep.EpsonPriv("EPSON L8050 Series")
         with self.assertRaises(ValueError):
@@ -53,6 +62,7 @@ class EpsonPrivTests(unittest.TestCase):
             p = os.path.join(d, "p.json")
             json.dump({"L18050": {"border": 100, "ccor": 50}}, open(p, "w"))
             e = ep.EpsonPriv("EPSON L18050 Series", ep.load_profiles(p))
+            self.assertTrue(e.supported("quality"))
             self.assertTrue(e.supported("border"))
 
 

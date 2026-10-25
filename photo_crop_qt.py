@@ -5066,7 +5066,12 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         self.sw_ccor = Switch(False)
         self.sw_ccor.toggled.connect(lambda on: self._epson_set("ccor", on))
         self.w_epson = QWidget()
-        self.w_epson.setLayout(vbox(row("Печать без полей", self.sw_border), row("Отключить цветокоррекцию драйвера", self.sw_ccor), spacing=6, margins=(0, 0, 0, 0)))
+        self.cb_quality = QComboBox()
+        shrinkable_combo(self.cb_quality, 110, 200)
+        for v, name in ep.QUALITY_MODES["quality"]:
+            self.cb_quality.addItem(tr(name), v)
+        self.cb_quality.activated.connect(lambda _i: self._epson_set("quality", self.cb_quality.currentData()))
+        self.w_epson.setLayout(vbox(row("Качество печати", self.cb_quality), row("Печать без полей", self.sw_border), row("Отключить цветокоррекцию драйвера", self.sw_ccor), spacing=6, margins=(0, 0, 0, 0)))
         self.w_epson.hide()
         self.l_prof = lbl("", wrap=True)
         self.b_prof_reset = btn("Сбросить к стандарту", self.profile_reset, "link", tip="Забыть сохранённые настройки этой связки (принтер, формат, тип бумаги)")
@@ -5457,11 +5462,15 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
     def _fill_epson(self):
         """Переключатели «без полей» и «цветокоррекция» видны, только если для модели известны смещения."""
         e = self._epson()
-        ok = self.blob is not None and (e.supported("border") or e.supported("ccor"))
+        ok = self.blob is not None and any(e.supported(f) for f in ("border", "ccor", "quality"))
         try:
             if ok:
                 self.sw_border.set(bool(e.get(self.blob, "border")))
                 self.sw_ccor.set(bool(e.color_correction_off(self.blob)))
+                self.cb_quality.setCurrentIndex(max(0, self.cb_quality.findData(e.get(self.blob, "quality"))))
+                self.cb_quality.setVisible(e.supported("quality"))
+                self.sw_border.setVisible(e.supported("border"))
+                self.sw_ccor.setVisible(e.supported("ccor"))
         except ValueError:
             ok = False
         self.w_epson.setVisible(ok)
@@ -5475,8 +5484,12 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
                 nb = e.set_color_correction_off(self.blob, on)
             else:
                 nb = e.set(self.blob, feature, on)
-            self.blob = pc.merge_devmode(self.pr["printer"], nb)
-            self._save_blob()
+            merged = pc.merge_devmode(self.pr["printer"], nb)
+            if feature == "quality" and e.get(merged, "quality") != on:
+                warn(self, tr("Драйвер не принял это качество печати. Выберите его в «Свойствах драйвера»."))
+            else:
+                self.blob = merged
+                self._save_blob()
         except Exception as ex:
             warn(self, str(ex))
         pc.clear_geom_cache()
