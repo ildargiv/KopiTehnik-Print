@@ -5060,11 +5060,7 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         self.cb_source = combo(lambda: self._drv_set("source", self.cb_source))
         self.l_drv = lbl("", "muted", wrap=True)
         self.l_paper_drv = lbl("", wrap=True)
-        self.w_paper = QWidget()
-        self.w_paper.setLayout(row("Размер бумаги", self.cb_paper))
-        self.w_paper.hide()                                             # выбор бумаги драйвера открывается только по «Изменить…»
-        self.b_paper_edit = btn("Изменить…", lambda: self.w_paper.setVisible(not self.w_paper.isVisible()), "link",
-                                tip="Выбрать бумагу драйвера вручную (например, вариант «без полей»). По умолчанию она подбирается по размеру листа сверху.")
+        self.pr["paper_auto"] = True                                    # размер бумаги драйвера всегда берётся из формата листа сверху
         self.sw_border = Switch(False)
         self.sw_border.toggled.connect(lambda on: self._epson_set("border", on))
         self.sw_ccor = Switch(False)
@@ -5079,7 +5075,7 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         self.l_icc2 = lbl("", "muted", wrap=True)
         printer = card("Принтер и бумага",
                        row("Принтер", hbox(self.cb_printer, spacing=4)),
-                       row("Тип бумаги", self.cb_media), self.l_paper_drv, hbox(self.b_paper_edit, None), self.w_paper, row("Подача", self.cb_source),
+                       row("Тип бумаги", self.cb_media), self.l_paper_drv, row("Подача", self.cb_source),
                        hbox(btn("Свойства драйвера…", self.driver_props, ico="settings"),
                             ibtn("reset", "Обновить список принтеров", self.reload_printers, 34, True), spacing=6),
                        self.w_epson, self.l_drv, self.l_prof, hbox(self.b_prof_reset, None),
