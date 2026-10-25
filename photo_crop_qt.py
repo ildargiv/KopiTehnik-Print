@@ -4400,6 +4400,12 @@ class DocMixin:
         total = len(pages) * d["copies"]
         text = "%s\n%s: %s\n%s: %s, %s: %d\n%s: %d" % (self.doc["src"].name, tr("Принтер"), pr["printer"], tr("Бумага"), d["paper"],
                                                        tr("копий"), d["copies"], tr("Листов к печати"), total)
+        try:
+            e_ = self._epson()
+            if cm and e_.supported("ccor") and e_.color_correction_off(self.blob) is False:
+                text += "\n" + tr("Внимание: цветокоррекция драйвера включена, она исказит цвет профиля. Отключите её на странице «Принтер».")
+        except ValueError:
+            pass
         if pcr.active(self.s["pcorr"]):
             text += "\n" + tr("Поправка принтера: включена")
         if cm:
@@ -5071,7 +5077,9 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         for v, name in ep.QUALITY_MODES["quality"]:
             self.cb_quality.addItem(tr(name), v)
         self.cb_quality.activated.connect(lambda _i: self._epson_set("quality", self.cb_quality.currentData()))
-        self.w_epson.setLayout(vbox(row("Качество печати", self.cb_quality), row("Печать без полей", self.sw_border), row("Отключить цветокоррекцию драйвера", self.sw_ccor), spacing=6, margins=(0, 0, 0, 0)))
+        self.w_quality = QWidget()
+        self.w_quality.setLayout(row("Качество печати", self.cb_quality))
+        self.w_epson.setLayout(vbox(self.w_quality, row("Печать без полей", self.sw_border), row("Отключить цветокоррекцию драйвера", self.sw_ccor), spacing=6, margins=(0, 0, 0, 0)))
         self.w_maint = QWidget()
         self.w_maint.setLayout(hbox(btn("Проверка дюз", lambda: self._epson_maint("nozzle_check"), ico="settings"),
                                     btn("Прочистка головки", lambda: self._epson_maint("clean"), ico="settings"), spacing=6))
@@ -5472,7 +5480,7 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
                 self.sw_border.set(bool(e.get(self.blob, "border")))
                 self.sw_ccor.set(bool(e.color_correction_off(self.blob)))
                 self.cb_quality.setCurrentIndex(max(0, self.cb_quality.findData(e.get(self.blob, "quality"))))
-                self.cb_quality.setVisible(e.supported("quality"))
+                self.w_quality.setVisible(e.supported("quality"))
                 self.sw_border.setVisible(e.supported("border"))
                 self.sw_ccor.setVisible(e.supported("ccor"))
         except ValueError:
@@ -5505,6 +5513,8 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
             else:
                 self.blob = merged
                 self._save_blob()
+                if feature == "border" and on and e.get(merged, "border") is False:
+                    warn(self, tr("Драйвер не включил печать без полей: для этого размера бумаги или типа бумаги она недоступна."))
         except Exception as ex:
             warn(self, str(ex))
         pc.clear_geom_cache()
