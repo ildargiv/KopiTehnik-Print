@@ -5072,6 +5072,10 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
             self.cb_quality.addItem(tr(name), v)
         self.cb_quality.activated.connect(lambda _i: self._epson_set("quality", self.cb_quality.currentData()))
         self.w_epson.setLayout(vbox(row("Качество печати", self.cb_quality), row("Печать без полей", self.sw_border), row("Отключить цветокоррекцию драйвера", self.sw_ccor), spacing=6, margins=(0, 0, 0, 0)))
+        self.w_maint = QWidget()
+        self.w_maint.setLayout(hbox(btn("Проверка дюз", lambda: self._epson_maint("nozzle_check"), ico="settings"),
+                                    btn("Прочистка головки", lambda: self._epson_maint("clean"), ico="settings"), spacing=6))
+        self.w_maint.hide()
         self.w_epson.hide()
         self.l_prof = lbl("", wrap=True)
         self.b_prof_reset = btn("Сбросить к стандарту", self.profile_reset, "link", tip="Забыть сохранённые настройки этой связки (принтер, формат, тип бумаги)")
@@ -5083,7 +5087,7 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
                        row("Тип бумаги", self.cb_media), self.l_paper_drv, row("Подача", self.cb_source),
                        hbox(btn("Свойства драйвера…", self.driver_props, ico="settings"),
                             ibtn("reset", "Обновить список принтеров", self.reload_printers, 34, True), spacing=6),
-                       self.w_epson, self.l_drv, self.l_prof, hbox(self.b_prof_reset, None),
+                       self.w_epson, self.w_maint, self.l_drv, self.l_prof, hbox(self.b_prof_reset, None),
                        row("Профиль принтера", self.sw_cm2), self.l_icc2,
                        btn("Выбрать профиль…", self.open_cm_dialog, ico="profile"))
         self.cb_ppi = QComboBox()
@@ -5474,6 +5478,17 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         except ValueError:
             ok = False
         self.w_epson.setVisible(ok)
+        self.w_maint.setVisible(self.blob is not None and e.supported("maint"))
+
+    def _epson_maint(self, action):
+        text = {"nozzle_check": "Напечатать тест дюз? Будет израсходовано немного чернил и бумаги.",
+                "clean": "Запустить прочистку печатающей головки? Тратит чернила и заполняет ёмкость отработки; делайте её, только если тест дюз показал пропуски."}[action]
+        if not ask(self, tr(text)):
+            return
+        try:
+            self._epson().maintenance(self.pr["printer"], action)
+        except Exception as ex:
+            warn(self, tr("Не удалось отправить команду принтеру") + ":\n%s" % ex)
 
     def _epson_set(self, feature, on):
         if self.blob is None or getattr(self, "_prof_lock", False):

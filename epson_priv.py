@@ -17,7 +17,7 @@ CCOR_AUTO, CCOR_MANUAL = 1, 2              # «Автоматический» / 
 
 # ключи: border (байт, бит 0), ccor (байт), quality (байт; значения в "quality_values")
 PROFILES = {
-    "L8050": {"border": 7700, "ccor": 188},
+    "L8050": {"border": 7700, "ccor": 188, "maint": 1},
     # L18050: качество найдено по снимкам драйвера «Черновик/Стандарт/Высокое» (0/1/2); остальные смещения не сняты
     "L18050": {"quality": 7788},
 }
@@ -57,6 +57,12 @@ class EpsonPriv:
 
     def supported(self, feature):
         return feature in self.map
+
+    def maintenance(self, printer_name, action):
+        """Проверка дюз / прочистка. Только для моделей с ключом maint."""
+        if not self.supported("maint"):
+            raise ValueError("Для этой модели обслуживание из программы не проверено")
+        send_raw(printer_name, maintenance_job(action))
 
     @staticmethod
     def _private_start(blob):
@@ -98,3 +104,46 @@ class EpsonPriv:
     def color_correction_off(self, blob):
         v = self.get(blob, "ccor")
         return None if v is None else v == CCOR_MANUAL
+
+
+# --- обслуживание: проверка дюз и прочистка головки (служебные команды Epson remote mode) ---------------
+# Формат как у escputil/Gutenprint: ESC @, ESC ( R «REMOTE1» + команда, выход из remote mode, ESC @.
+# Для конкретной модели команды надо проверить на принтере, поэтому кнопки показываются только когда
+# в профиле модели есть ключ "maint" (на неизвестных моделях их нет).
+MAINT_COMMANDS = {"nozzle_check": b"NC\x02\x00\x00\x00", "clean": b"CH\x02\x00\x00\x00"}
+
+
+def maintenance_job(action):
+    """Байты задания для проверки дюз ("nozzle_check") или прочистки ("clean")."""
+    cmd = MAINT_COMMANDS[action]
+    return b"\x1b@" + b"\x1b(R" + struct.pack("<H", 8) + b"\x00REMOTE1" + cmd + b"\x1b\x00\x00\x00" + b"\x1b@"
+
+
+def send_raw(printer_name, data):
+    """Отправляет байты принтеру как RAW-задание через spooler (только Windows)."""
+    import ctypes
+    import ctypes.wintypes as wt
+
+    class DocInfo(ctypes.Structure):
+        _fields_ = [("pDocName", wt.LPWSTR), ("pOutputFile", wt.LPWSTR), ("pDatatype", wt.LPWSTR)]
+    wp = ctypes.WinDLL("winspool.drv", use_last_error=True)
+    wp.OpenPrinterW.argtypes = [wt.LPWSTR, ctypes.POINTER(wt.HANDLE), ctypes.c_void_p]
+    wp.StartDocPrinterW.argtypes = [wt.HANDLE, wt.DWORD, ctypes.c_void_p]
+    wp.WritePrinter.argtypes = [wt.HANDLE, ctypes.c_void_p, wt.DWORD, ctypes.POINTER(wt.DWORD)]
+    wp.ClosePrinter.argtypes = [wt.HANDLE]
+    h = wt.HANDLE()
+    if not wp.OpenPrinterW(printer_name, ctypes.byref(h), None):
+        raise ctypes.WinError(ctypes.get_last_error())
+    try:
+        if not wp.StartDocPrinterW(h, 1, ctypes.byref(DocInfo("Обслуживание принтера", None, "RAW"))):
+            raise ctypes.WinError(ctypes.get_last_error())
+        wp.StartPagePrinter(h)
+        n = wt.DWORD(0)
+        buf = ctypes.create_string_buffer(data, len(data))
+        ok = wp.WritePrinter(h, buf, len(data), ctypes.byref(n))
+        wp.EndPagePrinter(h)
+        wp.EndDocPrinter(h)
+        if not ok or n.value != len(data):
+            raise OSError("Принтер принял %d из %d байт" % (n.value, len(data)))
+    finally:
+        wp.ClosePrinter(h)
