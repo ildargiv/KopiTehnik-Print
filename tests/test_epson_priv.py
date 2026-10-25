@@ -75,6 +75,17 @@ class EpsonPrivTests(unittest.TestCase):
         b = ep.EpsonPriv("EPSON L8050 Series").set(bytes(b), "quality", 2)
         self.assertEqual((b[220 + 124], b[220 + 154]), (3, 0x22))
 
+    def test_l18050_draft_only_on_photo(self):
+        e = ep.EpsonPriv("EPSON L18050 Series")
+        b = bytearray(blob())
+        struct.pack_into("<I", b, 196, 1)
+        self.assertEqual([v for v, _ in e.quality_modes(bytes(b))], [1, 2])
+        struct.pack_into("<I", b, 196, 396)
+        self.assertEqual([v for v, _ in e.quality_modes(bytes(b))], [0, 1, 2])
+        self.assertEqual(e.set(bytes(b), "quality", 2)[220 + 124], 5)
+        struct.pack_into("<I", b, 196, 1)
+        self.assertEqual(e.set(bytes(b), "quality", 2)[220 + 124], 3)
+
     def test_quality_modes_per_model(self):
         self.assertEqual([v for v, _ in ep.EpsonPriv("EPSON L8050 Series").quality_modes()], [1, 2])
         self.assertEqual([v for v, _ in ep.EpsonPriv("EPSON L18050 Series").quality_modes()], [0, 1, 2])

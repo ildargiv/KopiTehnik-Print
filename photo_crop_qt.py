@@ -5477,7 +5477,7 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
                 self.sw_border.set(bool(e.get(self.blob, "border")))
                 self.sw_ccor.set(bool(e.color_correction_off(self.blob)))
                 self.cb_quality.clear()
-                for v, name in e.quality_modes():
+                for v, name in e.quality_modes(self.blob):
                     self.cb_quality.addItem(tr(name), v)
                 self.cb_quality.setCurrentIndex(max(0, self.cb_quality.findData(e.get(self.blob, "quality"))))
                 self.l_quality.setVisible(e.supported("quality"))
