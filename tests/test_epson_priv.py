@@ -54,6 +54,11 @@ class EpsonPrivTests(unittest.TestCase):
             self.assertEqual(e.get(b, "quality"), v)
         self.assertEqual(b[220 + 7788], 0)
 
+    def test_quality_modes_per_model(self):
+        self.assertEqual([v for v, _ in ep.EpsonPriv("EPSON L8050 Series").quality_modes()], [1, 2])
+        self.assertEqual([v for v, _ in ep.EpsonPriv("EPSON L18050 Series").quality_modes()], [0, 1, 2])
+        self.assertEqual(ep.EpsonPriv("EPSON L3250 Series").quality_modes(), [])
+
     def test_maintenance_job(self):
         j = ep.maintenance_job("nozzle_check")
         self.assertTrue(j.startswith(b"\x1b@\x1b(R") and j.endswith(b"\x1b@"))

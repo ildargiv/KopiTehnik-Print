@@ -17,13 +17,16 @@ CCOR_AUTO, CCOR_MANUAL = 1, 2              # «Автоматический» / 
 
 # ключи: border (байт, бит 0), ccor (байт), quality (байт; значения в "quality_values")
 PROFILES = {
-    "L8050": {"border": 7700, "ccor": 188, "maint": 1},
+    "L8050": {"border": 7700, "ccor": 188, "maint": 1, "quality": 7788},
     # L18050: качество (0/1/2) найдено по снимкам драйвера, «без полей» и цветокоррекция сняты вручную через диалог — совпадают с L8050
     "L18050": {"quality": 7788, "border": 7700, "ccor": 188},
 }
 
-# значения байта качества: порядок = порядок в списке программы
-QUALITY_MODES = {"quality": [(0, "Черновик"), (1, "Стандарт"), (2, "Высокое")]}
+# режимы качества по моделям: (значение байта, название). У L8050 в драйвере нет «Черновика».
+QUALITY_MODES = {
+    "L8050": [(1, "Стандарт"), (2, "Высокое")],
+    "L18050": [(0, "Черновик"), (1, "Стандарт"), (2, "Высокое")],
+}
 
 
 def model_of(printer_name):
@@ -57,6 +60,9 @@ class EpsonPriv:
 
     def supported(self, feature):
         return feature in self.map
+
+    def quality_modes(self):
+        return QUALITY_MODES.get(self.model, []) if self.supported("quality") else []
 
     def maintenance(self, printer_name, action):
         """Проверка дюз / прочистка. Только для моделей с ключом maint."""

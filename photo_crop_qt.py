@@ -5074,8 +5074,6 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         self.w_epson = QWidget()
         self.cb_quality = QComboBox()
         shrinkable_combo(self.cb_quality, 110, 200)
-        for v, name in ep.QUALITY_MODES["quality"]:
-            self.cb_quality.addItem(tr(name), v)
         self.cb_quality.activated.connect(lambda _i: self._epson_set("quality", self.cb_quality.currentData()))
         self.w_quality = QWidget()
         self.w_quality.setLayout(row("Качество печати", self.cb_quality))
@@ -5479,6 +5477,9 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
             if ok:
                 self.sw_border.set(bool(e.get(self.blob, "border")))
                 self.sw_ccor.set(bool(e.color_correction_off(self.blob)))
+                self.cb_quality.clear()
+                for v, name in e.quality_modes():
+                    self.cb_quality.addItem(tr(name), v)
                 self.cb_quality.setCurrentIndex(max(0, self.cb_quality.findData(e.get(self.blob, "quality"))))
                 self.w_quality.setVisible(e.supported("quality"))
                 self.sw_border.setVisible(e.supported("border"))
