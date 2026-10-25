@@ -22,7 +22,8 @@ PROFILES = {
     "L18050": {"quality": 7788, "border": 7700, "ccor": 188},
 }
 
-PAPER_CODE_OFFSET = 2088   # priv+2088: 0x00 — простая бумага, 0x10 — глянцевая фотобумага
+DM_MEDIATYPE_OFFSET = 196   # DEVMODEW.dmMediaType: 1 — простая бумага, остальное (396 и др.) — фото.
+                            # priv+2088 для этого не годится: он зависит и от размера (на A5 всегда 0x10).
 
 # байты режима качества (priv+offset: значение) и публичные поля (dmPrintQuality/dmYResolution @90/96),
 # снятые с драйвера через его диалог. Ключ: (бумага, значение селектора priv+7788).
@@ -84,7 +85,8 @@ class EpsonPriv:
         """Набор байтов режима качества из реальных снимков драйвера: драйвер выводит байт 7788 из зеркальных
         байтов (+124, +150, +154 ...), поэтому одного селектора мало — иначе merge вернёт прежнее качество."""
         sets = QUALITY_SETS.get(self.model, {})
-        paper = "plain" if blob[self._private_start(blob) + PAPER_CODE_OFFSET] == 0 else "photo"
+        media = struct.unpack_from("<I", blob, DM_MEDIATYPE_OFFSET)[0]
+        paper = "plain" if media == 1 else "photo"
         return sets.get((paper, value)) or sets.get(("photo", value)) or {}
 
     def quality_modes(self):

@@ -57,14 +57,23 @@ class EpsonPrivTests(unittest.TestCase):
     def test_quality_sets_plain_and_photo(self):
         e = ep.EpsonPriv("EPSON L8050 Series")
         b = bytearray(blob())
+        struct.pack_into("<I", b, 196, 1)
         b = e.set(bytes(b), "quality", 2)
         self.assertEqual((b[220 + 124], b[220 + 150], b[220 + 154], b[220 + 7788]), (3, 4, 0x22, 2))
         b = bytearray(b)
+        struct.pack_into("<I", b, 196, 396)
         b[220 + 2088] = 0x10
         b = e.set(bytes(b), "quality", 1)
         self.assertEqual((b[220 + 124], b[220 + 154], b[220 + 7788]), (3, 0x20, 1))
         d = ep.EpsonPriv("EPSON L18050 Series").set(blob(), "quality", 0)
         self.assertEqual((d[220 + 124], d[220 + 7765], d[90], d[91]), (2, 0x40, 0x68, 1))
+
+    def test_plain_a5_uses_plain_set_despite_2088(self):
+        b = bytearray(blob())
+        struct.pack_into("<I", b, 196, 1)
+        b[220 + 2088] = 0x10                      # A5: драйвер ставит 0x10 и на простой бумаге
+        b = ep.EpsonPriv("EPSON L8050 Series").set(bytes(b), "quality", 2)
+        self.assertEqual((b[220 + 124], b[220 + 154]), (3, 0x22))
 
     def test_quality_modes_per_model(self):
         self.assertEqual([v for v, _ in ep.EpsonPriv("EPSON L8050 Series").quality_modes()], [1, 2])
