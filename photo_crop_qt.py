@@ -32,6 +32,7 @@ import brand_datestamp as bd                               # noqa: E402  (фир
 import photo_crop as pc                                    # noqa: E402  (движок программы)
 import color_tools as ct                                   # noqa: E402  (уровни, кривые, выборочный цвет)
 import printer_corr as pcr                                 # noqa: E402  (поправка принтера: цвет на выходе, не на экране)
+import print_quick as pqk                                  # noqa: E402  (быстрый старт печати: три ячейки настроек)
 import epson_priv as ep                                    # noqa: E402  (без полей и цветокоррекция драйвера Epson)
 import gui_agent as ga                                     # noqa: E402  (ИИ-агент внутри окна)
 import i18n                                                # noqa: E402  (переводы интерфейса)
@@ -5132,7 +5133,7 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         self.l_queue = lbl("Нажмите «Обновить», чтобы увидеть очередь.", "muted", wrap=True)
         queue = card("Очередь печати", self.l_queue,
                      hbox(btn("Обновить", self.queue_refresh), btn("Очистить", self.queue_clear), spacing=6))
-        return self._scroll(printer, screen, corr, proc, bleed, job, queue, btn("Старое окно печати…", self.open_print, "link"))
+        return self._scroll(self._quick_card(), printer, screen, corr, proc, bleed, job, queue, btn("Старое окно печати…", self.open_print, "link"))
 
     def reload_printers(self):
         self.printers = pc.list_printers()
@@ -5144,6 +5145,7 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         if name:
             self.cb_printer.setCurrentText(name)
         self._load_printer()
+        self._qs_refresh()
 
     def _printer_changed(self):
         self.pr["printer"] = self.cb_printer.currentText()
@@ -5538,6 +5540,176 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
             warn(self, str(ex))
         pc.clear_geom_cache()
         self._fill_driver()
+
+    # ---------- быстрый старт: три ячейки «принтер + бумага + качество + формат + цвет»
+    QS_COLORS = {pqk.GREEN: "#3fb950", pqk.ORANGE: "#f0883e", pqk.RED: "#e5534b", pqk.GRAY: ""}
+
+    def _qs_slots(self):
+        slots = pqk.norm_slots(self.settings.get("print_quick"))
+        self.settings["print_quick"] = slots
+        return slots
+
+    def _quick_card(self):
+        self.qs_btns, self.qs_save, self.qs_ren = [], [], []
+        cols = []
+        for i in range(pqk.SLOTS):
+            b = MotionButton("")
+            b.clicked.connect(lambda _=False, i=i: self._qs_apply(i))
+            sv = btn("Сохранить", lambda i=i: self._qs_save(i), "link", tip="Запомнить текущие настройки принтера, бумаги, формата и цвета в эту ячейку")
+            rn = btn("Переименовать", lambda i=i: self._qs_rename(i), "link")
+            self.qs_btns.append(b)
+            self.qs_save.append(sv)
+            self.qs_ren.append(rn)
+            cols.append(vbox(b, hbox(sv, None, rn, spacing=2), spacing=2))
+        self.l_qs = lbl("", "muted", wrap=True)
+        card_ = card("Быстрый старт", hbox(*cols, spacing=8), self.l_qs)
+        self._qs_refresh()
+        return card_
+
+    def _qs_refresh(self):
+        if not hasattr(self, "qs_btns"):
+            return
+        slots = self._qs_slots()
+        printers = getattr(self, "printers", [])
+        for i, sl in enumerate(slots):
+            st = pqk.status(sl, printers)
+            col = self.QS_COLORS[st]
+            b = self.qs_btns[i]
+            b.setText("%s%s" % ("" if sl.get("empty") else "● ", tr(sl["name"]) if sl.get("empty") else sl["name"]))
+            b.setStyleSheet("QPushButton { border: 2px solid %s; border-radius: 8px; padding: 8px 6px; }" % col if col else "")
+            tips = {pqk.GREEN: "Все настройки заданы, принтер найден: нажмите, чтобы применить",
+                    pqk.ORANGE: "Настройки без привязки к принтеру: применятся к выбранному принтеру",
+                    pqk.RED: "Принтер из этой ячейки не найден: применятся остальные настройки",
+                    pqk.GRAY: "Пустая ячейка: настройте всё как нужно и нажмите «Сохранить»"}
+            tip = tr(tips[st])
+            if not sl.get("empty"):
+                tip += "\n" + self._qs_describe(sl)
+            b.setToolTip(tip)
+            self.qs_ren[i].setEnabled(not sl.get("empty"))
+        self.l_qs.setText(tr("Зелёная: настройка привязана к принтеру. Оранжевая: без привязки, подходит любому принтеру."))
+
+    def _qs_describe(self, sl):
+        s = sl["state"]
+        parts = [sl.get("printer") if sl.get("bound") else tr("без привязки к принтеру"), s.get("format", ""), s.get("media", ""), s.get("quality", "")]
+        if s.get("icc"):
+            parts.append(Path(s["icc"]).name)
+        return " · ".join(x for x in parts if x)
+
+    def _qs_capture(self):
+        """Текущие настройки печати одним словарём."""
+        st = {k: self.s[k] for k in self.PROF_COLOR}
+        st["pcorr"] = pcr.norm(self.s["pcorr"])
+        st.update({k: self.pr[k] for k in self.PROF_PR})
+        st["format"] = self.s["format"]
+        st["media"] = self.cb_media.currentText() if self.cb_media.isEnabled() and self.cb_media.count() else ""
+        st["quality"] = self._quality_name()
+        if self.blob:
+            st["blob"] = base64.b64encode(self.blob).decode()
+        return st
+
+    def _qs_save(self, i):
+        slots = self._qs_slots()
+        old = slots[i]
+        dlg = QDialog(self)
+        dlg.setWindowTitle(tr("Сохранить быстрый старт"))
+        name = QLineEdit(old["name"] if not old.get("empty") else "")
+        name.setPlaceholderText(tr("Например: матовая, высокое, зеркально"))
+        name.setMaxLength(24)
+        bind = QPushButton(tr("Привязать к принтеру: %s") % (self.pr.get("printer") or "—"))
+        bind.setCheckable(True)
+        bind.setChecked(bool(self.pr.get("printer")) and (old.get("empty") or old.get("bound")))
+        bind.setEnabled(bool(self.pr.get("printer")))
+        ok, cancel = btn("Сохранить", None, "primary"), btn("Отмена")
+        ok.clicked.connect(dlg.accept)
+        cancel.clicked.connect(dlg.reject)
+        dlg.setLayout(vbox(lbl("Название"), name, bind, hbox(None, cancel, ok), spacing=8, margins=(14, 14, 14, 14)))
+        dlg.setMinimumWidth(380)
+        if not dlg.exec():
+            return
+        nm = " ".join(name.text().split())[:24] or "Быстрый старт %d" % (i + 1)
+        printer = self.pr.get("printer", "")
+        slots[i] = {"name": nm, "bound": bool(bind.isChecked() and printer), "printer": printer,
+                    "model": ep.model_of(printer) or "", "state": self._qs_capture()}
+        self.settings["print_quick"] = slots
+        self.persist()
+        self._qs_refresh()
+
+    def _qs_rename(self, i):
+        slots = self._qs_slots()
+        if slots[i].get("empty"):
+            return
+        dlg = QInputDialog(self)
+        dlg.setWindowTitle(tr("Переименовать"))
+        dlg.setLabelText(tr("Название ячейки"))
+        dlg.setTextValue(slots[i]["name"])
+        dlg.setOkButtonText(tr("Готово"))
+        dlg.setCancelButtonText(tr("Отмена"))
+        if not dlg.exec():
+            return
+        nm = " ".join(dlg.textValue().split())[:24]
+        if nm:
+            slots[i]["name"] = nm
+            self.settings["print_quick"] = slots
+            self.persist()
+            self._qs_refresh()
+
+    def _qs_apply(self, i):
+        """Применить ячейку: принтер (если привязана), формат, настройки драйвера (бумага, качество, поля,
+        цветокоррекция), цветовой профиль, обработка. Настройки драйвера — только для того же принтера/модели."""
+        sl = self._qs_slots()[i]
+        if sl.get("empty"):
+            info(self, tr("Ячейка пуста. Настройте всё как нужно и нажмите «Сохранить» под кнопкой."))
+            return
+        st, notes = sl["state"], []
+        self._prof_lock = True
+        try:
+            if sl.get("bound"):
+                if sl["printer"] in self.printers:
+                    if self.pr["printer"] != sl["printer"]:
+                        self.cb_printer.setCurrentText(sl["printer"])
+                        self._printer_changed()
+                else:
+                    notes.append(trf("Принтер «{p}» не найден, оставлен текущий.", p=sl["printer"]))
+            if st.get("format") in pc.FORMATS:
+                self.cb_format.setCurrentText(st["format"])
+            if st.get("blob"):
+                if pqk.driver_compatible(sl, self.pr.get("printer", ""), ep.model_of):
+                    try:
+                        b = base64.b64decode(st["blob"])
+                        if pc.devmode_valid(b):
+                            self.blob = b
+                            self._save_blob(profile=False)
+                            self._fill_driver()
+                    except Exception:
+                        notes.append(tr("Настройки драйвера не удалось применить."))
+                else:
+                    notes.append(tr("Настройки драйвера (бумага, качество) относятся к другой модели и не применены."))
+            self._building = True
+            for k in self.PROF_COLOR:
+                if k in st:
+                    self.s[k] = pcr.norm(st[k]) if k == "pcorr" else st[k]
+            for k in self.PROF_PR:
+                if k in st:
+                    self.pr[k] = st[k]
+            try:
+                self.sw_cm.set(bool(self.s["cm_on"]))
+                self.sw_cm2.set(bool(self.s["cm_on"]))
+                self.sw_icm.set(bool(self.pr["icm_off"]))
+                self.cb_ppi.setCurrentText(self.pr["ppi"] if self.pr["ppi"] in pc.PPI_CHOICES else pc.PPI_CHOICES[0])
+                self.sl_sharp.setValue(int(self.pr["sharp"]))
+                self.l_sharp.setText(str(int(self.pr["sharp"])))
+                self.e_shrink.setText(str(self.pr["shrink"]))
+                self.pcorr_sync()
+            except (AttributeError, RuntimeError):
+                pass
+        finally:
+            self._building = False
+            self._prof_lock = False
+        self.cm_changed()
+        self.profile_label()
+        if self._ccor_on() and self.s.get("cm_on") and self.s.get("icc", "").strip():
+            notes.append(tr("Цветокоррекция драйвера включена при цветовом профиле."))
+        self.l_qs.setText(" ".join(notes) if notes else trf("Применено: {n}", n=sl["name"]))
 
     def _ccor_on(self):
         """True, если у модели известна цветокоррекция драйвера и она включена (искажает цвет профиля)."""
@@ -7661,7 +7833,7 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
                      nup=s["nup"], borders=s["borders"], border_mm=self.border_mm(), sheet_fill=s["fill"], qt_print=dict(self.pr),
                      cell_mode=s["cell_mode"], cell_w=self.cell_mm()[0], cell_h=self.cell_mm()[1],
                      smart=dict(self.sm))
-        for k in ("print_devmodes", "print_printer", "print_profiles"):
+        for k in ("print_devmodes", "print_printer", "print_profiles", "print_quick"):
             if k in self.settings:
                 fresh[k] = self.settings[k]
         if s["out_mode"] == "custom":
