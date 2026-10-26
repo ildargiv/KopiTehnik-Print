@@ -10,6 +10,7 @@
 Самопроверка (собирает окно, делает снимок экрана и отчёт):  python photo_crop_qt.py --selftest
 """
 import base64
+import struct
 import json
 import math
 import os
@@ -5212,23 +5213,40 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
             self.l_paper_drv.setText(trf("Бумага в драйвере: {p} (выбрана вручную)", p=self.cb_paper.currentText()))
         self.profile_apply()
 
-    def _save_blob(self):
+    def _save_blob(self, profile=True):
+        """profile=False — когда меняется часть ключа профиля (бумага, качество): настройки новой связки
+        нужно подставить из её профиля, а не затереть текущими."""
         if self.pr["printer"] and self.blob:
             self.settings.setdefault("print_devmodes", {})[self.pr["printer"]] = base64.b64encode(self.blob).decode()
             self.settings["print_printer"] = self.pr["printer"]
-            self.profile_save()
+            if profile:
+                self.profile_save()
 
     # ---------- профили печати: свои настройки для связки «принтер + формат + тип бумаги»
     PROF_COLOR = ("cm_on", "icc", "intent", "bpc", "embed", "pcorr")  # лежат в self.s
     PROF_PR = ("icm_off", "ppi", "sharp", "shrink")                  # лежат в self.pr
 
+    def _quality_name(self):
+        """Название режима качества Epson в текущих настройках драйвера (пусто, если модель не изучена)."""
+        try:
+            e = self._epson()
+            v = e.get(self.blob, "quality") if self.blob is not None else None
+            return next((tr(n) for k, n in e.quality_modes(self.blob) if k == v), "") if v is not None else ""
+        except (ValueError, struct.error):
+            return ""
+
     def profile_key(self):
         media = self.cb_media.currentText() if hasattr(self, "cb_media") and self.cb_media.isEnabled() and self.cb_media.count() else ""
-        return " | ".join((self.pr.get("printer", ""), self.s["format"], media))
+        return " | ".join((self.pr.get("printer", ""), self.s["format"], media, self._quality_name()))
+
+    @staticmethod
+    def _kparts(key):
+        """Ключ профиля -> (принтер, формат, бумага, качество); старые ключи без качества дополняются пустым."""
+        p = key.split(" | ")
+        return tuple(p + [""] * (4 - len(p)))[:4]
 
     def profile_title(self, key=None):
-        pr_, fmt, media = (key or self.profile_key()).split(" | ")
-        return " · ".join(x for x in (pr_, fmt, media) if x)
+        return " · ".join(x for x in self._kparts(key or self.profile_key()) if x)
 
     def _profiles(self):
         return self.settings.setdefault("print_profiles", {})
@@ -5253,8 +5271,8 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         profs = self._profiles()
         prof, how = profs.get(key), "own"
         if prof is None:                                             # ближайшая: тот же принтер и тип бумаги, другой формат
-            pr_, _fmt, media = key.split(" | ")
-            near = [k for k in profs if k.split(" | ")[0] == pr_ and k.split(" | ")[2] == media]
+            pr_, _fmt, media, qual = self._kparts(key)
+            near = [k for k in profs if self._kparts(k)[0] == pr_ and self._kparts(k)[2] == media and self._kparts(k)[3] == qual]
             if near:
                 prof, how = profs[near[0]], near[0]
         self._prof_lock = True
@@ -5460,7 +5478,7 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
             return
         try:
             self.blob = pc.merge_devmode(self.pr["printer"], pc.devmode_write(self.blob, {field: int(code)}))
-            self._save_blob()
+            self._save_blob(profile=field not in ("media_type",))
         except Exception as ex:
             warn(self, str(ex))
         self._fill_driver()
@@ -5513,13 +5531,45 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
                 warn(self, tr("Драйвер не принял это качество печати. Выберите его в «Свойствах драйвера»."))
             else:
                 self.blob = merged
-                self._save_blob()
+                self._save_blob(profile=feature != "quality")
                 if feature == "border" and on and e.get(merged, "border") is False:
                     warn(self, tr("Драйвер не включил печать без полей: для этого размера бумаги или типа бумаги она недоступна."))
         except Exception as ex:
             warn(self, str(ex))
         pc.clear_geom_cache()
         self._fill_driver()
+
+    def _ccor_on(self):
+        """True, если у модели известна цветокоррекция драйвера и она включена (искажает цвет профиля)."""
+        try:
+            e = self._epson()
+            return self.blob is not None and e.supported("ccor") and e.color_correction_off(self.blob) is False
+        except (ValueError, struct.error):
+            return False
+
+    def _ccor_check(self):
+        """Выбрали цветовой профиль, а цветокоррекция драйвера включена: предупредить и предложить отключить."""
+        if self.s.get("cm_on") and self.s.get("icc", "").strip() and self._ccor_on():
+            if ask(self, tr("Цветокоррекция драйвера включена, она исказит цвет цветового профиля. Отключить её сейчас?")):
+                self._epson_set("ccor", True)
+
+    def _epson_summary(self):
+        """Строки для окна подтверждения печати: тип бумаги, качество, поля, цветокоррекция драйвера."""
+        out = []
+        try:
+            e = self._epson()
+            if self.cb_media.isEnabled() and self.cb_media.count():
+                out.append("%s: %s" % (tr("Тип бумаги"), self.cb_media.currentText()))
+            q = self._quality_name()
+            if q:
+                out.append("%s: %s" % (tr("Качество печати"), q))
+            if e.supported("border"):
+                out.append("%s: %s" % (tr("Печать без полей"), tr("да") if e.get(self.blob, "border") else tr("нет")))
+            if e.supported("ccor"):
+                out.append("%s: %s" % (tr("Цветокоррекция драйвера"), tr("включена") if self._ccor_on() else tr("отключена")))
+        except (ValueError, struct.error):
+            pass
+        return out
 
     def _paper_changed(self):
         code = self.cb_paper.currentData()
@@ -5604,10 +5654,14 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         total = len(plan["sheets"]) * int(pr["copies"])
         text = ("%s\n" % only.name if only is not None else "") + "%s: %s\n%s: %g×%g %s\n%s: %d" % (tr("Принтер"), pr["printer"], tr("Бумага в драйвере"), round(gw, 1), round(gh, 1), tr("мм"),
                                                  tr("Листов к печати"), total)
+        for ln in self._epson_summary():
+            text += "\n" + ln
         if pcr.active(self.s["pcorr"]):
             text += "\n" + tr("Поправка принтера: включена")
         if cm:
             text += "\n%s: %s" % (tr("Профиль принтера"), cm["name"])
+            if self._ccor_on():
+                text += "\n\n⚠ " + tr("Цветокоррекция драйвера включена при цветовом профиле — цвет исказится. Отключите её на странице «Принтер».")
             if not pr["icm_off"]:
                 text += "\n\n⚠ " + tr("Включено управление цветом Windows (ICM) при включённом профиле принтера — цвет обработается дважды. Включите «Цвет Windows (ICM) отключён» на вкладке «Принтер».")
         if abs(min(gw, gh) - L["PW"]) > 2 or abs(max(gw, gh) - L["PH"]) > 2:
@@ -6946,6 +7000,8 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
             return
         self.s[key] = bool(on)
         self.cm_changed()
+        if key == "cm_on" and on:
+            self._ccor_check()
 
     def cm_changed(self):
         icc = self.s["icc"].strip()
@@ -7017,6 +7073,7 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         self.sw_cm2.set(self.s["cm_on"])
         self._building = False
         self.cm_changed()
+        self._ccor_check()
 
     # ---------- цветокоррекция
     def cur_adj(self):
