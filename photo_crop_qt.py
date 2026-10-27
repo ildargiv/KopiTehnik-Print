@@ -10,6 +10,7 @@
 Самопроверка (собирает окно, делает снимок экрана и отчёт):  python photo_crop_qt.py --selftest
 """
 import base64
+import struct
 import json
 import math
 import os
@@ -31,6 +32,8 @@ import brand_datestamp as bd                               # noqa: E402  (фир
 import photo_crop as pc                                    # noqa: E402  (движок программы)
 import color_tools as ct                                   # noqa: E402  (уровни, кривые, выборочный цвет)
 import printer_corr as pcr                                 # noqa: E402  (поправка принтера: цвет на выходе, не на экране)
+import print_quick as pqk                                  # noqa: E402  (быстрый старт печати: три ячейки настроек)
+import epson_priv as ep                                    # noqa: E402  (без полей и цветокоррекция драйвера Epson)
 import gui_agent as ga                                     # noqa: E402  (ИИ-агент внутри окна)
 import i18n                                                # noqa: E402  (переводы интерфейса)
 
@@ -148,6 +151,11 @@ ICONS = {
     "zoom_in": '<circle cx="10.5" cy="10.5" r="6.5"/><path d="M15.5 15.5l5 5M10.5 7.8v5.4M7.8 10.5h5.4"/>',
     "zoom_out": '<circle cx="10.5" cy="10.5" r="6.5"/><path d="M15.5 15.5l5 5M7.8 10.5h5.4"/>',
     "copy": '<rect x="8.5" y="8.5" width="11" height="11" rx="2"/><path d="M5.5 15.5h-.3A1.7 1.7 0 0 1 3.5 13.8V5.2a1.7 1.7 0 0 1 1.7-1.7h8.6a1.7 1.7 0 0 1 1.7 1.7v.3"/>',
+    "nozzle": '<path d="M12 3.3c3.4 4.2 5.8 7.3 5.8 10.4a5.8 5.8 0 0 1-11.6 0c0-3.1 2.4-6.2 5.8-10.4z"/><path d="M9.3 14.2a2.8 2.8 0 0 0 2.7 2.8"/>',
+    "head_clean": '<rect x="5" y="3.5" width="14" height="7" rx="1.8"/><path d="M8.5 10.5v1.8M12 10.5v1.8M15.5 10.5v1.8"/><path d="M8 15.3l-1.2 2.4M12 15.3v2.7M16 15.3l1.2 2.4M6.3 20.6h.01M12 20.8h.01M17.7 20.6h.01"/>',
+    "driver": ('<path d="M6.5 7.5V3.8h9v3.7"/><path d="M11 15.5H5a1.8 1.8 0 0 1-1.8-1.8V9.3A1.8 1.8 0 0 1 5 7.5h12a1.8 1.8 0 0 1 1.8 1.8v1.7"/>'
+               '<path d="M6.5 13v6.2h4.5"/><circle cx="17" cy="17.5" r="2.3"/>'
+               '<path d="M17 13.2v1.2M17 20.6v1.2M12.7 17.5h1.2M20.1 17.5h1.2M14 14.5l.8.8M20 20.5l-.8-.8M14 20.5l.8-.8M20 14.5l-.8.8"/>'),
 }
 
 
@@ -684,6 +692,115 @@ class MotionButton(QPushButton):
         p.end()
 
 
+class GearButton(MotionButton):
+    """Кнопка «Настройки» в шапке: шестерёнка + подпись. Шестерёнка плавно поворачивается при наведении
+    и делает полный оборот по щелчку; цвета берутся из текущей темы."""
+    TEETH = 8
+
+    def __init__(self, text, tip, slot):
+        super().__init__(tr(text))
+        self.setToolTip(tr(tip))
+        self.setCursor(Qt.PointingHandCursor)
+        self._rot = 0.0
+        self._ag = QPropertyAnimation(self, b"rot", self)
+        self.setFixedHeight(34)
+        self.clicked.connect(lambda _=False: slot())
+        self.pressed.connect(self._spin)
+
+    def getRot(self):
+        return self._rot
+
+    def setRot(self, v):
+        self._rot = float(v)
+        self.update()
+
+    rot = Property(float, getRot, setRot)
+
+    def _go(self, to, ms, curve):
+        self._ag.stop()
+        if not ANIM_ON[0]:
+            self._rot = float(to)
+            self.update()
+            return
+        self._ag.setDuration(ms)
+        self._ag.setEasingCurve(curve)
+        self._ag.setStartValue(self._rot)
+        self._ag.setEndValue(float(to))
+        self._ag.start()
+
+    def enterEvent(self, e):
+        self._go(45.0 + 360.0 * round(self._rot / 360.0), 520, QEasingCurve.OutBack)
+        super().enterEvent(e)
+
+    def leaveEvent(self, e):
+        self._go(360.0 * round(self._rot / 360.0), 420, QEasingCurve.InOutCubic)
+        super().leaveEvent(e)
+
+    def _spin(self):
+        self._go(self._rot + 360.0, 800, QEasingCurve.OutCubic)
+
+    def _font(self):
+        f = QFont(self.font())
+        f.setPixelSize(13)
+        f.setWeight(QFont.DemiBold)
+        return f
+
+    def sizeHint(self):
+        return QSize(14 + 18 + 8 + QFontMetrics(self._font()).horizontalAdvance(self.text()) + 14, 34)
+
+    def minimumSizeHint(self):
+        return self.sizeHint()
+
+    def _gear(self, r_out):
+        r_in = r_out * 0.76
+        path = QPainterPath()
+        pts = []
+        n = self.TEETH
+        for i in range(n):
+            a0 = 360.0 / n * i
+            for da, rr in ((-12, r_in), (-7, r_out), (7, r_out), (12, r_in)):
+                t = math.radians(a0 + da)
+                pts.append(QPointF(rr * math.cos(t), rr * math.sin(t)))
+        path.addPolygon(QPolygonF(pts))
+        path.closeSubpath()
+        path.addEllipse(QPointF(0, 0), r_out * 0.34, r_out * 0.34)
+        path.setFillRule(Qt.OddEvenFill)
+        return path
+
+    def paintEvent(self, e):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+        hv = self._hv
+        r = QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
+        path = QPainterPath()
+        path.addRoundedRect(r, 11, 11)
+        acc = T["accent"]
+        p.setPen(QPen(QColor(mix(T["border"], acc, 0.15 + 0.5 * hv)), 1))
+        p.setBrush(QColor(mix(mix(T["raised"], T["hover"], hv), acc, 0.04 + 0.08 * hv)))
+        p.drawPath(path)
+        if self._rp < 1.0:
+            p.save()
+            p.setClipPath(path)
+            R = max(self.width(), self.height()) * 1.1 * self._rp
+            c = QColor(acc)
+            c.setAlphaF(0.28 * (1.0 - self._rp))
+            p.setPen(Qt.NoPen)
+            p.setBrush(c)
+            p.drawEllipse(self._pt, R, R)
+            p.restore()
+        p.save()
+        p.translate(14 + 9, self.height() / 2.0)
+        p.rotate(self._rot)
+        p.setPen(Qt.NoPen)
+        p.setBrush(QColor(mix(T["muted"], acc, 0.35 + 0.65 * hv)))
+        p.drawPath(self._gear(9.0))
+        p.restore()
+        p.setFont(self._font())
+        p.setPen(QColor(mix(T["text"], acc, 0.25 * hv)))
+        p.drawText(QRectF(14 + 18 + 8, 0, self.width() - 14 - 18 - 8 - 8, self.height()), Qt.AlignVCenter | Qt.AlignLeft, self.text())
+        p.end()
+
+
 def btn(text, slot=None, kind=None, big=False, ico=None, ico_color=None, tip=None):
     b = MotionButton(tr(text))
     if kind:
@@ -693,6 +810,224 @@ def btn(text, slot=None, kind=None, big=False, ico=None, ico_color=None, tip=Non
     if ico:
         b.setIcon(icon(ico, ico_color or (T["accent_text"] if kind == "primary" else T["text"])))
         b.setIconSize(QSize(18, 18))
+    if tip:
+        b.setToolTip(tr(tip))
+    if slot:
+        b.clicked.connect(lambda _=False: slot())
+    b.setCursor(Qt.PointingHandCursor)
+    return b
+
+
+class ActionButton(MotionButton):
+    """Плитка действия на всю ширину: значок в цветной подложке, название и короткая серая подпись.
+    При нажатии плитка слегка «вдавливается», волна мягкая и широкая; busy() — бегущая полоска по нижнему краю
+    и пульс вокруг значка, done() — короткая вспышка цветом результата."""
+
+    def __init__(self, text="", sub="", ico="settings", tone="accent"):
+        super().__init__(text)
+        self.sub, self.ico, self.tone = sub, ico, tone
+        self._pr, self._bz, self._fl, self._fc, self._want_flash = 0.0, 1.0, 0.0, "ok", False
+        self._ar.setDuration(560)
+        self._ap = QPropertyAnimation(self, b"pr", self)
+        self._ab = QPropertyAnimation(self, b"bz", self)
+        self._ab.setDuration(900)
+        self._ab.setEasingCurve(QEasingCurve.InOutCubic)
+        self._ab.setStartValue(0.0)
+        self._ab.setEndValue(1.0)
+        self._ab.finished.connect(self._busy_end)
+        self._af = QPropertyAnimation(self, b"fl", self)
+        self._af.setDuration(650)
+        self._af.setEasingCurve(QEasingCurve.OutQuad)
+        self._af.setStartValue(1.0)
+        self._af.setEndValue(0.0)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+
+    def getPr(self):
+        return self._pr
+
+    def setPr(self, v):
+        self._pr = float(v)
+        self.update()
+
+    def getBz(self):
+        return self._bz
+
+    def setBz(self, v):
+        self._bz = float(v)
+        self.update()
+
+    def getFl(self):
+        return self._fl
+
+    def setFl(self, v):
+        self._fl = float(v)
+        self.update()
+
+    pr = Property(float, getPr, setPr)
+    bz = Property(float, getBz, setBz)
+    fl = Property(float, getFl, setFl)
+
+    def _fonts(self):
+        f1, f2 = QFont(self.font()), QFont(self.font())
+        f1.setPixelSize(14)
+        f1.setWeight(QFont.DemiBold)
+        f2.setPixelSize(12)
+        return f1, f2
+
+    def sizeHint(self):
+        f1, f2 = self._fonts()
+        m1, m2 = QFontMetrics(f1), QFontMetrics(f2)
+        tw = max(m1.horizontalAdvance(self.text()), m2.horizontalAdvance(self.sub) if self.sub else 0)
+        th = m1.height() + (m2.height() + 1 if self.sub else 0)
+        return QSize(10 + 34 + 11 + tw + 34, max(34, th) + 18)
+
+    def minimumSizeHint(self):
+        return QSize(120, self.sizeHint().height())
+
+    def _tint(self):
+        if not self.isEnabled():
+            return QColor(T["muted"])
+        if self.tone == "select" and T["select"].lower() == T["accent"].lower():
+            return QColor(T["text"])
+        return QColor(T.get(self.tone, T["accent"]))
+
+    def _press(self, to):
+        self._ap.stop()
+        if not ANIM_ON[0]:
+            self.setPr(to)
+            return
+        self._ap.setDuration(120 if to else 260)
+        self._ap.setEasingCurve(QEasingCurve.OutQuad if to else QEasingCurve.InOutCubic)
+        self._ap.setStartValue(self._pr)
+        self._ap.setEndValue(to)
+        self._ap.start()
+
+    def mousePressEvent(self, e):
+        if e.button() == Qt.LeftButton and self.isEnabled():
+            self._press(1.0)
+            if not ANIM_ON[0]:
+                QPushButton.mousePressEvent(self, e)
+                return
+        super().mousePressEvent(e)
+
+    def mouseReleaseEvent(self, e):
+        if e.button() == Qt.LeftButton:
+            self._press(0.0)                            # до super(): по щелчку может открыться модальный диалог
+        super().mouseReleaseEvent(e)
+
+    def busy(self):
+        self._want_flash = False
+        if ANIM_ON[0]:
+            self._ab.stop()
+            self._ab.start()
+
+    def done(self, ok=True):
+        self._fc = "ok" if ok else "bad"
+        if not ANIM_ON[0]:
+            return
+        if self._ab.state() == QVariantAnimation.Running:
+            self._want_flash = True
+        else:
+            self._af.stop()
+            self._af.start()
+
+    def _busy_end(self):
+        if self._want_flash:
+            self._want_flash = False
+            self._af.stop()
+            self._af.start()
+
+    def paintEvent(self, e):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+        on, k, hv = self.isEnabled(), self._pr, (self._hv if self.isEnabled() else 0.0)
+        tint = self._tint()
+        tn = tint.name()
+        r = QRectF(self.rect()).adjusted(0.5 + 1.5 * k, 0.5 + 1.5 * k, -0.5 - 1.5 * k, -0.5 - 0.5 * k)
+        path = QPainterPath()
+        path.addRoundedRect(r, 11, 11)
+        bg = mix(mix(T["raised"], T["hover"], hv), tn, 0.04 + 0.05 * hv)
+        bg = mix(bg, T["border"], 0.55 * k)
+        edge = mix(T["border"], tn, (0.18 + 0.47 * hv) if on else 0.0)
+        if self._fl > 0.0:
+            bg = mix(bg, T[self._fc], 0.14 * self._fl)
+            edge = mix(edge, T[self._fc], self._fl)
+        p.setPen(QPen(QColor(edge), 1))
+        p.setBrush(QColor(bg))
+        p.drawPath(path)
+        p.save()
+        p.setClipPath(path)
+        if self._rp < 1.0:
+            R = math.hypot(r.width(), r.height()) * (0.15 + 0.95 * self._rp)
+            fade = 1.0 - self._rp
+            g = QRadialGradient(self._pt, max(1.0, R))
+            for at, a in ((0.0, 0.24), (0.7, 0.16), (1.0, 0.0)):
+                c = QColor(tint)
+                c.setAlphaF(a * fade)
+                g.setColorAt(at, c)
+            p.setPen(Qt.NoPen)
+            p.setBrush(QBrush(g))
+            p.drawEllipse(self._pt, R, R)
+            ring = QColor(tint)
+            ring.setAlphaF(0.35 * fade)
+            p.setPen(QPen(ring, 1.5))
+            p.setBrush(Qt.NoBrush)
+            p.drawEllipse(self._pt, R * 0.92, R * 0.92)
+        dy = 1.0 * k
+        badge = QRectF(r.left() + 9, r.center().y() - 17 + dy * 0.5, 34, 34)
+        if self._bz < 1.0:
+            seg = r.width() * 0.38
+            x = r.left() - seg + (r.width() + seg) * self._bz
+            under = QColor(tint)
+            under.setAlphaF(0.12)
+            p.fillRect(QRectF(r.left(), r.bottom() - 3, r.width() * self._bz, 3), under)
+            lg = QLinearGradient(QPointF(x, 0), QPointF(x + seg, 0))
+            c0, c1 = QColor(tint), QColor(tint)
+            c0.setAlphaF(0.0)
+            lg.setColorAt(0.0, c0)
+            lg.setColorAt(0.65, c1)
+            lg.setColorAt(1.0, c0)
+            p.fillRect(QRectF(x, r.bottom() - 3, seg, 3), QBrush(lg))
+            for ph in (0.0, 0.5):
+                q = (self._bz * 2 + ph) % 1.0
+                pc_ = QColor(tint)
+                pc_.setAlphaF(0.45 * (1.0 - q))
+                p.setPen(QPen(pc_, 1.5))
+                p.setBrush(Qt.NoBrush)
+                s = 1 + 7 * q
+                p.drawRoundedRect(badge.adjusted(-s, -s, s, s), 9 + s, 9 + s)
+        p.restore()
+        bc = QColor(tint)
+        bc.setAlphaF((0.16 + 0.08 * hv) if on else 0.10)
+        p.setPen(Qt.NoPen)
+        p.setBrush(bc)
+        p.drawRoundedRect(badge, 9, 9)
+        sc = 1.0 - 0.08 * k
+        p.save()
+        p.translate(badge.center())
+        p.scale(sc, sc)
+        p.drawPixmap(QPointF(-10, -10), pix(self.ico, tn, 20))
+        p.restore()
+        f1, f2 = self._fonts()
+        m1, m2 = QFontMetrics(f1), QFontMetrics(f2)
+        tx = badge.right() + 11
+        tw = max(10.0, r.right() - 28 - tx)
+        th = m1.height() + (m2.height() + 1 if self.sub else 0)
+        ty = r.center().y() - th / 2 + dy
+        p.setFont(f1)
+        p.setPen(QColor(T["text"] if on else T["muted"]))
+        p.drawText(QRectF(tx, ty, tw, m1.height()), Qt.AlignLeft | Qt.AlignVCenter, m1.elidedText(self.text(), Qt.ElideRight, int(tw)))
+        if self.sub:
+            p.setFont(f2)
+            p.setPen(QColor(T["muted"]))
+            p.drawText(QRectF(tx, ty + m1.height() + 1, tw, m2.height()), Qt.AlignLeft | Qt.AlignVCenter,
+                       m2.elidedText(self.sub, Qt.ElideRight, int(tw)))
+        p.drawPixmap(QPointF(r.right() - 26 + 2 * hv, r.center().y() - 8 + dy), pix("next", mix(T["muted"], tn, hv) if on else T["border"], 16))
+        p.end()
+
+
+def tile(text, slot=None, sub="", ico="settings", tone="accent", tip=None):
+    b = ActionButton(tr(text), tr(sub) if sub else "", ico, tone)
     if tip:
         b.setToolTip(tr(tip))
     if slot:
@@ -760,12 +1095,37 @@ def row(left, right):
     return hbox(left if not isinstance(left, str) else WrapLabel(tr(left)), None, right)
 
 
-def card(title, *items):
+def help_popup(anchor, text):
+    """Подсказка по нажатию на «?»: небольшое окошко под кнопкой, закрывается кликом в сторону."""
+    from PySide6.QtWidgets import QWidgetAction
+    m = QMenu(anchor)
+    lab = QLabel(tr(text))
+    lab.setWordWrap(True)
+    lab.setMaximumWidth(320)
+    lab.setContentsMargins(10, 8, 10, 8)
+    a = QWidgetAction(m)
+    a.setDefaultWidget(lab)
+    m.addAction(a)
+    m.exec(anchor.mapToGlobal(anchor.rect().bottomLeft()))
+
+
+def help_btn(text):
+    b = QToolButton()
+    b.setText("?")
+    b.setFixedSize(22, 22)
+    b.setCursor(Qt.PointingHandCursor)
+    b.setToolTip(tr("Подсказка"))
+    b.setProperty("boxed", "true")
+    b.clicked.connect(lambda _=False: help_popup(b, text))
+    return b
+
+
+def card(title, *items, help=None):
     f = QFrame()
     f.setObjectName("card")
     l = vbox(spacing=9, margins=(13, 12, 13, 12))
     if title:
-        l.addWidget(lbl(title, "title"))
+        l.addWidget(lbl(title, "title")) if not help else l.addLayout(hbox(lbl(title, "title"), None, help_btn(help)))
     for it in items:
         _add(l, it)
     f.setLayout(l)
@@ -4399,6 +4759,12 @@ class DocMixin:
         total = len(pages) * d["copies"]
         text = "%s\n%s: %s\n%s: %s, %s: %d\n%s: %d" % (self.doc["src"].name, tr("Принтер"), pr["printer"], tr("Бумага"), d["paper"],
                                                        tr("копий"), d["copies"], tr("Листов к печати"), total)
+        try:
+            e_ = self._epson()
+            if cm and e_.supported("ccor") and e_.color_correction_off(self.blob) is False:
+                text += "\n" + tr("Внимание: цветокоррекция драйвера включена, она исказит цвет профиля. Отключите её на странице «Принтер».")
+        except ValueError:
+            pass
         if pcr.active(self.s["pcorr"]):
             text += "\n" + tr("Поправка принтера: включена")
         if cm:
@@ -4816,6 +5182,13 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
                           spacing=1, margins=(5, 3, 5, 3)))
         return fr
 
+    def _pos_width(self, txt):
+        """Ширина счётчика «2 / 10» в плашке: меряем шрифтом плашки (17 px, жирный), а не обычным шрифтом подписи."""
+        f = QFont(self.l_pos.font())
+        f.setPixelSize(17)
+        f.setWeight(QFont.Bold)
+        return max(42, QFontMetrics(f).horizontalAdvance(txt) + 16)
+
     def nav_chip(self, sz, isz):
         """Листание фото: такая же цветная плашка, как у счётчика копий."""
         fr = QFrame()
@@ -4901,7 +5274,7 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         l = hbox(logo, name, 10, btn("Открыть", self.open_any, "primary", ico="open", tip="Открыть фото или папку (Ctrl+O)"), 10,
                  self.mode_switch, 10, cap("Бумага"), self.cb_format, 6,
                  None, self.l_agent,
-                 self.seg_view, 6, self.b_grid, more, ibtn("settings", "Настройки", self.open_settings),
+                 self.seg_view, 6, self.b_grid, more, GearButton("Настройки", "Настройки программы: оформление, язык, печать", self.open_settings),
                  spacing=8, margins=(16, 0, 12, 0))
         bar.setLayout(l)
         self._photo_only += [self.cb_format, self.seg_view, self.b_grid]
@@ -5059,24 +5432,47 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         self.cb_source = combo(lambda: self._drv_set("source", self.cb_source))
         self.l_drv = lbl("", "muted", wrap=True)
         self.l_paper_drv = lbl("", wrap=True)
-        self.w_paper = QWidget()
-        self.w_paper.setLayout(row("Размер бумаги", self.cb_paper))
-        self.w_paper.hide()                                             # выбор бумаги драйвера открывается только по «Изменить…»
-        self.b_paper_edit = btn("Изменить…", lambda: self.w_paper.setVisible(not self.w_paper.isVisible()), "link",
-                                tip="Выбрать бумагу драйвера вручную (например, вариант «без полей»). По умолчанию она подбирается по размеру листа сверху.")
+        self.pr["paper_auto"] = True                                    # размер бумаги драйвера всегда берётся из формата листа сверху
+        self.sw_border = Switch(False)
+        self.sw_border.toggled.connect(lambda on: self._epson_set("border", on))
+        self.sw_ccor = Switch(False)
+        self.sw_ccor.toggled.connect(lambda on: self._epson_set("ccor", on))
+        self.cb_quality = QComboBox()
+        shrinkable_combo(self.cb_quality, 110, 200)
+        self.cb_quality.activated.connect(lambda _i: self._epson_set("quality", self.cb_quality.currentData()))
+        self.l_quality = WrapLabel(tr("Качество печати"))
+        self.l_border = WrapLabel(tr("Печать без полей"))
+        self.l_ccor = WrapLabel(tr("Отключить цветокоррекцию драйвера"))
+        for c_ in (self.cb_printer, self.cb_media, self.cb_source, self.cb_quality):
+            c_.setMinimumWidth(160)
+            c_.setMaximumWidth(240)
+        self.b_nozzle = tile("Проверка дюз", lambda: self._epson_maint("nozzle_check"), "Узор из дюз", "nozzle")
+        self.b_clean = tile("Прочистка головки", lambda: self._epson_maint("clean"), "Если есть полосы", "head_clean")
+        self.epson_groups = {"quality": (self.l_quality, self.cb_quality), "border": (self.l_border, self.sw_border),
+                             "ccor": (self.l_ccor, self.sw_ccor), "maint": (self.b_nozzle, self.b_clean)}
+        for ws in self.epson_groups.values():
+            for w_ in ws:
+                w_.hide()
         self.l_prof = lbl("", wrap=True)
         self.b_prof_reset = btn("Сбросить к стандарту", self.profile_reset, "link", tip="Забыть сохранённые настройки этой связки (принтер, формат, тип бумаги)")
         self.sw_cm2 = Switch(self.s["cm_on"])
         self.sw_cm2.toggled.connect(lambda on: (self._cm_set("cm_on", on), self.sw_cm.set(on)))
         self.l_icc2 = lbl("", "muted", wrap=True)
         printer = card("Принтер и бумага",
-                       row("Принтер", hbox(self.cb_printer, spacing=4)),
-                       row("Тип бумаги", self.cb_media), self.l_paper_drv, hbox(self.b_paper_edit, None), self.w_paper, row("Подача", self.cb_source),
-                       hbox(btn("Свойства драйвера…", self.driver_props, ico="settings"),
-                            ibtn("reset", "Обновить список принтеров", self.reload_printers, 34, True), spacing=6),
+                       row("Принтер", hbox(self.cb_printer, ibtn("reset", "Обновить список принтеров", self.reload_printers, 34, True), spacing=4)),
+                       row("Тип бумаги", self.cb_media), self.l_paper_drv, row("Подача", self.cb_source),
+                       tile("Свойства драйвера…", self.driver_props, "Все настройки печати", "driver", "select"),
+                       row(self.l_quality, self.cb_quality), row(self.l_border, self.sw_border), row(self.l_ccor, self.sw_ccor),
+                       self.b_nozzle, self.b_clean,
+                       tile("Тестовый лист", self.add_test_sheet, "Цвет, кожа, шкалы", "image", "select"),
                        self.l_drv, self.l_prof, hbox(self.b_prof_reset, None),
                        row("Профиль принтера", self.sw_cm2), self.l_icc2,
-                       btn("Выбрать профиль…", self.open_cm_dialog, ico="profile"))
+                       btn("Выбрать профиль…", self.open_cm_dialog, ico="profile"),
+                       help=("Тип бумаги, качество и поля задаются здесь или в «Свойствах драйвера», настройки запоминаются. "
+                             "Размер бумаги драйвера берётся из формата листа вверху. "
+                             "Профиль внизу (в строке «Профиль: …») запоминается отдельно для каждой связки «формат, тип бумаги, качество» "
+                             "и сохраняется автоматически; «Сбросить к стандарту» забывает его. "
+                             "Цветокоррекцию драйвера нужно отключать, когда включён цветовой профиль принтера."))
         self.cb_ppi = QComboBox()
         shrinkable_combo(self.cb_ppi, 80, 140)
         self.cb_ppi.addItems(pc.PPI_CHOICES)
@@ -5113,7 +5509,7 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         self.l_queue = lbl("Нажмите «Обновить», чтобы увидеть очередь.", "muted", wrap=True)
         queue = card("Очередь печати", self.l_queue,
                      hbox(btn("Обновить", self.queue_refresh), btn("Очистить", self.queue_clear), spacing=6))
-        return self._scroll(printer, screen, corr, proc, bleed, job, queue, btn("Старое окно печати…", self.open_print, "link"))
+        return self._scroll(self._quick_card(), printer, screen, corr, proc, bleed, job, queue, btn("Старое окно печати…", self.open_print, "link"))
 
     def reload_printers(self):
         self.printers = pc.list_printers()
@@ -5125,10 +5521,12 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         if name:
             self.cb_printer.setCurrentText(name)
         self._load_printer()
+        self._qs_refresh()
 
     def _printer_changed(self):
         self.pr["printer"] = self.cb_printer.currentText()
         self._load_printer()
+        self._qs_refresh()
 
     def _load_printer(self):
         """Настройки драйвера и возможности выбранного принтера -> списки «тип бумаги», «размер», «подача»."""
@@ -5182,34 +5580,51 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
             self.l_drv.setText(tr("Принтеры не найдены. Листы можно сохранить в файлы."))
         elif self.blob is None:
             self.l_drv.setText(tr("Не удалось получить настройки драйвера этого принтера."))
-        elif not media:
-            self.l_drv.setText(tr("Тип бумаги, качество и печать без полей этот драйвер отдаёт только через «Свойства драйвера». Настройки запоминаются."))
         else:
-            self.l_drv.setText(tr("Качество и печать без полей задаются в «Свойствах драйвера». Настройки запоминаются."))
+            self.l_drv.setText("")
+        self.l_drv.setVisible(bool(self.l_drv.text()))
+        self._fill_epson()
         self.l_icc2.setText(self.l_icc.text())
         if self.pr["paper_auto"] or self.cb_paper.currentData() is None:
-            self.l_paper_drv.setText(trf("Бумага в драйвере: подбирается автоматически по размеру листа ({f})", f=self.s["format"]))
+            self.l_paper_drv.setText(trf("Бумага в драйвере: авто, {f}", f=self.s["format"]))
         else:
             self.l_paper_drv.setText(trf("Бумага в драйвере: {p} (выбрана вручную)", p=self.cb_paper.currentText()))
         self.profile_apply()
 
-    def _save_blob(self):
+    def _save_blob(self, profile=True):
+        """profile=False — когда меняется часть ключа профиля (бумага, качество): настройки новой связки
+        нужно подставить из её профиля, а не затереть текущими."""
         if self.pr["printer"] and self.blob:
             self.settings.setdefault("print_devmodes", {})[self.pr["printer"]] = base64.b64encode(self.blob).decode()
             self.settings["print_printer"] = self.pr["printer"]
-            self.profile_save()
+            if profile:
+                self.profile_save()
 
     # ---------- профили печати: свои настройки для связки «принтер + формат + тип бумаги»
     PROF_COLOR = ("cm_on", "icc", "intent", "bpc", "embed", "pcorr")  # лежат в self.s
     PROF_PR = ("icm_off", "ppi", "sharp", "shrink")                  # лежат в self.pr
 
+    def _quality_name(self):
+        """Название режима качества Epson в текущих настройках драйвера (пусто, если модель не изучена)."""
+        try:
+            e = self._epson()
+            v = e.get(self.blob, "quality") if self.blob is not None else None
+            return next((tr(n) for k, n in e.quality_modes(self.blob) if k == v), "") if v is not None else ""
+        except (ValueError, struct.error):
+            return ""
+
     def profile_key(self):
         media = self.cb_media.currentText() if hasattr(self, "cb_media") and self.cb_media.isEnabled() and self.cb_media.count() else ""
-        return " | ".join((self.pr.get("printer", ""), self.s["format"], media))
+        return " | ".join((self.pr.get("printer", ""), self.s["format"], media, self._quality_name()))
+
+    @staticmethod
+    def _kparts(key):
+        """Ключ профиля -> (принтер, формат, бумага, качество); старые ключи без качества дополняются пустым."""
+        p = key.split(" | ")
+        return tuple(p + [""] * (4 - len(p)))[:4]
 
     def profile_title(self, key=None):
-        pr_, fmt, media = (key or self.profile_key()).split(" | ")
-        return " · ".join(x for x in (pr_, fmt, media) if x)
+        return " · ".join(x for x in self._kparts(key or self.profile_key())[1:] if x)
 
     def _profiles(self):
         return self.settings.setdefault("print_profiles", {})
@@ -5234,8 +5649,8 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         profs = self._profiles()
         prof, how = profs.get(key), "own"
         if prof is None:                                             # ближайшая: тот же принтер и тип бумаги, другой формат
-            pr_, _fmt, media = key.split(" | ")
-            near = [k for k in profs if k.split(" | ")[0] == pr_ and k.split(" | ")[2] == media]
+            pr_, _fmt, media, qual = self._kparts(key)
+            near = [k for k in profs if self._kparts(k)[0] == pr_ and self._kparts(k)[2] == media and self._kparts(k)[3] == qual]
             if near:
                 prof, how = profs[near[0]], near[0]
         self._prof_lock = True
@@ -5355,7 +5770,8 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
             self._pc_slider("Гамма", key_get("gamma"), key_set("gamma"), "темнее", "светлее"),
             self._pc_slider("Цвета", key_get("sat"), key_set("sat"), "бледнее", "ярче"),
             self.l_pcorr, self.l_pc_prof,
-            hbox(btn("Сбросить", self.pcorr_reset), btn("Тестовая страница", self.add_pcorr_test, ico="image"), None, spacing=6),
+            hbox(btn("Сбросить", self.pcorr_reset), btn("Тестовая страница", self.add_pcorr_test, ico="image"),
+                 btn("Тестовый лист", self.add_test_sheet, ico="image"), None, spacing=6),
             spacing=6)
         self.w_pcorr_body = QWidget()
         self.w_pcorr_body.setLayout(body)
@@ -5401,17 +5817,28 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         pcr.make_test_page(w, h, 300).save(p, dpi=(300, 300))
         self.load_files([p], add=True)
 
+    def add_test_sheet(self):
+        """Тестовый лист печати (клин, цвета, кожа, градиенты, резкость) на выбранный формат -> в список фото."""
+        import test_sheet
+        short, long_, tag = pc.FORMATS[self.s["format"]]
+        w, h = (long_, short) if pc.ORIENTS[self.s["orient"]] == "landscape" else (short, long_)
+        d = Path(tempfile.gettempdir()) / "PhotoCrop"
+        d.mkdir(parents=True, exist_ok=True)
+        p = d / ("Тестовый_лист_%s.png" % tag)
+        test_sheet.build(w, h, 300).save(p, dpi=(300, 300))
+        self.load_files([p], add=True)
+
     def profile_label(self, how="own"):
         if not hasattr(self, "l_prof"):
             return
         key = self.profile_key()
         own = key in self._profiles()
         if own:
-            txt = trf("Профиль: {t}. Изменения сохраняются автоматически.", t=self.profile_title(key))
+            txt = trf("Профиль: {t}", t=self.profile_title(key))
         elif how and how != "own":
-            txt = trf("Профиль: {t}. Взяты настройки из «{n}», изменения сохранятся для этой связки.", t=self.profile_title(key), n=self.profile_title(how))
+            txt = trf("Профиль: {t} (взято из «{n}»)", t=self.profile_title(key), n=self.profile_title(how))
         else:
-            txt = trf("Профиль: {t}. Пока общие настройки, при первом изменении запомнятся для этой связки.", t=self.profile_title(key))
+            txt = trf("Профиль: {t} (общие настройки)", t=self.profile_title(key))
         self.l_prof.setText(txt)
         self.b_prof_reset.setVisible(own)
 
@@ -5440,11 +5867,291 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         if self.blob is None or code is None:
             return
         try:
-            self.blob = pc.merge_devmode(self.pr["printer"], pc.devmode_write(self.blob, {field: int(code)}))
-            self._save_blob()
+            e = self._epson()
+            nb = e.set_media(self.blob, code) if field == "media_type" and e.recipe else pc.devmode_write(self.blob, {field: int(code)})
+            self.blob = pc.merge_devmode(self.pr["printer"], nb)
+            self._save_blob(profile=field not in ("media_type",))
         except Exception as ex:
             warn(self, str(ex))
         self._fill_driver()
+
+    def _epson(self):
+        return ep.EpsonPriv(self.pr.get("printer", ""), ep.load_profiles(str(pc.AGENT_DIR / "epson_profiles.json")),
+                           pc.printer_driver_name(self.pr.get("printer", "")))
+
+    def _fill_epson(self):
+        """Поля «качество», «без полей», «цветокоррекция» и кнопки обслуживания видны, только если для модели известны смещения."""
+        e = self._epson()
+        vis = {k: False for k in self.epson_groups}
+        if self.blob is not None:
+            try:
+                for k, feat in (("quality", "quality"), ("border", "border"), ("ccor", "ccor"), ("maint", "maint")):
+                    vis[k] = e.supported(feat)
+                if vis["border"]:
+                    self.sw_border.set(bool(e.get(self.blob, "border")))
+                if vis["ccor"]:
+                    self.sw_ccor.set(bool(e.color_correction_off(self.blob)))
+                if vis["quality"]:
+                    self.cb_quality.clear()
+                    for v, name in e.quality_modes(self.blob):
+                        self.cb_quality.addItem(tr(name), v)
+                    self.cb_quality.setCurrentIndex(max(0, self.cb_quality.findData(e.get(self.blob, "quality"))))
+            except (ValueError, struct.error):
+                vis = {k: False for k in self.epson_groups}
+        for k, ws in self.epson_groups.items():
+            for w_ in ws:
+                w_.setVisible(vis[k])
+
+    def _epson_maint(self, action):
+        port = pc.printer_port_name(self.pr.get("printer", "")).upper()
+        if port.startswith(("FILE", "NUL", "PORTPROMPT")):
+            warn(self, tr("Принтер не подключён: очередь печатает в файл. Команда обслуживания никуда не отправлена."))
+            return
+        text = {"nozzle_check": "Напечатать тест дюз? Будет израсходовано немного чернил и бумаги.",
+                "clean": "Запустить прочистку печатающей головки? Тратит чернила и заполняет ёмкость отработки; делайте её, только если тест дюз показал пропуски."}[action]
+        if not self._epson().maintenance_verified():
+            text += " " + "Для этой модели команда стандартная для Epson, но на ней ещё не проверялась: если принтер не отреагирует, воспользуйтесь кнопками на самом принтере или в драйвере."
+        if not ask(self, tr(text)):
+            return
+        b = self.b_nozzle if action == "nozzle_check" else self.b_clean
+        b.busy()
+        QTimer.singleShot(120 if ANIM_ON[0] else 0, lambda: self._epson_maint_send(action, b))     # кадр анимации успевает отрисоваться
+
+    def _epson_maint_send(self, action, b):
+        try:
+            self._epson().maintenance(self.pr["printer"], action)
+        except Exception as ex:
+            b.done(False)
+            warn(self, tr("Не удалось отправить команду принтеру") + ":\n%s" % ex)
+            return
+        b.done(True)
+
+    def _epson_set(self, feature, on):
+        if self.blob is None or getattr(self, "_prof_lock", False):
+            return
+        e = self._epson()
+        try:
+            if feature == "ccor":
+                nb = e.set_color_correction_off(self.blob, on)
+            else:
+                nb = e.set(self.blob, feature, on)
+            merged = pc.merge_devmode(self.pr["printer"], nb)
+            if feature == "border" and on and e.recipe:
+                m0 = struct.unpack_from("<I", self.blob, 196)[0]
+                m1 = struct.unpack_from("<I", merged, 196)[0]
+                if m0 != m1:
+                    warn(self, trf("Печать без полей доступна только на фотобумаге: тип бумаги изменён на {m}. После отключения «Без полей» выберите нужный тип бумаги заново.", m=m1))
+            if feature == "quality" and e.get(merged, "quality") != on:
+                warn(self, tr("Драйвер не принял это качество печати. Выберите его в «Свойствах драйвера»."))
+            else:
+                self.blob = merged
+                self._save_blob(profile=feature != "quality")
+                if feature == "border" and on and e.get(merged, "border") is False:
+                    warn(self, tr("Драйвер не включил печать без полей: для этого размера бумаги или типа бумаги она недоступна."))
+        except Exception as ex:
+            warn(self, str(ex))
+        pc.clear_geom_cache()
+        self._fill_driver()
+
+    # ---------- быстрый старт: три ячейки «принтер + бумага + качество + формат + цвет»
+    QS_COLORS = {pqk.GREEN: "#3fb950", pqk.ORANGE: "#f0883e", pqk.RED: "#e5534b", pqk.GRAY: ""}
+
+    def _qs_slots(self):
+        """Три ячейки текущего принтера: у каждого принтера свои."""
+        name = self.pr.get("printer", "")
+        store = pqk.norm_store(self.settings.get("print_quick"), name)
+        self.settings["print_quick"] = store
+        return store[name]
+
+    def _quick_card(self):
+        """Три строки: кнопка-ячейка на всю ширину и справа маленькие «сохранить» и «переименовать»."""
+        self.qs_btns, self.qs_save, self.qs_ren = [], [], []
+        rows = []
+        for i in range(pqk.SLOTS):
+            b = MotionButton("")
+            b.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+            b.setMinimumWidth(60)
+            b.clicked.connect(lambda _=False, i=i: self._qs_apply(i))
+            sv = ibtn("save", "Сохранить сюда текущие настройки", lambda i=i: self._qs_save(i), 34, True)
+            rn = ibtn("edit", "Переименовать", lambda i=i: self._qs_rename(i), 34, True)
+            self.qs_btns.append(b)
+            self.qs_save.append(sv)
+            self.qs_ren.append(rn)
+            rows.append(hbox(b, sv, rn, spacing=6))
+        self.l_qs = lbl("", "muted", wrap=True)
+        self.l_qs.hide()
+        card_ = card("Быстрый старт", *rows, self.l_qs,
+                     help=("Ячейки привязаны к принтеру: у каждого принтера свои три, при смене принтера показываются только его. Ячейка запоминает формат листа, тип бумаги, качество, «без полей», цветокоррекцию драйвера, "
+                           "цветовой профиль и обработку. Нажмите на ячейку, чтобы всё выставить разом; значок дискеты сохраняет "
+                           "текущие настройки в ячейку. Зелёная рамка: ячейка сохранена. Серая: ячейка пуста."))
+        self._qs_refresh()
+        return card_
+
+    def _qs_refresh(self):
+        if not hasattr(self, "qs_btns"):
+            return
+        slots = self._qs_slots()
+        printers = getattr(self, "printers", [])
+        for i, sl in enumerate(slots):
+            st = pqk.status(sl, printers)
+            col = self.QS_COLORS[st]
+            b = self.qs_btns[i]
+            nm = tr(sl["name"]) if sl.get("empty") else sl["name"]
+            b.setText(("" if sl.get("empty") else "● ") + (nm if len(nm) <= 20 else nm[:19] + "…"))
+            b.setStyleSheet("QPushButton { border: 2px solid %s; border-radius: 8px; padding: 8px 4px; font-size: 12px; }" % col if col else "")
+            b.setToolTip(tr("Пустая ячейка") if sl.get("empty") else sl["name"] + "\n" + self._qs_describe(sl))
+            self.qs_ren[i].setEnabled(not sl.get("empty"))
+
+    def _qs_describe(self, sl):
+        s = sl["state"]
+        parts = [sl.get("printer") if sl.get("bound") else tr("без привязки к принтеру"), s.get("format", ""), s.get("media", ""), s.get("quality", "")]
+        if s.get("icc"):
+            parts.append(Path(s["icc"]).name)
+        return " · ".join(x for x in parts if x)
+
+    def _qs_capture(self):
+        """Текущие настройки печати одним словарём."""
+        st = {k: self.s[k] for k in self.PROF_COLOR}
+        st["pcorr"] = pcr.norm(self.s["pcorr"])
+        st.update({k: self.pr[k] for k in self.PROF_PR})
+        st["format"] = self.s["format"]
+        st["media"] = self.cb_media.currentText() if self.cb_media.isEnabled() and self.cb_media.count() else ""
+        st["quality"] = self._quality_name()
+        if self.blob:
+            st["blob"] = base64.b64encode(self.blob).decode()
+        return st
+
+    def _qs_save(self, i):
+        slots = self._qs_slots()
+        old = slots[i]
+        dlg = QDialog(self)
+        dlg.setWindowTitle(tr("Сохранить быстрый старт"))
+        name = QLineEdit(old["name"] if not old.get("empty") else "")
+        name.setPlaceholderText(tr("Например: матовая, высокое, зеркально"))
+        name.setMaxLength(24)
+        who = lbl(trf("Принтер: {p}", p=self.pr.get("printer") or "—"), "muted")
+        ok, cancel = btn("Сохранить", None, "primary"), btn("Отмена")
+        ok.clicked.connect(dlg.accept)
+        cancel.clicked.connect(dlg.reject)
+        dlg.setLayout(vbox(lbl("Название"), name, who, hbox(None, cancel, ok), spacing=8, margins=(14, 14, 14, 14)))
+        dlg.setMinimumWidth(380)
+        if not dlg.exec():
+            return
+        nm = " ".join(name.text().split())[:24] or "Быстрый старт %d" % (i + 1)
+        printer = self.pr.get("printer", "")
+        slots[i] = {"name": nm, "bound": True, "printer": printer,
+                    "model": self._epson().model or "", "state": self._qs_capture()}
+        self.persist()
+        self._qs_refresh()
+
+    def _qs_rename(self, i):
+        slots = self._qs_slots()
+        if slots[i].get("empty"):
+            return
+        dlg = QInputDialog(self)
+        dlg.setWindowTitle(tr("Переименовать"))
+        dlg.setLabelText(tr("Название ячейки"))
+        dlg.setTextValue(slots[i]["name"])
+        dlg.setOkButtonText(tr("Готово"))
+        dlg.setCancelButtonText(tr("Отмена"))
+        if not dlg.exec():
+            return
+        nm = " ".join(dlg.textValue().split())[:24]
+        if nm:
+            slots[i]["name"] = nm
+            self.persist()
+            self._qs_refresh()
+
+    def _qs_apply(self, i):
+        """Применить ячейку: принтер (если привязана), формат, настройки драйвера (бумага, качество, поля,
+        цветокоррекция), цветовой профиль, обработка. Настройки драйвера — только для того же принтера/модели."""
+        sl = self._qs_slots()[i]
+        if sl.get("empty"):
+            info(self, tr("Ячейка пуста. Настройте всё как нужно и нажмите «Сохранить» под кнопкой."))
+            return
+        st, notes = sl["state"], []
+        self._prof_lock = True
+        try:
+            if sl.get("bound"):
+                if sl["printer"] in self.printers:
+                    if self.pr["printer"] != sl["printer"]:
+                        self.cb_printer.setCurrentText(sl["printer"])
+                        self._printer_changed()
+                else:
+                    notes.append(trf("Принтер «{p}» не найден, оставлен текущий.", p=sl["printer"]))
+            if st.get("format") in pc.FORMATS:
+                self.cb_format.setCurrentText(st["format"])
+            if st.get("blob"):
+                if pqk.driver_compatible(sl, self.pr.get("printer", ""), ep.model_of, self._epson().model):
+                    try:
+                        b = base64.b64decode(st["blob"])
+                        if pc.devmode_valid(b):
+                            self.blob = b
+                            self._save_blob(profile=False)
+                            self._fill_driver()
+                    except Exception:
+                        notes.append(tr("Настройки драйвера не удалось применить."))
+                else:
+                    notes.append(tr("Настройки драйвера (бумага, качество) относятся к другой модели и не применены."))
+            self._building = True
+            for k in self.PROF_COLOR:
+                if k in st:
+                    self.s[k] = pcr.norm(st[k]) if k == "pcorr" else st[k]
+            for k in self.PROF_PR:
+                if k in st:
+                    self.pr[k] = st[k]
+            try:
+                self.sw_cm.set(bool(self.s["cm_on"]))
+                self.sw_cm2.set(bool(self.s["cm_on"]))
+                self.sw_icm.set(bool(self.pr["icm_off"]))
+                self.cb_ppi.setCurrentText(self.pr["ppi"] if self.pr["ppi"] in pc.PPI_CHOICES else pc.PPI_CHOICES[0])
+                self.sl_sharp.setValue(int(self.pr["sharp"]))
+                self.l_sharp.setText(str(int(self.pr["sharp"])))
+                self.e_shrink.setText(str(self.pr["shrink"]))
+                self.pcorr_sync()
+            except (AttributeError, RuntimeError):
+                pass
+        finally:
+            self._building = False
+            self._prof_lock = False
+        self.cm_changed()
+        self.profile_label()
+        if self._ccor_on() and self.s.get("cm_on") and self.s.get("icc", "").strip():
+            notes.append(tr("Цветокоррекция драйвера включена при цветовом профиле."))
+        self.l_qs.setText(" ".join(notes))
+        self.l_qs.setVisible(bool(notes))
+
+    def _ccor_on(self):
+        """True, если у модели известна цветокоррекция драйвера и она включена (искажает цвет профиля)."""
+        try:
+            e = self._epson()
+            return self.blob is not None and e.supported("ccor") and e.color_correction_off(self.blob) is False
+        except (ValueError, struct.error):
+            return False
+
+    def _ccor_check(self):
+        """Выбрали цветовой профиль, а цветокоррекция драйвера включена: предупредить и предложить отключить."""
+        if self.s.get("cm_on") and self.s.get("icc", "").strip() and self._ccor_on():
+            if ask(self, tr("Цветокоррекция драйвера включена, она исказит цвет цветового профиля. Отключить её сейчас?")):
+                self._epson_set("ccor", True)
+
+    def _epson_summary(self):
+        """Строки для окна подтверждения печати: тип бумаги, качество, поля, цветокоррекция драйвера."""
+        out = []
+        try:
+            e = self._epson()
+            if self.cb_media.isEnabled() and self.cb_media.count():
+                out.append("%s: %s" % (tr("Тип бумаги"), self.cb_media.currentText()))
+            q = self._quality_name()
+            if q:
+                out.append("%s: %s" % (tr("Качество печати"), q))
+            if e.supported("border"):
+                out.append("%s: %s" % (tr("Печать без полей"), tr("да") if e.get(self.blob, "border") else tr("нет")))
+            if e.supported("ccor"):
+                out.append("%s: %s" % (tr("Цветокоррекция драйвера"), tr("включена") if self._ccor_on() else tr("отключена")))
+        except (ValueError, struct.error):
+            pass
+        return out
 
     def _paper_changed(self):
         code = self.cb_paper.currentData()
@@ -5529,10 +6236,14 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         total = len(plan["sheets"]) * int(pr["copies"])
         text = ("%s\n" % only.name if only is not None else "") + "%s: %s\n%s: %g×%g %s\n%s: %d" % (tr("Принтер"), pr["printer"], tr("Бумага в драйвере"), round(gw, 1), round(gh, 1), tr("мм"),
                                                  tr("Листов к печати"), total)
+        for ln in self._epson_summary():
+            text += "\n" + ln
         if pcr.active(self.s["pcorr"]):
             text += "\n" + tr("Поправка принтера: включена")
         if cm:
             text += "\n%s: %s" % (tr("Профиль принтера"), cm["name"])
+            if self._ccor_on():
+                text += "\n\n⚠ " + tr("Цветокоррекция драйвера включена при цветовом профиле — цвет исказится. Отключите её на странице «Принтер».")
             if not pr["icm_off"]:
                 text += "\n\n⚠ " + tr("Включено управление цветом Windows (ICM) при включённом профиле принтера — цвет обработается дважды. Включите «Цвет Windows (ICM) отключён» на вкладке «Принтер».")
         if abs(min(gw, gh) - L["PW"]) > 2 or abs(max(gw, gh) - L["PH"]) > 2:
@@ -6666,6 +7377,7 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         self.b_redo.setEnabled(bool(self._redo))
         if not cur:
             self.l_pos.setText("0 / %d" % len(chk))
+            self.l_pos.setMinimumWidth(self._pos_width("0 / %d" % len(chk)))
             self.l_angle.setText("0,0°")
             self.l_copies.setText("1")
             self.l_dot.setStyleSheet("color: %s;" % T["muted"])
@@ -6686,7 +7398,9 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
             part = tr("без обрезки")
         self.l_dot.setStyleSheet("color: %s;" % (T["ok"] if dpi >= 250 else T["warn"] if dpi >= 150 else T["bad"]))
         self.l_info.setText("%s ≈ %d dpi      %s      %d×%d px      %s" % (tr("печать"), round(dpi), f.name, W, H, part))
-        self.l_pos.setText("%d / %d" % (chk.index(f) + 1, len(chk)))
+        txt = "%d / %d" % (chk.index(f) + 1, len(chk))
+        self.l_pos.setText(txt)
+        self.l_pos.setMinimumWidth(self._pos_width(txt))
         self.l_angle.setText(("%.1f°" % st.angle).replace(".", ","))
         self.l_copies.setText(str(st.copies))
 
@@ -6871,6 +7585,8 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
             return
         self.s[key] = bool(on)
         self.cm_changed()
+        if key == "cm_on" and on:
+            self._ccor_check()
 
     def cm_changed(self):
         icc = self.s["icc"].strip()
@@ -6942,6 +7658,7 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         self.sw_cm2.set(self.s["cm_on"])
         self._building = False
         self.cm_changed()
+        self._ccor_check()
 
     # ---------- цветокоррекция
     def cur_adj(self):
@@ -7529,7 +8246,7 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
                      nup=s["nup"], borders=s["borders"], border_mm=self.border_mm(), sheet_fill=s["fill"], qt_print=dict(self.pr),
                      cell_mode=s["cell_mode"], cell_w=self.cell_mm()[0], cell_h=self.cell_mm()[1],
                      smart=dict(self.sm))
-        for k in ("print_devmodes", "print_printer", "print_profiles"):
+        for k in ("print_devmodes", "print_printer", "print_profiles", "print_quick"):
             if k in self.settings:
                 fresh[k] = self.settings[k]
         if s["out_mode"] == "custom":
@@ -8341,7 +9058,10 @@ class SettingsDialog(QDialog):
                         hbox(link("Сообщить об ошибке", GITHUB_URL + "/issues"), link("Текст лицензии", LICENSE_URL), None, spacing=6),
                         row("Проверять обновления при запуске", sw_upd),
                         hbox(None, btn("Проверить обновления", lambda: app.check_updates(True), ico="sparkle")))
-        about = lbl(tr("Настройки хранятся в файле") + ": " + str(pc.SETTINGS_PATH), "muted", wrap=True)
+        about = lbl(tr("Настройки хранятся в файле") + ": " + str(pc.SETTINGS_PATH) + "\n\n" + tr(
+            "Программа не связана с компанией Epson. Epson и названия моделей — торговые марки их владельцев и используются только "
+            "для описания совместимости. Управление драйвером принтера и обслуживание (проверка дюз, прочистка) вы используете на свой риск: "
+            "прочистка расходует чернила."), "muted", wrap=True)
         # классическая раскладка: слева дерево разделов с подпунктами, справа страница выбранного
         self.stack = QStackedWidget()
         self.tree = QTreeWidget()
@@ -8607,7 +9327,7 @@ pc.EN.update({
     "Нейтраль (серый)": "Neutral (grey)", "По цветам": "By colour", "Общее": "General", "Тени": "Shadows", "Средние": "Midtones", "Света": "Highlights",
     "Тепло": "Warmth", "Пурпур": "Magenta", "Оттенок": "Hue", "Насыщ.": "Sat.", "Яркость": "Brightness", "Гамма": "Gamma", "Цвета": "Colours",
     "холоднее": "cooler", "теплее": "warmer", "зеленее": "greener", "пурпурнее": "more magenta", "темнее": "darker", "светлее": "lighter", "бледнее": "paler", "ярче": "more vivid",
-    "Двойной щелчок — сбросить": "Double-click to reset", "Сбросить": "Reset", "Тестовая страница": "Test page",
+    "Двойной щелчок — сбросить": "Double-click to reset", "Сбросить": "Reset", "Тестовая страница": "Test page", "Тестовый лист": "Test sheet",
     "Поправка включена и будет применена при печати.": "The correction is on and will be applied when printing.",
     "Включено, но все значения нулевые.": "On, but all values are zero.", "Выключена: печать без поправки.": "Off: printing without correction.",
     "Поправка принтера: включена": "Printer correction: on",
@@ -8813,6 +9533,8 @@ pc.EN.update({
     "Вернуть это фото в сетку": "Put this photo back on the grid", "Убрать фото с листа": "Remove the photo from the sheet",
     "Принтер": "Printer", "Принтер и бумага": "Printer and paper", "Тип бумаги": "Media type", "Размер бумаги": "Paper size", "Подача": "Source",
     "Свойства драйвера…": "Driver properties…", "Обновить список принтеров": "Refresh the printer list", "Обработка": "Processing",
+    "Все настройки печати": "All print settings", "Проверка дюз": "Nozzle check", "Узор из дюз": "Nozzle pattern",
+    "Прочистка головки": "Head cleaning", "Если есть полосы": "If you see banding",
     "Разрешение печати, ppi": "Print resolution, ppi", "Резкость": "Sharpen", "Метки реза": "Cut marks", "Уменьшить лист, %": "Shrink sheet, %",
     "Насколько уменьшить лист, чтобы принтер не срезал края при печати без полей. 0 — не менять.": "How much to shrink the sheet so the printer does not trim the edges in borderless printing. 0 — no change.",
     "Цвет Windows (ICM) отключён": "Windows colour (ICM) off", "Задание": "Job", "Копий каждого листа": "Copies of each sheet",

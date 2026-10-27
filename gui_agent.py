@@ -7,6 +7,7 @@ GuiAgent даёт MCP-клиенту те же команды, что и реж�
 настройки, справка. Всё выполняется в потоке окна, поэтому пользователь видит изменения сразу, а Ctrl+Z их отменяет.
 """
 import json
+import struct
 import threading
 import time
 from concurrent.futures import Future
@@ -15,6 +16,7 @@ from pathlib import Path
 import agent_bridge as ab
 import agent_guide as guide
 import photo_crop as pc
+import print_quick as pqk
 import printer_corr as pcr
 
 # Диалоги окна во время команды агента не показываются: сообщения копятся здесь и возвращаются в ответе (notes).
@@ -62,6 +64,21 @@ GUI_SPEC = {
     "set_view": ("Window view: crop (one photo with its frame) or sheet (layout of the sheets).", [("view", "string", "crop | sheet")]),
     "set_app_mode": ("PHOTO / DOCUMENT switch.", [("mode", "string", "photo | doc")]),
     "add_edge_test": ("Add the edge-test sheet (for borderless printing) of the current paper size to the open photos.", []),
+    "epson_settings": ("Private options of the Epson driver of the selected printer, as on the Printer tab: print quality "
+                       "(draft / standard / high), borderless printing and the driver's colour correction. Without arguments it only reads: "
+                       "model, which options this model supports, the values and the quality modes the driver accepts for the current paper. "
+                       "Models without a known recipe have nothing here (use set_driver_settings and the driver dialog).",
+                       [("quality", "any", "0 / draft, 1 / standard, 2 / high (only modes listed in quality_modes)."),
+                        ("borderless", "boolean", "Print without margins (not on every paper type; the answer says what the driver accepted)."),
+                        ("color_correction_off", "boolean", "true — switch the driver's colour correction off (needed with a printer ICC profile).")]),
+    "printer_maintenance": ("Nozzle check or head cleaning of the selected Epson printer. Both use ink and paper (cleaning also fills the waste "
+                            "tank): do it only when the owner asked, and set confirm=true. Clean only if the nozzle check showed gaps.",
+                            [("action", "string", "nozzle_check | clean"), ("confirm", "boolean", "Must be true.")]),
+    "quick_start": ("Quick Start: three slots per printer with saved format, paper, quality, borderless, colour profile and processing. "
+                    "action=list shows the slots of the selected printer, apply applies slot n, save stores the current settings into slot n, clear empties slot n.",
+                    [("action", "string", "list | apply | save | clear"), ("n", "integer", "Slot 1..3."), ("name", "string", "Name for save (up to 24 chars).")]),
+    "add_test_sheet": ("Add the print test sheet (grey wedge, shadows/highlights, colours and saturation, skin tones I-VI, gradients, "
+                       "sharpness targets) of the current paper size to the open photos. Print it with the normal pipeline to judge the profile.", []),
     "print_photos": ("Print like the «Print photo» button: sheets are built from the window's settings (format, photos per sheet, margins, "
                      "printer profile, Printer tab) and sent to the selected printer.",
                      [("which", "string", "current | checked (default checked)"), ("photo", "any", "Print only these photos (ref or list)."),
@@ -84,7 +101,7 @@ GUI_SPEC = {
 GUI_READONLY = {"app_state", "app_guide", "color_presets", "print_status", "doc_info", "print_stats", "check_update"}
 GUI_REQUIRED = {"open_files": ["paths"], "color_preset_save": ["n"], "color_preset_apply": ["n"], "set_view": ["view"],
                 "set_app_mode": ["mode"], "doc_open": ["path"]}
-GUI_DESTRUCTIVE = ("print", "save_files", "export_sheets", "clear_queue", "cancel_job", "job_control", "print_photos", "doc_print")
+GUI_DESTRUCTIVE = ("printer_maintenance", "print", "save_files", "export_sheets", "clear_queue", "cancel_job", "job_control", "print_photos", "doc_print")
 
 SETTABLE = {"language": str, "theme": str, "anim": bool, "confirm_actions": bool, "check_updates": bool, "dpi": str, "filetype": str,
             "quality": int, "out_mode": str, "out_name": str, "outdir": str, "subfolder": bool, "resize": bool, "copies_name": bool}
@@ -114,6 +131,8 @@ class GuiAgent:
                        "auto_levels": self.c_auto_levels, "color_presets": self.c_color_presets, "color_preset_save": self.c_preset_save,
                        "color_preset_apply": self.c_preset_apply, "copy_adjust": self.c_copy_adjust, "paste_adjust": self.c_paste_adjust,
                        "set_layout": self.c_set_layout, "set_view": self.c_set_view, "set_app_mode": self.c_set_app_mode,
+                       "epson_settings": self.c_epson_settings, "printer_maintenance": self.c_maintenance,
+                       "quick_start": self.c_quick_start, "add_test_sheet": self.c_test_sheet,
                        "add_edge_test": self.c_edge_test, "print_status": self.c_print_status, "doc_open": self.c_doc_open,
                        "doc_info": self.c_doc_info, "doc_set": self.c_doc_set, "doc_convert": self.c_doc_convert,
                        "printer_correction": self.c_printer_correction, "app_settings": self.c_app_settings, "print_stats": self.c_print_stats, "check_update": self.c_check_update,
@@ -267,7 +286,8 @@ class GuiAgent:
             st.update(cm_on=bool(s.cm["on"]), icc=s.cm["icc"], intent=s.cm["intent"], bpc=s.cm["bpc"], embed=s.cm["embed"])
             w.cm_changed()
         if s.printer != snap["printer"] and s.printer and s.printer != w.pr.get("printer"):
-            w.cb_printer.setCurrentText(s.printer)              # окно загрузит драйвер этого принтера
+            w.cb_printer.setCurrentText(s.printer)
+            w._printer_changed()                                # сигнал activated от setCurrentText не приходит: загружаем драйвер сами
         if s.blob is not None and s.blob != snap["blob"]:
             w.blob = s.blob
             w._save_blob()
@@ -532,6 +552,105 @@ class GuiAgent:
     def c_edge_test(self, req):
         w = self.win
         w.add_edge_test()
+        return {"photos": len(w.files), "added": w.files[-1].name if w.files else None}
+
+    def _epson_state(self):
+        w = self.win
+        e = w._epson()
+        out = {"printer": w.pr.get("printer") or None, "model": e.model, "supported": [f for f in ("quality", "border", "ccor", "maint") if e.supported(f)]}
+        if w.blob is None or not out["supported"]:
+            return out
+        names = {0: "draft", 1: "standard", 2: "high"}
+        try:
+            out["quality_modes"] = [{"value": v, "name": names.get(v, n)} for v, n in e.quality_modes(w.blob)]
+            q = e.get(w.blob, "quality")
+            out["quality"] = {"value": q, "name": names.get(q)} if q is not None else None
+            out["borderless"] = e.get(w.blob, "border")
+            out["color_correction_off"] = e.color_correction_off(w.blob)
+        except (ValueError, struct.error) as ex:
+            out["error"] = str(ex)
+        out["maintenance_verified"] = e.maintenance_verified()
+        return out
+
+    def c_epson_settings(self, req):
+        w = self.win
+        e = w._epson()
+        if not (req.get("quality") is None and req.get("borderless") is None and req.get("color_correction_off") is None):
+            if w.blob is None or not e.model:
+                raise pc.AgentError("Для выбранного принтера нет настроек Epson.", "unsupported")
+            if req.get("quality") is not None:
+                q = req["quality"]
+                q = {"draft": 0, "standard": 1, "high": 2}.get(str(q).lower(), q)
+                try:
+                    q = int(q)
+                except (TypeError, ValueError):
+                    raise pc.AgentError("quality: draft | standard | high (0, 1, 2)", "bad_value")
+                if not e.supported("quality") or q not in [v for v, _ in e.quality_modes(w.blob)]:
+                    raise pc.AgentError("Этот режим качества недоступен для модели или текущей бумаги: см. quality_modes.", "unsupported")
+                w._epson_set("quality", q)
+            if req.get("borderless") is not None:
+                if not e.supported("border"):
+                    raise pc.AgentError("Печать без полей для этой модели не поддерживается.", "unsupported")
+                w._epson_set("border", bool(req["borderless"]))
+            if req.get("color_correction_off") is not None:
+                if not e.supported("ccor"):
+                    raise pc.AgentError("Цветокоррекция драйвера для этой модели не управляется.", "unsupported")
+                w._epson_set("ccor", bool(req["color_correction_off"]))
+        return self._epson_state()
+
+    def c_maintenance(self, req):
+        w = self.win
+        action = str(req.get("action") or "")
+        if action not in ("nozzle_check", "clean"):
+            raise pc.AgentError("action: nozzle_check | clean", "bad_value")
+        if req.get("confirm") is not True:
+            raise pc.AgentError("Это расходует чернила и бумагу. Подтвердите: confirm=true, только если владелец просил.", "confirm_required")
+        if not w._epson().supported("maint"):
+            raise pc.AgentError("Для выбранного принтера обслуживание из программы недоступно.", "unsupported")
+        if pc.printer_port_name(w.pr.get("printer", "")).upper().startswith(("FILE", "NUL", "PORTPROMPT")):
+            raise pc.AgentError("Принтер не подключён: очередь печатает в файл.", "printer_offline")
+        try:
+            w._epson().maintenance(w.pr["printer"], action)
+        except Exception as ex:
+            raise pc.AgentError("Не удалось отправить команду принтеру: %s" % ex, "send_failed")
+        return {"sent": action, "printer": w.pr["printer"], "verified_model": w._epson().maintenance_verified()}
+
+    def c_quick_start(self, req):
+        w = self.win
+        action = str(req.get("action") or "list")
+        slots = w._qs_slots()
+        if action == "list":
+            return {"printer": w.pr.get("printer") or None,
+                    "slots": [{"n": i + 1, "name": None if sl.get("empty") else sl["name"], "empty": bool(sl.get("empty")),
+                               "summary": None if sl.get("empty") else w._qs_describe(sl)} for i, sl in enumerate(slots)]}
+        try:
+            n = int(req.get("n"))
+        except (TypeError, ValueError):
+            raise pc.AgentError("n: номер ячейки 1..3", "bad_value")
+        if not 1 <= n <= len(slots):
+            raise pc.AgentError("n: номер ячейки 1..3", "bad_value")
+        if action == "apply":
+            if slots[n - 1].get("empty"):
+                raise pc.AgentError("Ячейка пуста.", "empty_slot")
+            w._qs_apply(n - 1)
+            return {"applied": n, "printer": w.pr.get("printer") or None, "epson": self._epson_state()}
+        if action == "save":
+            name = " ".join(str(req.get("name") or "").split())[:24] or (slots[n - 1]["name"] if not slots[n - 1].get("empty") else "Быстрый старт %d" % n)
+            printer = w.pr.get("printer", "")
+            slots[n - 1] = {"name": name, "bound": True, "printer": printer, "model": w._epson().model or "", "state": w._qs_capture()}
+            w.persist()
+            w._qs_refresh()
+            return {"saved": n, "name": name, "printer": printer}
+        if action == "clear":
+            slots[n - 1] = pqk.empty_slot(n - 1)
+            w.persist()
+            w._qs_refresh()
+            return {"cleared": n, "printer": w.pr.get("printer") or None}
+        raise pc.AgentError("action: list | apply | save | clear", "bad_value")
+
+    def c_test_sheet(self, req):
+        w = self.win
+        w.add_test_sheet()
         return {"photos": len(w.files), "added": w.files[-1].name if w.files else None}
 
     def c_undo(self, req):
