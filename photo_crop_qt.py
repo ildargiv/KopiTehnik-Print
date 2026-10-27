@@ -5348,6 +5348,7 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
                        tile("Свойства драйвера…", self.driver_props, "Все настройки печати", "driver", "select"),
                        row(self.l_quality, self.cb_quality), row(self.l_border, self.sw_border), row(self.l_ccor, self.sw_ccor),
                        self.b_nozzle, self.b_clean,
+                       tile("Тестовый лист", self.add_test_sheet, "Цвет, кожа, шкалы", "image", "select"),
                        self.l_drv, self.l_prof, hbox(self.b_prof_reset, None),
                        row("Профиль принтера", self.sw_cm2), self.l_icc2,
                        btn("Выбрать профиль…", self.open_cm_dialog, ico="profile"),
