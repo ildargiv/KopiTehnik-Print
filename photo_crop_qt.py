@@ -5784,6 +5784,10 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
                 w_.setVisible(vis[k])
 
     def _epson_maint(self, action):
+        port = pc.printer_port_name(self.pr.get("printer", "")).upper()
+        if port.startswith(("FILE", "NUL", "PORTPROMPT")):
+            warn(self, tr("Принтер не подключён: очередь печатает в файл. Команда обслуживания никуда не отправлена."))
+            return
         text = {"nozzle_check": "Напечатать тест дюз? Будет израсходовано немного чернил и бумаги.",
                 "clean": "Запустить прочистку печатающей головки? Тратит чернила и заполняет ёмкость отработки; делайте её, только если тест дюз показал пропуски."}[action]
         if not self._epson().maintenance_verified():

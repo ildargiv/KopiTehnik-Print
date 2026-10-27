@@ -1948,6 +1948,30 @@ def printer_driver_name(name):
     return out
 
 
+def printer_port_name(name):
+    """Порт очереди («USB001», «FILE:», «COM1:»); пустая строка при неудаче. Не кешируется: порт могут сменить."""
+    try:
+        wp, gd, wt = _win()
+        wp.GetPrinterW.argtypes = [wt.HANDLE, wt.DWORD, ctypes.c_void_p, wt.DWORD, ctypes.POINTER(wt.DWORD)]
+        wp.GetPrinterW.restype = wt.BOOL
+        h = wt.HANDLE()
+        if not wp.OpenPrinterW(name, ctypes.byref(h), None):
+            return ""
+        try:
+            need = wt.DWORD(0)
+            wp.GetPrinterW(h, 2, None, 0, ctypes.byref(need))
+            if need.value:
+                buf = ctypes.create_string_buffer(need.value)
+                if wp.GetPrinterW(h, 2, buf, need.value, ctypes.byref(need)):
+                    ptrs = ctypes.cast(buf, ctypes.POINTER(ctypes.c_void_p))
+                    return ctypes.wstring_at(ptrs[3]) if ptrs[3] else ""
+        finally:
+            wp.ClosePrinter(h)
+    except Exception:
+        pass
+    return ""
+
+
 def list_printers():
     """Установленные принтеры Windows (имя по умолчанию — первым)."""
     if sys.platform != "win32":
