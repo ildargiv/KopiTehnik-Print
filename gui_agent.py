@@ -16,6 +16,7 @@ from pathlib import Path
 import agent_bridge as ab
 import agent_guide as guide
 import photo_crop as pc
+import print_quick as pqk
 import printer_corr as pcr
 
 # Диалоги окна во время команды агента не показываются: сообщения копятся здесь и возвращаются в ответе (notes).
@@ -74,8 +75,8 @@ GUI_SPEC = {
                             "tank): do it only when the owner asked, and set confirm=true. Clean only if the nozzle check showed gaps.",
                             [("action", "string", "nozzle_check | clean"), ("confirm", "boolean", "Must be true.")]),
     "quick_start": ("Quick Start: three slots per printer with saved format, paper, quality, borderless, colour profile and processing. "
-                    "action=list shows the slots of the selected printer, apply applies slot n, save stores the current settings into slot n.",
-                    [("action", "string", "list | apply | save"), ("n", "integer", "Slot 1..3."), ("name", "string", "Name for save (up to 24 chars).")]),
+                    "action=list shows the slots of the selected printer, apply applies slot n, save stores the current settings into slot n, clear empties slot n.",
+                    [("action", "string", "list | apply | save | clear"), ("n", "integer", "Slot 1..3."), ("name", "string", "Name for save (up to 24 chars).")]),
     "add_test_sheet": ("Add the print test sheet (grey wedge, shadows/highlights, colours and saturation, skin tones I-VI, gradients, "
                        "sharpness targets) of the current paper size to the open photos. Print it with the normal pipeline to judge the profile.", []),
     "print_photos": ("Print like the «Print photo» button: sheets are built from the window's settings (format, photos per sheet, margins, "
@@ -640,7 +641,12 @@ class GuiAgent:
             w.persist()
             w._qs_refresh()
             return {"saved": n, "name": name, "printer": printer}
-        raise pc.AgentError("action: list | apply | save", "bad_value")
+        if action == "clear":
+            slots[n - 1] = pqk.empty_slot(n - 1)
+            w.persist()
+            w._qs_refresh()
+            return {"cleared": n, "printer": w.pr.get("printer") or None}
+        raise pc.AgentError("action: list | apply | save | clear", "bad_value")
 
     def c_test_sheet(self, req):
         w = self.win

@@ -5936,6 +5936,11 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
             else:
                 nb = e.set(self.blob, feature, on)
             merged = pc.merge_devmode(self.pr["printer"], nb)
+            if feature == "border" and on and e.recipe:
+                m0 = struct.unpack_from("<I", self.blob, 196)[0]
+                m1 = struct.unpack_from("<I", merged, 196)[0]
+                if m0 != m1:
+                    warn(self, trf("Печать без полей доступна только на фотобумаге: тип бумаги изменён на {m}. После отключения «Без полей» выберите нужный тип бумаги заново.", m=m1))
             if feature == "quality" and e.get(merged, "quality") != on:
                 warn(self, tr("Драйвер не принял это качество печати. Выберите его в «Свойствах драйвера»."))
             else:
