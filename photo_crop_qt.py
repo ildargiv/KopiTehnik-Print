@@ -9053,7 +9053,10 @@ class SettingsDialog(QDialog):
                         hbox(link("Сообщить об ошибке", GITHUB_URL + "/issues"), link("Текст лицензии", LICENSE_URL), None, spacing=6),
                         row("Проверять обновления при запуске", sw_upd),
                         hbox(None, btn("Проверить обновления", lambda: app.check_updates(True), ico="sparkle")))
-        about = lbl(tr("Настройки хранятся в файле") + ": " + str(pc.SETTINGS_PATH), "muted", wrap=True)
+        about = lbl(tr("Настройки хранятся в файле") + ": " + str(pc.SETTINGS_PATH) + "\n\n" + tr(
+            "Программа не связана с компанией Epson. Epson и названия моделей — торговые марки их владельцев и используются только "
+            "для описания совместимости. Управление драйвером принтера и обслуживание (проверка дюз, прочистка) вы используете на свой риск: "
+            "прочистка расходует чернила."), "muted", wrap=True)
         # классическая раскладка: слева дерево разделов с подпунктами, справа страница выбранного
         self.stack = QStackedWidget()
         self.tree = QTreeWidget()
