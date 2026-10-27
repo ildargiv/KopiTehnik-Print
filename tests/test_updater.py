@@ -1,6 +1,7 @@
 import hashlib
 import http.server
 import sys
+import os
 import tempfile
 import threading
 import unittest
@@ -75,10 +76,20 @@ class UpdaterTest(unittest.TestCase):
 
     def test_script(self):
         s = updater.build_script(r"C:\Temp\Setup.exe", r"C:\Users\Я\KopiTehnik Print\PhotoCropQt.exe", 4321)
-        self.assertIn('"PID eq 4321"'.replace('"PID', 'PID').replace('4321"', '4321'), s)
-        self.assertIn('"C:\\Temp\\Setup.exe" /SILENT', s)
-        self.assertLess(s.index("/SILENT"), s.rindex('start ""'))      # сначала установка, потом запуск
+        self.assertIn("Wait-Process -Id 4321", s)
+        self.assertIn("'C:\\Temp\\Setup.exe'", s)
+        self.assertLess(s.index("/SILENT"), s.rindex("Start-Process"))      # сначала установка, потом запуск
+        self.assertNotIn("RunAs", s)
         self.assertTrue(s.endswith("\r\n"))
+
+    def test_script_elevated_and_quotes(self):
+        s = updater.build_script(r"C:\Temp\it's.exe", r"C:\Program Files\KT\PhotoCropQt.exe", 7, elevate=True)
+        self.assertIn("-Wait -Verb RunAs", s)
+        self.assertIn("'C:\\Temp\\it''s.exe'", s)
+
+    def test_needs_elevation(self):
+        with tempfile.TemporaryDirectory() as d:
+            self.assertFalse(updater.needs_elevation(os.path.join(d, "app.exe")))
 
     def test_source_run_has_no_self_update(self):
         self.assertIsNone(updater.install_kind())
