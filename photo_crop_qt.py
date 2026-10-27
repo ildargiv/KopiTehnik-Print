@@ -692,6 +692,115 @@ class MotionButton(QPushButton):
         p.end()
 
 
+class GearButton(MotionButton):
+    """Кнопка «Настройки» в шапке: шестерёнка + подпись. Шестерёнка плавно поворачивается при наведении
+    и делает полный оборот по щелчку; цвета берутся из текущей темы."""
+    TEETH = 8
+
+    def __init__(self, text, tip, slot):
+        super().__init__(tr(text))
+        self.setToolTip(tr(tip))
+        self.setCursor(Qt.PointingHandCursor)
+        self._rot = 0.0
+        self._ag = QPropertyAnimation(self, b"rot", self)
+        self.setFixedHeight(34)
+        self.clicked.connect(lambda _=False: slot())
+        self.pressed.connect(self._spin)
+
+    def getRot(self):
+        return self._rot
+
+    def setRot(self, v):
+        self._rot = float(v)
+        self.update()
+
+    rot = Property(float, getRot, setRot)
+
+    def _go(self, to, ms, curve):
+        self._ag.stop()
+        if not ANIM_ON[0]:
+            self._rot = float(to)
+            self.update()
+            return
+        self._ag.setDuration(ms)
+        self._ag.setEasingCurve(curve)
+        self._ag.setStartValue(self._rot)
+        self._ag.setEndValue(float(to))
+        self._ag.start()
+
+    def enterEvent(self, e):
+        self._go(45.0 + 360.0 * round(self._rot / 360.0), 520, QEasingCurve.OutBack)
+        super().enterEvent(e)
+
+    def leaveEvent(self, e):
+        self._go(360.0 * round(self._rot / 360.0), 420, QEasingCurve.InOutCubic)
+        super().leaveEvent(e)
+
+    def _spin(self):
+        self._go(self._rot + 360.0, 800, QEasingCurve.OutCubic)
+
+    def _font(self):
+        f = QFont(self.font())
+        f.setPixelSize(13)
+        f.setWeight(QFont.DemiBold)
+        return f
+
+    def sizeHint(self):
+        return QSize(14 + 18 + 8 + QFontMetrics(self._font()).horizontalAdvance(self.text()) + 14, 34)
+
+    def minimumSizeHint(self):
+        return self.sizeHint()
+
+    def _gear(self, r_out):
+        r_in = r_out * 0.76
+        path = QPainterPath()
+        pts = []
+        n = self.TEETH
+        for i in range(n):
+            a0 = 360.0 / n * i
+            for da, rr in ((-12, r_in), (-7, r_out), (7, r_out), (12, r_in)):
+                t = math.radians(a0 + da)
+                pts.append(QPointF(rr * math.cos(t), rr * math.sin(t)))
+        path.addPolygon(QPolygonF(pts))
+        path.closeSubpath()
+        path.addEllipse(QPointF(0, 0), r_out * 0.34, r_out * 0.34)
+        path.setFillRule(Qt.OddEvenFill)
+        return path
+
+    def paintEvent(self, e):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+        hv = self._hv
+        r = QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
+        path = QPainterPath()
+        path.addRoundedRect(r, 11, 11)
+        acc = T["accent"]
+        p.setPen(QPen(QColor(mix(T["border"], acc, 0.15 + 0.5 * hv)), 1))
+        p.setBrush(QColor(mix(mix(T["raised"], T["hover"], hv), acc, 0.04 + 0.08 * hv)))
+        p.drawPath(path)
+        if self._rp < 1.0:
+            p.save()
+            p.setClipPath(path)
+            R = max(self.width(), self.height()) * 1.1 * self._rp
+            c = QColor(acc)
+            c.setAlphaF(0.28 * (1.0 - self._rp))
+            p.setPen(Qt.NoPen)
+            p.setBrush(c)
+            p.drawEllipse(self._pt, R, R)
+            p.restore()
+        p.save()
+        p.translate(14 + 9, self.height() / 2.0)
+        p.rotate(self._rot)
+        p.setPen(Qt.NoPen)
+        p.setBrush(QColor(mix(T["muted"], acc, 0.35 + 0.65 * hv)))
+        p.drawPath(self._gear(9.0))
+        p.restore()
+        p.setFont(self._font())
+        p.setPen(QColor(mix(T["text"], acc, 0.25 * hv)))
+        p.drawText(QRectF(14 + 18 + 8, 0, self.width() - 14 - 18 - 8 - 8, self.height()), Qt.AlignVCenter | Qt.AlignLeft, self.text())
+        p.end()
+
+
 def btn(text, slot=None, kind=None, big=False, ico=None, ico_color=None, tip=None):
     b = MotionButton(tr(text))
     if kind:
@@ -5165,7 +5274,7 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         l = hbox(logo, name, 10, btn("Открыть", self.open_any, "primary", ico="open", tip="Открыть фото или папку (Ctrl+O)"), 10,
                  self.mode_switch, 10, cap("Бумага"), self.cb_format, 6,
                  None, self.l_agent,
-                 self.seg_view, 6, self.b_grid, more, ibtn("settings", "Настройки", self.open_settings),
+                 self.seg_view, 6, self.b_grid, more, GearButton("Настройки", "Настройки программы: оформление, язык, печать", self.open_settings),
                  spacing=8, margins=(16, 0, 12, 0))
         bar.setLayout(l)
         self._photo_only += [self.cb_format, self.seg_view, self.b_grid]
