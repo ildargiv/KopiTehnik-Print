@@ -13,7 +13,7 @@ PRIMARIES = (("R", (255, 0, 0)), ("G", (0, 255, 0)), ("B", (0, 0, 255)),
              ("C", (0, 255, 255)), ("M", (255, 0, 255)), ("Y", (255, 255, 0)))
 GRAY18 = (118, 118, 118)        # серая карта 18 %: отражение 0,18 в sRGB ≈ 118 (L* ≈ 50)
 NEUTRALS = (("100 %", (255, 255, 255)), ("96 %", (245, 245, 245)), ("50 %", (128, 128, 128)),
-            ("18 % (серая карта)", GRAY18), ("0 %", (0, 0, 0)))
+            ("18 % (gray card)", GRAY18), ("0 %", (0, 0, 0)))
 SHADOW_PCT = (0, 1, 2, 3, 4, 5)
 LIGHT_PCT = (95, 96, 97, 98, 99, 100)
 SAT_STEPS = (100, 80, 60, 40, 20, 0)
@@ -235,7 +235,7 @@ def _cells_row(d, x0, x1, y0, y1, colors, labels, k, lab_font=None):
 
 
 def _wedge(d, L, k):
-    _caption(d, L["wedge"], "Серый клин: 21 ступень, 0–100 % яркости (шаг 5 %)", k)
+    _caption(d, L["wedge"], "Gray wedge: 21 steps, 0–100 % (5 % each)", k)
     cells = L["wedge_cells"]
     cw = cells[0][2] - cells[0][0]
     f = _fit_font(d, "100", 6, cw * 0.8, k)
@@ -266,8 +266,8 @@ def _shadows(d, L, k):
     _rect(d, g, GRAY18)
     _text(d, ((g[0] + g[2]) // 2, y1 + k(0.6)), "18 %", lf, fill=MUTED, anchor="ma")
     f = _font(5.5 * k.pt)
-    _text(d, (x0 + k(1), y0 + k(0.8)), "тени", f, fill=(150, 150, 150))
-    _text(d, (x1 - k(1), y0 + k(0.8)), "света", f, fill=(140, 140, 140), anchor="ra")
+    _text(d, (x0 + k(1), y0 + k(0.8)), "shadows", f, fill=(150, 150, 150))
+    _text(d, (x1 - k(1), y0 + k(0.8)), "highlights", f, fill=(140, 140, 140), anchor="ra")
 
 
 def _tint(c, p):
@@ -284,7 +284,7 @@ def _desat(c, p):
 def _colors(d, L, k, compact):
     x0, y0, x1, y1 = L["colors"]
     if compact:
-        _caption(d, L["colors"], "Цвета R G B C M Y: 100 % и 50 %, серая 18 %", k)
+        _caption(d, L["colors"], "Colors R G B C M Y: 100 % and 50 %, gray 18 %", k)
         cy0, cy1 = y0 + k(CAPTION), y1 - k(LABEL)
         gx = x1 - max(k(6), (x1 - x0) // 13)
         cols = [c for _n, c in PRIMARIES] + [_tint(c, 50) for _n, c in PRIMARIES]
@@ -293,7 +293,7 @@ def _colors(d, L, k, compact):
         _rect(d, (gx, cy0, x1, cy1), GRAY18)
         _text(d, ((gx + x1) // 2, cy1 + k(0.6)), "18 %", _font(5 * k.pt), fill=MUTED, anchor="ma")
         return
-    _caption(d, L["colors"], "Основные и вторичные цвета: 100 %, 50 % и насыщенность 100 → 0 % (к серому той же яркости)", k)
+    _caption(d, L["colors"], "Primary and secondary colors: 100 %, 50 % and saturation 100 → 0 % (toward gray of equal brightness)", k)
     cy0, cy1 = y0 + k(CAPTION), y1 - k(LABEL)
     lab = k(6)
     gap = k(2.5)
@@ -317,14 +317,14 @@ def _colors(d, L, k, compact):
     for i, s in enumerate(("100 %", "50 %")):
         _text(d, (round(xa + (i + 0.5) * cell), ly), s, fl, fill=MUTED, anchor="ma")
     for i, p in enumerate(SAT_STEPS):
-        _text(d, (round(xs + (i + 0.5) * cell), ly), "нас. %d" % p if i == 0 else str(p), fl, fill=MUTED, anchor="ma")
+        _text(d, (round(xs + (i + 0.5) * cell), ly), "sat %d" % p if i == 0 else str(p), fl, fill=MUTED, anchor="ma")
     _text(d, (round((xg + x1) / 2), ly), "18 %", fl, fill=MUTED, anchor="ma")
 
 
 def _skin(d, L, k, compact):
     x0, y0, x1, y1 = L["skin"]
-    _caption(d, L["skin"], "Оттенки кожи по Фицпатрику I–VI (типовые значения, не стандарт): сверху светлее, снизу темнее"
-             if not compact else "Кожа I–VI (типовые значения): светлее / темнее", k)
+    _caption(d, L["skin"], "Skin tones, Fitzpatrick I–VI (typical values, not a standard): lighter above, darker below"
+             if not compact else "Skin I–VI (typical values): lighter / darker", k)
     cells = L["skin_cells"]
     for i, (_n, light, dark) in enumerate(SKIN):
         _rect(d, cells[2 * i], light)
@@ -335,8 +335,8 @@ def _skin(d, L, k, compact):
         _text(d, ((b[0] + b[2]) // 2, b[3] + k(0.6)), n, f, anchor="ma")
     fs = _font((6 if not compact else 5) * k.pt)
     lx = x0
-    _text(d, (lx, (cells[0][1] + cells[0][3]) // 2), "светл.", fs, fill=MUTED, anchor="lm")
-    _text(d, (lx, (cells[1][1] + cells[1][3]) // 2), "темн.", fs, fill=MUTED, anchor="lm")
+    _text(d, (lx, (cells[0][1] + cells[0][3]) // 2), "light", fs, fill=MUTED, anchor="lm")
+    _text(d, (lx, (cells[1][1] + cells[1][3]) // 2), "dark", fs, fill=MUTED, anchor="lm")
     g = L["skin_gray"]
     _rect(d, g, GRAY18)
     _text(d, ((g[0] + g[2]) // 2, g[3] + k(0.6)), "18 %", fs, fill=MUTED, anchor="ma")
@@ -361,22 +361,22 @@ def _portraits(d, im, L, k, portraits):
             im.paste(_fit_portrait(portraits[i], (x1 - x0, y1 - y0)), (x0, y0))
         else:
             d.rectangle((x0, y0, x1 - 1, y1 - 1), fill=(236, 236, 236), outline=FRAME, width=max(1, k(0.5)))
-            _text(d, ((x0 + x1) // 2, (y0 + y1) // 2), "Сюда ваш портрет",
-                  _fit_font(d, "Сюда ваш портрет", 8, (x1 - x0) * 0.85, k), fill=(120, 120, 120), anchor="mm")
-        _text(d, ((x0 + x1) // 2, y1 + k(0.8)), "Портрет %d" % (i + 1), f, anchor="ma")
+            _text(d, ((x0 + x1) // 2, (y0 + y1) // 2), "Your portrait here",
+                  _fit_font(d, "Your portrait here", 8, (x1 - x0) * 0.85, k), fill=(120, 120, 120), anchor="mm")
+        _text(d, ((x0 + x1) // 2, y1 + k(0.8)), "Portrait %d" % (i + 1), f, anchor="ma")
 
 
 def _gradients(im, d, L, k, compact):
     """Плавные полосы на всю ширину: серый 0→100 % яркости, цвета от белого (0 %) до чистого (100 %)."""
     x0, y0, x1, y1 = L["gradients"]
-    _caption(d, L["gradients"], "Градиенты 0 → 100 % (полосатость и плавность переходов)", k)
+    _caption(d, L["gradients"], "Gradients 0 → 100 % (banding and smoothness)", k)
     gy0 = y0 + k(CAPTION)
     lab = k(5)
     gx0 = x0 + lab
     n = 7
     t = np.linspace(0.0, 1.0, max(1, x1 - gx0))[None, :, None]
     f = _font((6 if not compact else 4.5) * k.pt)
-    rows = [("Сер", (0, 0, 0), (255, 255, 255))] + [(nm, (255, 255, 255), c) for nm, c in PRIMARIES]
+    rows = [("K", (0, 0, 0), (255, 255, 255))] + [(nm, (255, 255, 255), c) for nm, c in PRIMARIES]
     for j, (name, a, b) in enumerate(rows):
         ra, rb = gy0 + round((y1 - gy0) * j / n), gy0 + round((y1 - gy0) * (j + 1) / n)
         if rb - ra < 1:
@@ -414,9 +414,9 @@ def _star(d, cx, cy, r, spokes=36):
 def _lines(d, b, k):
     """Мишень из тонких линий 1, 2, 3 px при 300 dpi (0,08 / 0,17 / 0,25 мм): горизонтальные и вертикальные пары."""
     x0, y0, x1, y1 = b
-    groups = (("0,08", 0.085), ("0,17", 0.17), ("0,25", 0.254))
+    groups = (("0.08", 0.085), ("0.17", 0.17), ("0.25", 0.254))
     gw = (x1 - x0) / 3.0
-    f = _fit_font(d, "0,08 мм", 5, gw - k(1.5), k)
+    f = _fit_font(d, "0.08 mm", 5, gw - k(1.5), k)
     lab = k(2.6)
     for i, (name, mm) in enumerate(groups):
         t = max(1, k(mm))
@@ -430,7 +430,7 @@ def _lines(d, b, k):
         while x + t <= bnd:                                             # вертикальные
             _bar(d, x, y0 + hh + k(0.5), x + t - 1, y0 + 2 * hh - 1)
             x += 2 * t
-        _text(d, ((a + bnd) // 2, y1 - lab + k(0.4)), name + " мм", f, fill=MUTED, anchor="ma")
+        _text(d, ((a + bnd) // 2, y1 - lab + k(0.4)), name + " mm", f, fill=MUTED, anchor="ma")
 
 
 def _hatch(im, b, k):
@@ -460,7 +460,7 @@ def _small_text(im, b, k):
     rh = h / 6.0
     for j, fill in enumerate(((0, 0, 0), (255, 255, 255))):
         for i, pt in enumerate((4, 5, 6)):
-            _text(d, (k(0.8), round(rh * (3 * j + i + 0.5))), "%d pt Съешь ещё 0123" % pt, _font(pt * k.pt),
+            _text(d, (k(0.8), round(rh * (3 * j + i + 0.5))), "%d pt The quick brown fox 0123" % pt, _font(pt * k.pt),
                   fill=fill, anchor="lm")
     im.paste(tile, (x0, y0))
 
@@ -502,7 +502,7 @@ def _marks(d, W, H, k, dpi, compact):
         _text(d, (cx + sx * k(1.0), cy + sy * k(0.9)), str(n), f, fill=(0, 0, 0),
               anchor=("l" if sx > 0 else "r") + ("t" if sy > 0 else "b"))
     # подписи рамок у середины верхнего края
-    _text(d, (W // 2, k(0.6)), "край листа · рамка в 3 мм", _font(4.5 * k.pt), fill=MUTED, anchor="ma")
+    _text(d, (W // 2, k(0.6)), "sheet edge · frame 3 mm", _font(4.5 * k.pt), fill=MUTED, anchor="ma")
 
 
 # ---------------------------------------------------------------- лист
@@ -522,9 +522,9 @@ def build(width_mm, height_mm, dpi=300, portraits=None, title="", icc_name=""):
 
     # шапка: название и параметры листа
     hx0, hy0, hx1, hy1 = L["head"]
-    name = title or "Тестовый лист печати"
+    name = title or "Print test sheet"
     px = (H, W) if L["rotated"] else (W, H)
-    info = "%g × %g мм · %d dpi · %d × %d px" % (size_mm + (dpi,) + px)
+    info = "%g × %g mm · %d dpi · %d × %d px" % (size_mm + (dpi,) + px)
     if compact:
         _text(d, (hx0, hy0), name, _fit_font(d, name, 8, (hx1 - hx0) * 0.55, k))
         _text(d, (hx1, hy0 + k(0.4)), info, _font(5.5 * k.pt), fill=MUTED, anchor="ra")
@@ -537,10 +537,10 @@ def build(width_mm, height_mm, dpi=300, portraits=None, title="", icc_name=""):
     _colors(d, L, k, compact)
     if not compact:
         x0, y0, x1, y1 = L["neutrals"]
-        _caption(d, L["neutrals"], "Нейтральные плашки", k)
+        _caption(d, L["neutrals"], "Neutral patches", k)
         nx = x0 + round((x1 - x0) * 0.5)
         _neutrals(d, (x0, y0 + k(CAPTION), nx - k(3), y1), k)
-        _caption(d, (nx, y0, x1, y1), "Резкость: звезда Сименса, линии, мелкий текст, штриховка", k)
+        _caption(d, (nx, y0, x1, y1), "Sharpness: Siemens star, lines, small text, hatching", k)
         _sharpness(im, d, (nx, y0 + k(CAPTION), x1, y1), k, False)
     _skin(d, L, k, compact)
     _portraits(d, im, L, k, portraits)
@@ -553,9 +553,9 @@ def build(width_mm, height_mm, dpi=300, portraits=None, title="", icc_name=""):
 
     # низ: название программы и профиль
     fx0, fy0, fx1, fy1 = L["foot"]
-    foot = "КопиТехник Принт — тестовый лист"
+    foot = "KopiTehnik Print — test sheet"
     if icc_name:
-        foot += "  ·  Профиль: %s" % icc_name
+        foot += "  ·  Profile: %s" % icc_name
     _text(d, (fx0, fy1), foot, _fit_font(d, foot, 7 if not compact else 5.5, fx1 - fx0, k), fill=MUTED, anchor="ld")
 
     _marks(d, W, H, k, dpi, compact)
