@@ -51,6 +51,8 @@ QUALITY_SETS = {
 # носители (dmMediaType), на которых драйвер не принимает режим и сам возвращает «Стандарт»:
 # проверено перебором 10 носителей × 28 размеров на L8050 — «Высокое» не работает на «Бланк письма» (828),
 # «Photo Quality Ink Jet» (318), «Photo Stickers» (338) и «Конверты» (353).
+OLD_FAMILY = {"T50", "P50", "TX650", "R290", "1410"}      # приватная зона 796 байт; фотобумага снята полностью на T50
+
 QUALITY_UNSUPPORTED = {
     "L8050": {2: {828, 318, 338, 353}},
     # остальное — матрица через DocumentProperties на ПК пользователя (носители из драйвера × режимы), 27.10.2026
@@ -119,6 +121,20 @@ class EpsonPriv:
             if start + off < len(ba):
                 ba[start + off] = val
 
+    def set_media(self, blob, code):
+        """Тип бумаги: у моделей по рецептам драйвер хранит его и в публичном dmMediaType, и в зеркале приватной зоны;
+        если записать только публичное поле, merge откатывает носитель на «простую» (проверено на T50, P50, TX650, R290, 1410, PX660, L805)."""
+        ba = bytearray(blob)
+        struct.pack_into("<I", ba, DM_MEDIATYPE_OFFSET, int(code))
+        m = (self.recipe or {}).get("media_mirror")
+        if m:
+            pos = self._private_start(blob) + m
+            if pos + 1 < len(ba):
+                struct.pack_into("<H", ba, pos, int(code) & 0xFFFF)
+        flags = struct.unpack_from("<I", ba, DM_FIELDS_OFFSET)[0] | 0x2000000        # DM_MEDIATYPE
+        struct.pack_into("<I", ba, DM_FIELDS_OFFSET, flags)
+        return bytes(ba)
+
     def _recipe_get(self, blob, feature):
         if feature == "quality":
             return self._DPI_LEVEL.get(struct.unpack_from("<H", blob, 90)[0])
@@ -135,7 +151,7 @@ class EpsonPriv:
         self._put(ba, b["on"] if value else b["off"])
         struct.pack_into("<H", ba, DM_DEFAULTSOURCE_OFFSET, b["src_on"] if value else b["src_off"])
         if value and b["media"] and struct.unpack_from("<I", ba, DM_MEDIATYPE_OFFSET)[0] == 1:
-            struct.pack_into("<I", ba, DM_MEDIATYPE_OFFSET, b["media"])     # без полей — только на фотобумаге
+            ba = bytearray(self.set_media(bytes(ba), b["media"]))           # без полей — только на фотобумаге
         struct.pack_into("<I", ba, DM_FIELDS_OFFSET, struct.unpack_from("<I", ba, DM_FIELDS_OFFSET)[0] | DM_DEFAULTSOURCE_FLAG)
         return bytes(ba)
 
@@ -153,7 +169,11 @@ class EpsonPriv:
             names = {0: "Черновик", 1: "Стандарт", 2: "Высокое"}
             media = struct.unpack_from("<I", blob, DM_MEDIATYPE_OFFSET)[0] if blob else None
             bad = QUALITY_UNSUPPORTED.get(self.model, {})
-            return [(k, names[k]) for k in sorted(self.recipe["quality"]) if media not in bad.get(k, ())]
+            out = [(k, names[k]) for k in sorted(self.recipe["quality"]) if media not in bad.get(k, ())]
+            if self.model in OLD_FAMILY and media not in (None, 1):
+                # на фотобумаге драйвер T50 поднимает «Стандарт» до 720 dpi; «Черновик» остаётся только на простой
+                out = [(k, n) for k, n in out if k == 2]
+            return out
         modes = QUALITY_MODES.get(self.model, []) if self.supported("quality") else []
         if blob is None:
             return modes

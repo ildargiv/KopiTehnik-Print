@@ -166,5 +166,24 @@ class RecipeModelTests(unittest.TestCase):
         self.assertEqual(struct.unpack_from("<I", b, 196)[0], 359)
 
 
+class MediaMirrorTests(unittest.TestCase):
+    def test_media_written_in_both_places(self):
+        e = ep.EpsonPriv("EPSON T50 Series")
+        b = bytearray(220 + 796)
+        struct.pack_into("<HH", b, 68, 220, 796)
+        b = e.set_media(bytes(b), 271)
+        self.assertEqual(struct.unpack_from("<I", b, 196)[0], 271)
+        self.assertEqual(struct.unpack_from("<H", b, 220 + 116)[0], 271)
+
+    def test_old_family_photo_media_only_high_quality(self):
+        e = ep.EpsonPriv("EPSON T50 Series")
+        b = bytearray(220 + 796)
+        struct.pack_into("<HH", b, 68, 220, 796)
+        struct.pack_into("<I", b, 196, 1)
+        self.assertGreater(len(e.quality_modes(bytes(b))), 1)
+        b = e.set_media(bytes(b), 272)
+        self.assertEqual([k for k, _ in e.quality_modes(b)], [2])
+
+
 if __name__ == "__main__":
     unittest.main()

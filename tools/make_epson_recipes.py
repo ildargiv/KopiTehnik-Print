@@ -9,7 +9,9 @@ import sys
 
 PUB = 220
 QUALITY_SNAPS = {0: ("draft",), 1: ("base",), 2: ("bestphoto", "high")}
-SKIP_BORDER = {88, 89, 196, 197}     # источник подачи и носитель обрабатываются отдельно
+# источник подачи и носитель (публичный @196 и его зеркало в приватной зоне) обрабатываются отдельно
+MEDIA_MIRROR = {796: 116, 3704: 144}       # смещение зеркала dmMediaType в приватной зоне по размеру приватной зоны
+SKIP_BORDER = {88, 89, 196, 197}
 
 
 def rd(d, rows, model, opts):
@@ -43,12 +45,17 @@ def main(d):
         entry = {"quality": {k: pack(v, qoffs) for k, v in q.items()}}
         bl = rd(d, rows, model, ("borderless_glossy", "borderless"))
         if bl is not None:
-            boffs = diff(base, bl) - qoffs - SKIP_BORDER
+            mirror = MEDIA_MIRROR.get(len(base) - PUB)
+            skip = SKIP_BORDER | ({PUB + mirror, PUB + mirror + 1} if mirror else set())
+            boffs = diff(base, bl) - qoffs - skip
             on, off = pack(bl, boffs), pack(base, boffs)
             src = lambda b: b[88] | b[89] << 8
             media = bl[196] | bl[197] << 8
+            if media == 1 and mirror:           # драйвер держит носитель в зеркале, а публичное поле откатывает
+                media = bl[PUB + mirror] | bl[PUB + mirror + 1] << 8
             entry["border"] = {"on": on, "off": off, "src_on": src(bl), "src_off": src(base),
                                "media": media if media != 1 else 0}
+        entry["media_mirror"] = MEDIA_MIRROR.get(len(base) - PUB)
         out[model.upper()] = entry
     print("# -*- coding: utf-8 -*-")
     print('"""Рецепты DEVMODE моделей Epson (создан tools/make_epson_recipes.py из снимков драйвера). Не править вручную."""')

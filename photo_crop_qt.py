@@ -5751,7 +5751,9 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         if self.blob is None or code is None:
             return
         try:
-            self.blob = pc.merge_devmode(self.pr["printer"], pc.devmode_write(self.blob, {field: int(code)}))
+            e = self._epson()
+            nb = e.set_media(self.blob, code) if field == "media_type" and e.recipe else pc.devmode_write(self.blob, {field: int(code)})
+            self.blob = pc.merge_devmode(self.pr["printer"], nb)
             self._save_blob(profile=field not in ("media_type",))
         except Exception as ex:
             warn(self, str(ex))
