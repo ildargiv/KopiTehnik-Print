@@ -7254,6 +7254,7 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         self.b_redo.setEnabled(bool(self._redo))
         if not cur:
             self.l_pos.setText("0 / %d" % len(chk))
+            self.l_pos.setMinimumWidth(max(42, self.l_pos.fontMetrics().horizontalAdvance("0 / %d" % len(chk)) * 5 // 4 + 14))
             self.l_angle.setText("0,0°")
             self.l_copies.setText("1")
             self.l_dot.setStyleSheet("color: %s;" % T["muted"])
@@ -7274,7 +7275,9 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
             part = tr("без обрезки")
         self.l_dot.setStyleSheet("color: %s;" % (T["ok"] if dpi >= 250 else T["warn"] if dpi >= 150 else T["bad"]))
         self.l_info.setText("%s ≈ %d dpi      %s      %d×%d px      %s" % (tr("печать"), round(dpi), f.name, W, H, part))
-        self.l_pos.setText("%d / %d" % (chk.index(f) + 1, len(chk)))
+        txt = "%d / %d" % (chk.index(f) + 1, len(chk))
+        self.l_pos.setText(txt)
+        self.l_pos.setMinimumWidth(max(42, self.l_pos.fontMetrics().horizontalAdvance(txt) * 5 // 4 + 14))     # жирный шрифт шире обычного
         self.l_angle.setText(("%.1f°" % st.angle).replace(".", ","))
         self.l_copies.setText(str(st.copies))
 
