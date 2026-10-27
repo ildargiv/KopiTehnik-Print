@@ -5073,6 +5073,13 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
                           spacing=1, margins=(5, 3, 5, 3)))
         return fr
 
+    def _pos_width(self, txt):
+        """Ширина счётчика «2 / 10» в плашке: меряем шрифтом плашки (17 px, жирный), а не обычным шрифтом подписи."""
+        f = QFont(self.l_pos.font())
+        f.setPixelSize(17)
+        f.setWeight(QFont.Bold)
+        return max(42, QFontMetrics(f).horizontalAdvance(txt) + 16)
+
     def nav_chip(self, sz, isz):
         """Листание фото: такая же цветная плашка, как у счётчика копий."""
         fr = QFrame()
@@ -7256,7 +7263,7 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         self.b_redo.setEnabled(bool(self._redo))
         if not cur:
             self.l_pos.setText("0 / %d" % len(chk))
-            self.l_pos.setMinimumWidth(max(42, self.l_pos.fontMetrics().horizontalAdvance("0 / %d" % len(chk)) * 5 // 4 + 14))
+            self.l_pos.setMinimumWidth(self._pos_width("0 / %d" % len(chk)))
             self.l_angle.setText("0,0°")
             self.l_copies.setText("1")
             self.l_dot.setStyleSheet("color: %s;" % T["muted"])
@@ -7279,7 +7286,7 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         self.l_info.setText("%s ≈ %d dpi      %s      %d×%d px      %s" % (tr("печать"), round(dpi), f.name, W, H, part))
         txt = "%d / %d" % (chk.index(f) + 1, len(chk))
         self.l_pos.setText(txt)
-        self.l_pos.setMinimumWidth(max(42, self.l_pos.fontMetrics().horizontalAdvance(txt) * 5 // 4 + 14))     # жирный шрифт шире обычного
+        self.l_pos.setMinimumWidth(self._pos_width(txt))
         self.l_angle.setText(("%.1f°" % st.angle).replace(".", ","))
         self.l_copies.setText(str(st.copies))
 
