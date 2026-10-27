@@ -82,17 +82,60 @@ class ChatTest(unittest.TestCase):
         self.assertEqual(self.ran, [])
 
     def test_step_limit(self):
-        a = self.agent([("preflight", {})] * 5, max_steps=3)
+        a = self.agent([("preflight", {"path": self.root + "/%d" % i}) for i in range(5)], max_steps=3, route=False)
         self.assertIn("limit", a.say("x"))
         self.assertEqual(len(self.ran), 3)
 
     def test_stop(self):
-        a = self.agent([("preflight", {}), "x"])
+        a = self.agent([("preflight", {}), "x"], route=False)
         a.stop()
         a.stopped = False
         orig = a.execute
         a.execute = lambda r: (a.stop(), orig(r))[1]
         self.assertEqual(a.say("x"), "(stopped)")
+
+    def test_repeated_call_stops(self):
+        a = self.agent([("preflight", {})] * 5, route=False)
+        self.assertIn("repeated", a.say("x"))
+        self.assertEqual(len(self.ran), 2)
+
+    def test_text_tool_call_is_parsed(self):
+        a = self.agent(['<tool_call>{"name": "preflight", "arguments": {}}</tool_call>', "done"], route=False)
+        self.assertEqual(a.say("x"), "done")
+        self.assertEqual(len(self.ran), 1)
+
+    def test_routing_limits_tools(self):
+        spec = {n: ("d", []) for n in ("open_folder", "set_adjust", "print_photos", "list_printers")}
+        gate = ac.ToolGate(spec, groups=[])
+        gate.route("открой папку")
+        self.assertNotIn("print_photos", gate.names)
+        gate.route("распечатай")
+        self.assertIn("print_photos", gate.names)
+        self.assertIn("list_printers", gate.names)
+
+    def test_need_tools_adds_group(self):
+        a = self.agent([("need_tools", {"group": "print"}), ("preflight", {}), "ok"])
+        a.say("x")
+        self.assertEqual(len(self.ran), 1)
+
+    def test_images_are_dropped_from_results(self):
+        a = ac.Agent(Stub([("preflight", {}), "ok"]), self.gate, lambda r: {"ok": True, "_image_b64": "A" * 5000, "n": 1}, route=False)
+        a.say("x")
+        tool = [m for m in a.messages if m["role"] == "tool"][0]["content"]
+        self.assertNotIn("AAAA", tool)
+
+    def test_required_in_schema(self):
+        g = ac.ToolGate(SPEC, required={"open_folder": ["path"]})
+        t = [x for x in g.tools() if x["function"]["name"] == "open_folder"][0]
+        self.assertEqual(t["function"]["parameters"]["required"], ["path"])
+
+    def test_rollback_uses_undo_steps(self):
+        depth = [3]
+        a = ac.Agent(Stub([("preflight", {}), "ok"]), self.gate, lambda r: self.ran.append(r) or depth.__setitem__(0, depth[0] + 2) or {"ok": True},
+                     undo_depth=lambda: depth[0], route=False)
+        a.say("x")
+        self.assertEqual(a.rollback(), 2)
+        self.assertEqual(self.ran[-1], {"cmd": "undo", "steps": 2})
 
     def test_bad_arguments_json(self):
         a = ac.Agent(Stub([]), self.gate, lambda r: {"ok": True})

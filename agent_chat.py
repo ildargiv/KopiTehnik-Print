@@ -11,6 +11,7 @@ import urllib.error
 import urllib.request
 
 MAX_STEPS = 30
+RESULT_LIMIT = 3000                                              # знаков ответа инструмента, которые видит модель
 
 # Группы инструментов: модели отдаём только набор под текущую задачу (малой локальной модели 100 команд много).
 GROUPS = {
@@ -22,7 +23,17 @@ GROUPS = {
     "print": ["plan_print", "render_sheet", "preflight", "print_photos", "doc_print", "print_status", "print_stats"],
     "queue": ["printer_status", "queue", "jobs", "job_status", "wait_queue", "cancel_job"],
 }
-CONTROL = ["ask_user"]                                           # всегда доступно
+CONTROL = ["ask_user", "need_tools"]                             # всегда доступно
+
+# Слова запроса -> группы инструментов (маршрутизатор: малой модели отдаём 10–25 инструментов, а не все).
+ROUTES = {
+    "color": ("цвет", "ярк", "контраст", "светл", "темн", "тёмн", "розов", "синев", "жёлт", "желт", "баланс", "оттен", "насыщ", "кривы", "уровн",
+              "color", "bright", "contrast", "dark", "tint", "balance", "curve"),
+    "profiles": ("профил", "icc", "принтер", "бумаг", "поле", "края", "драйвер", "printer", "paper", "profile", "border"),
+    "print": ("печат", "распечат", "print", "лист", "sheet"),
+    "queue": ("очеред", "задани", "отмен", "застр", "queue", "job", "cancel"),
+}
+DEFAULT_GROUPS = ("prepare",)
 
 PRINT_TOOLS = {"print_photos", "doc_print", "print"}
 # Запрещено всегда, даже если окажется в группе: права, ключи, обновления, очистка чужой очереди.
@@ -32,14 +43,36 @@ NEVER = {"app_settings", "clear_queue", "pause_printer", "resume_printer", "job_
 class ToolGate:
     """Белый список + проверка папок + режим печати. policy: print_mode 'ask'|'auto'|'off', allow_print, max_sheets."""
 
-    def __init__(self, spec, groups=None, roots=(), policy=None):
+    def __init__(self, spec, groups=None, roots=(), policy=None, required=None):
         self.spec = spec
-        names = set(CONTROL)
-        for g in (groups or GROUPS):
-            names.update(GROUPS.get(g, ()))
-        self.names = {n for n in names if n not in NEVER and (n in spec or n in CONTROL)}
+        self.required = required or {}
+        self.groups = []
+        self.names = set()
+        self.set_groups(groups if groups is not None else list(GROUPS))
         self.roots = [r for r in roots if r]
         self.policy = {"print_mode": "ask", "allow_print": True, "max_sheets": 0, **(policy or {})}
+
+    def set_groups(self, groups):
+        self.groups = [g for g in groups if g in GROUPS]
+        names = set(CONTROL)
+        for g in self.groups:
+            names.update(GROUPS[g])
+        self.names = {n for n in names if n not in NEVER and (n in self.spec or n in CONTROL)}
+
+    def add_group(self, g):
+        if g in GROUPS and g not in self.groups:
+            self.set_groups(self.groups + [g])
+            return True
+        return False
+
+    def route(self, text):
+        """Выбирает группы по словам запроса (всегда есть «prepare»)."""
+        t = (text or "").lower()
+        gs = list(DEFAULT_GROUPS) + [g for g, words in ROUTES.items() if any(w in t for w in words)]
+        if "print" in gs and "profiles" not in gs:
+            gs.append("profiles")                                 # печать без выбора принтера и профиля не обходится
+        self.set_groups(gs)
+        return self.groups
 
     def tools(self):
         """Описания инструментов в формате OpenAI (function calling)."""
@@ -49,8 +82,12 @@ class ToolGate:
                 out.append(_fn(n, "Ask the person a question when something is unclear instead of guessing.",
                                [("question", "string", "The question."), ("options", "array", "Optional answer choices.")], ["question"]))
                 continue
+            if n == "need_tools":
+                out.append(_fn(n, "Get more tools when the ones you have are not enough. Groups: %s." % ", ".join(GROUPS),
+                               [("group", "string", "Group name.")], ["group"]))
+                continue
             desc, params = self.spec[n]
-            out.append(_fn(n, desc, params, []))
+            out.append(_fn(n, desc, params, self.required.get(n, [])))
         return out
 
     def check(self, name, args):
@@ -68,10 +105,10 @@ class ToolGate:
     def path_violation(self, args):
         """Пути из аргументов, которые лежат вне разрешённых папок."""
         out = []
-        for k in ("path", "paths", "folder"):
+        for k in ("path", "paths", "folder", "outdir", "icc", "icc_path"):
             v = args.get(k)
             for p in ([v] if isinstance(v, str) else v if isinstance(v, list) else []):
-                if isinstance(p, str) and not self.in_roots(p):
+                if isinstance(p, str) and (k not in ("icc", "icc_path") or "/" in p or "\\" in p) and not self.in_roots(p):
                     out.append(p)
         return out
 
@@ -88,7 +125,14 @@ class ToolGate:
 
 
 def _fn(name, desc, params, required):
-    props = {n: {"type": {"any": "string"}.get(t, t), "description": d} for n, t, d in params}
+    props = {}
+    for n, t, d in params:
+        pr = {"description": d}
+        if t != "any":                                           # any: тип не ограничиваем (число, строка или список)
+            pr["type"] = t
+        if t == "array":
+            pr["items"] = {"type": "string"}
+        props[n] = pr
     return {"type": "function", "function": {"name": name, "description": desc,
                                               "parameters": {"type": "object", "properties": props, "required": list(required)}}}
 
@@ -96,13 +140,16 @@ def _fn(name, desc, params, required):
 class Agent:
     """Один диалог. confirm(text) -> bool вызывается перед печатью в режиме 'ask'; ask(question, options) -> str для ask_user."""
 
-    def __init__(self, provider, gate, execute, system="", confirm=None, ask=None, max_steps=MAX_STEPS, log=None, allow_path=None):
+    def __init__(self, provider, gate, execute, system="", confirm=None, ask=None, max_steps=MAX_STEPS, log=None, allow_path=None,
+                 undo_depth=None, route=True):
         self.provider, self.gate, self.execute = provider, gate, execute
         self.confirm, self.ask, self.max_steps, self.log = confirm, ask, max_steps, log
         self.allow_path = allow_path                             # allow_path(path) -> bool: человек разрешает новую папку
         self.messages = [{"role": "system", "content": system}] if system else []
         self.stopped = False
         self.printed_ok = 0
+        self.undo_depth, self.undo_base = undo_depth, None      # undo_depth() -> число шагов отмены окна: по ним откатываем действия агента
+        self.route = route
 
     def stop(self):
         self.stopped = True
@@ -110,19 +157,49 @@ class Agent:
     def say(self, text):
         """Реплика человека -> ответ агента (текст). Выполняет вызовы инструментов, пока модель их просит."""
         self.stopped = False
+        if self.undo_base is None and self.undo_depth:
+            self.undo_base = self.undo_depth()
+        if self.route:
+            self.gate.route(text)
         self.messages.append({"role": "user", "content": text})
-        tools = self.gate.tools()
+        recent = []
         for _ in range(self.max_steps):
             if self.stopped:
                 return "(stopped)"
-            reply = self.provider.chat(self.messages, tools)
+            self._compact()
+            reply = self.provider.chat(self.messages, self.gate.tools())
             calls = reply.get("tool_calls") or []
+            if not calls:
+                calls = parse_text_calls(reply.get("content") or "")       # Qwen часто пишет вызов в текст
+                if calls:
+                    reply = {**reply, "content": ""}
             self.messages.append({"role": "assistant", "content": reply.get("content") or "", **({"tool_calls": calls} if calls else {})})
             if not calls:
                 return reply.get("content") or ""
             for c in calls:
+                key = json.dumps(c.get("function"), sort_keys=True, default=str)
+                recent.append(key)
+                if len(recent) >= 3 and recent[-1] == recent[-2] == recent[-3]:
+                    return "(the agent repeated the same step three times and was stopped; please rephrase the task)"
                 self.messages.append({"role": "tool", "tool_call_id": c.get("id", ""), "content": self._run(c)})
         return "(step limit reached)"
+
+    def _compact(self, keep=4, limit=300):
+        """Старые ответы инструментов сжимаем до первых символов: малой модели хватает окна на вчерашние разговоры."""
+        tools = [m for m in self.messages if m.get("role") == "tool"]
+        for m in tools[:-keep]:
+            if len(m["content"]) > limit:
+                m["content"] = m["content"][:limit] + "…"
+
+    def rollback(self):
+        """Откатывает всё, что агент изменил в окне с начала диалога (шаги Ctrl+Z). Возвращает число шагов."""
+        if not self.undo_depth or self.undo_base is None:
+            return 0
+        n = self.undo_depth() - self.undo_base
+        if n > 0:
+            self.execute({"cmd": "undo", "steps": n})
+        self.undo_base = self.undo_depth()
+        return max(n, 0)
 
     def _run(self, call):
         f = call.get("function") or {}
@@ -142,6 +219,9 @@ class Agent:
         if denied:
             self._log(name, args, "denied: " + denied)
             return json.dumps({"ok": False, "error": denied})
+        if name == "need_tools":
+            ok = self.gate.add_group(str(args.get("group", "")))
+            return json.dumps({"ok": ok, "groups": self.gate.groups} if ok else {"ok": False, "error": "unknown or already added group"})
         if name == "ask_user":
             ans = self.ask(args.get("question", ""), args.get("options")) if self.ask else ""
             return json.dumps({"ok": True, "answer": ans}, ensure_ascii=False)
@@ -155,11 +235,42 @@ class Agent:
             res = self.execute({"cmd": name, **args})
         except Exception as ex:                                  # noqa: BLE001
             res = {"ok": False, "error": "%s: %s" % (ex.__class__.__name__, ex)}
-        return json.dumps(res, ensure_ascii=False, default=str)[:20000]
+        return json.dumps(_slim(res), ensure_ascii=False, default=str)[:RESULT_LIMIT]
 
     def _log(self, name, args, what):
         if self.log:
             self.log(name, args, what)
+
+
+def _slim(o):
+    """Убирает из ответа картинки в base64 (модель их текстом не прочитает, а окно переполнится)."""
+    if isinstance(o, dict):
+        return {k: ("<image omitted>" if "image" in str(k).lower() and "b64" in str(k).lower() else _slim(v)) for k, v in o.items()}
+    if isinstance(o, list):
+        return [_slim(v) for v in o]
+    return o
+
+
+_TEXT_CALL = None
+
+
+def parse_text_calls(content):
+    """Вызовы инструментов, которые модель написала в тексте: <tool_call>{"name":…, "arguments":{…}}</tool_call>."""
+    import re
+    global _TEXT_CALL
+    if _TEXT_CALL is None:
+        _TEXT_CALL = re.compile(r"<tool_call>\s*(\{.*?\})\s*</tool_call>", re.S)
+    out = []
+    for i, m in enumerate(_TEXT_CALL.finditer(content or "")):
+        try:
+            d = json.loads(m.group(1))
+        except ValueError:
+            continue
+        if isinstance(d, dict) and isinstance(d.get("name"), str):
+            args = d.get("arguments", d.get("parameters", {}))
+            out.append({"id": "t%d" % i, "type": "function",
+                        "function": {"name": d["name"], "arguments": args if isinstance(args, str) else json.dumps(args, ensure_ascii=False)}})
+    return out
 
 
 class OpenAICompatible:
