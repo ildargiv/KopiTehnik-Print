@@ -51,7 +51,14 @@ QUALITY_SETS = {
 # носители (dmMediaType), на которых драйвер не принимает режим и сам возвращает «Стандарт»:
 # проверено перебором 10 носителей × 28 размеров на L8050 — «Высокое» не работает на «Бланк письма» (828),
 # «Photo Quality Ink Jet» (318), «Photo Stickers» (338) и «Конверты» (353).
-QUALITY_UNSUPPORTED = {"L8050": {2: {828, 318, 338, 353}}}
+QUALITY_UNSUPPORTED = {
+    "L8050": {2: {828, 318, 338, 353}},
+    # остальное — матрица через DocumentProperties на ПК пользователя (носители из драйвера × режимы), 27.10.2026
+    "L18050": {0: {1, 318, 326, 338, 352, 353, 828}, 2: {318}},
+    "L805": {1: {318, 326, 338, 352}},
+    "L1800": {1: {275, 318, 325, 326, 338, 352, 396}},
+    "PX660": {1: {260, 271, 272, 275, 283, 335, 338, 352, 359, 379}, 2: {272, 275, 353, 359, 379}},
+}
 
 # режимы качества по моделям: (значение байта, название). У L8050 в драйвере нет «Черновика».
 QUALITY_MODES = {
@@ -144,7 +151,9 @@ class EpsonPriv:
         """Режимы качества модели; с blob — только те, для которых известен набор байтов на текущем носителе."""
         if self.recipe is not None:
             names = {0: "Черновик", 1: "Стандарт", 2: "Высокое"}
-            return [(k, names[k]) for k in sorted(self.recipe["quality"])]
+            media = struct.unpack_from("<I", blob, DM_MEDIATYPE_OFFSET)[0] if blob else None
+            bad = QUALITY_UNSUPPORTED.get(self.model, {})
+            return [(k, names[k]) for k in sorted(self.recipe["quality"]) if media not in bad.get(k, ())]
         modes = QUALITY_MODES.get(self.model, []) if self.supported("quality") else []
         if blob is None:
             return modes
