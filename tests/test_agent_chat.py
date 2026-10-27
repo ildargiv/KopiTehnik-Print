@@ -137,6 +137,36 @@ class ChatTest(unittest.TestCase):
         self.assertEqual(a.rollback(), 2)
         self.assertEqual(self.ran[-1], {"cmd": "undo", "steps": 2})
 
+    def test_find_outliers(self):
+        ph = [{"index": i, "name": "%d.jpg" % i, "mean_luma": 120, "sharpness": 10, "shadow_clip_pct": 0, "highlight_clip_pct": 0} for i in range(5)]
+        ph[1]["mean_luma"] = 30
+        ph[3]["sharpness"] = 2
+        out = ac.find_outliers(ph)
+        self.assertEqual([o["index"] for o in out], [1, 3])
+        self.assertIn("dark", out[0]["why"])
+
+    def test_prepare_series_runs_subcommands_and_respects_roots(self):
+        cmds = []
+
+        def ex(r):
+            cmds.append(r["cmd"])
+            if r["cmd"] == "open_folder":
+                return {"ok": True, "result": {"photo_count": 4}}
+            if r["cmd"] == "preflight":
+                return {"ok": True, "result": {"ready": True, "checks": [], "sheets_to_print": 8}}
+            return {"ok": True, "result": {}}
+        spec = {n: ("d", []) for n in ("open_folder", "set_format", "set_copies", "preflight", "analyze_photos")}
+        gate = ac.ToolGate(spec, roots=[self.root])
+        a = ac.Agent(Stub([("prepare_series", {"folder": self.root, "format": "10x15", "copies": 2}), "ok"]), gate, ex, route=False)
+        a.say("x")
+        self.assertEqual(cmds, ["open_folder", "set_format", "set_copies", "preflight"])
+        self.assertNotIn("print_photos", cmds)
+        other = tempfile.mkdtemp()
+        cmds.clear()
+        a = ac.Agent(Stub([("prepare_series", {"folder": other, "format": "10x15"}), "ok"]), gate, ex, route=False)
+        a.say("x")
+        self.assertEqual(cmds, [])
+
     def test_bad_arguments_json(self):
         a = ac.Agent(Stub([]), self.gate, lambda r: {"ok": True})
         out = json.loads(a._run({"function": {"name": "preflight", "arguments": "{bad"}}))

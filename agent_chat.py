@@ -15,7 +15,7 @@ RESULT_LIMIT = 3000                                              # знаков 
 
 # Группы инструментов: модели отдаём только набор под текущую задачу (малой локальной модели 100 команд много).
 GROUPS = {
-    "prepare": ["app_state", "open_folder", "open_files", "list_photos", "photo_info", "set_format", "set_orientation", "set_layout", "set_copies", "doc_open", "doc_info", "doc_set"],
+    "prepare": ["app_state", "prepare_series", "find_problem_photos", "check_photos", "select_photo", "open_folder", "open_files", "list_photos", "photo_info", "set_format", "set_orientation", "set_layout", "set_copies", "doc_open", "doc_info", "doc_set"],
     "color": ["analyze_photo", "analyze_photos", "set_crop", "move_crop", "rotate_photo", "flip_photo", "set_adjust", "white_balance",
               "color_presets", "color_preset_apply", "copy_adjust", "paste_adjust", "compare_photo", "contact_sheet", "undo", "redo"],
     "profiles": ["list_icc_profiles", "set_color_profile", "get_color_profile", "printer_correction", "list_printers", "select_printer",
@@ -36,6 +36,17 @@ ROUTES = {
 DEFAULT_GROUPS = ("prepare",)
 
 PRINT_TOOLS = {"print_photos", "doc_print", "print"}
+# Макро-инструменты: один вызов вместо пяти (малой модели так проще). Выполняются через тот же execute, печать не запускают.
+MACRO_SPEC = {
+    "prepare_series": ("Open a folder of photos, set the print format and copies per photo, then run the pre-print check. Does NOT print. "
+                       "Returns how many photos were opened, sheets to print, and any problems.",
+                       [("folder", "string", "Folder with photos."), ("format", "string", "Print format, e.g. 10x15, A4."),
+                        ("copies", "integer", "Copies of each photo (default 1).")]),
+    "find_problem_photos": ("Look over the whole open series and list photos that stand out: too dark, too bright, blurry, clipped, low resolution. "
+                            "Returns photo numbers with reasons. Changes nothing.", []),
+}
+MACROS = set(MACRO_SPEC)
+
 # Запрещено всегда, даже если окажется в группе: права, ключи, обновления, очистка чужой очереди.
 NEVER = {"app_settings", "clear_queue", "pause_printer", "resume_printer", "job_control", "check_update", "save_project", "load_project"}
 
@@ -57,7 +68,7 @@ class ToolGate:
         names = set(CONTROL)
         for g in self.groups:
             names.update(GROUPS[g])
-        self.names = {n for n in names if n not in NEVER and (n in self.spec or n in CONTROL)}
+        self.names = {n for n in names if n not in NEVER and (n in self.spec or n in CONTROL or n in MACROS)}
 
     def add_group(self, g):
         if g in GROUPS and g not in self.groups:
@@ -85,6 +96,10 @@ class ToolGate:
             if n == "need_tools":
                 out.append(_fn(n, "Get more tools when the ones you have are not enough. Groups: %s." % ", ".join(GROUPS),
                                [("group", "string", "Group name.")], ["group"]))
+                continue
+            if n in MACROS:
+                desc, params = MACRO_SPEC[n]
+                out.append(_fn(n, desc, params, ["folder", "format"] if n == "prepare_series" else []))
                 continue
             desc, params = self.spec[n]
             out.append(_fn(n, desc, params, self.required.get(n, [])))
@@ -219,6 +234,9 @@ class Agent:
         if denied:
             self._log(name, args, "denied: " + denied)
             return json.dumps({"ok": False, "error": denied})
+        if name in MACROS:
+            self._log(name, args, "run")
+            return json.dumps(_slim(self._macro(name, args)), ensure_ascii=False, default=str)[:RESULT_LIMIT]
         if name == "need_tools":
             ok = self.gate.add_group(str(args.get("group", "")))
             return json.dumps({"ok": ok, "groups": self.gate.groups} if ok else {"ok": False, "error": "unknown or already added group"})
@@ -237,9 +255,60 @@ class Agent:
             res = {"ok": False, "error": "%s: %s" % (ex.__class__.__name__, ex)}
         return json.dumps(_slim(res), ensure_ascii=False, default=str)[:RESULT_LIMIT]
 
+    def _call(self, cmd, **args):
+        """Вложенная команда макроса: тот же execute, результат или ошибка текстом."""
+        out = self.execute({"cmd": cmd, **args})
+        if isinstance(out, dict) and out.get("ok") is False:
+            raise RuntimeError("%s: %s" % (cmd, (out.get("error") or {}).get("message", out)))
+        return (out or {}).get("result", out) if isinstance(out, dict) else out
+
+    def _macro(self, name, args):
+        try:
+            if name == "prepare_series":
+                opened = self._call("open_folder", path=args["folder"])
+                self._call("set_format", format=args["format"])
+                copies = int(args.get("copies") or 1)
+                if copies != 1:
+                    self._call("set_copies", photo="all", copies=copies)
+                pre = self._call("preflight")
+                checks = [c for c in pre.get("checks", []) if c.get("level") in ("error", "warning")]
+                return {"ok": True, "opened": opened.get("photo_count", opened.get("count")), "format": args["format"], "copies": copies,
+                        "sheets_to_print": pre.get("sheets_to_print"), "ready": pre.get("ready"), "problems": checks[:10]}
+            ph = self._call("analyze_photos", photo="all").get("photos", [])
+            pre = self._call("preflight")
+            return {"ok": True, "checked": len(ph), "problem_photos": find_outliers(ph),
+                    "print_warnings": [c for c in pre.get("checks", []) if c.get("level") in ("error", "warning")][:10]}
+        except (RuntimeError, KeyError, ValueError) as ex:
+            return {"ok": False, "error": str(ex)}
+
     def _log(self, name, args, what):
         if self.log:
             self.log(name, args, what)
+
+
+def find_outliers(photos, dark=60, bright=205, clip_pct=8.0, blur_ratio=0.5):
+    """Кадры серии, которые выбиваются: тёмные, светлые, с клиппингом, нерезкие (по analyze_photos). Пороги эвристические."""
+    import statistics
+    sharp = [p.get("sharpness") for p in photos if isinstance(p.get("sharpness"), (int, float))]
+    med = statistics.median(sharp) if sharp else 0
+    out = []
+    for p in photos:
+        why = []
+        luma = p.get("mean_luma")
+        if isinstance(luma, (int, float)):
+            if luma < dark:
+                why.append("dark")
+            elif luma > bright:
+                why.append("bright")
+        if (p.get("shadow_clip_pct") or 0) > clip_pct:
+            why.append("shadows clipped")
+        if (p.get("highlight_clip_pct") or 0) > clip_pct:
+            why.append("highlights clipped")
+        if med and isinstance(p.get("sharpness"), (int, float)) and p["sharpness"] < med * blur_ratio:
+            why.append("blurry compared with the series")
+        if why:
+            out.append({"index": p.get("index"), "name": p.get("name"), "why": why})
+    return out
 
 
 def _slim(o):
