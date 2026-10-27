@@ -285,7 +285,8 @@ class GuiAgent:
             st.update(cm_on=bool(s.cm["on"]), icc=s.cm["icc"], intent=s.cm["intent"], bpc=s.cm["bpc"], embed=s.cm["embed"])
             w.cm_changed()
         if s.printer != snap["printer"] and s.printer and s.printer != w.pr.get("printer"):
-            w.cb_printer.setCurrentText(s.printer)              # окно загрузит драйвер этого принтера
+            w.cb_printer.setCurrentText(s.printer)
+            w._printer_changed()                                # сигнал activated от setCurrentText не приходит: загружаем драйвер сами
         if s.blob is not None and s.blob != snap["blob"]:
             w.blob = s.blob
             w._save_blob()
