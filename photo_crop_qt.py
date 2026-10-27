@@ -763,12 +763,37 @@ def row(left, right):
     return hbox(left if not isinstance(left, str) else WrapLabel(tr(left)), None, right)
 
 
-def card(title, *items):
+def help_popup(anchor, text):
+    """Подсказка по нажатию на «?»: небольшое окошко под кнопкой, закрывается кликом в сторону."""
+    from PySide6.QtWidgets import QWidgetAction
+    m = QMenu(anchor)
+    lab = QLabel(tr(text))
+    lab.setWordWrap(True)
+    lab.setMaximumWidth(320)
+    lab.setContentsMargins(10, 8, 10, 8)
+    a = QWidgetAction(m)
+    a.setDefaultWidget(lab)
+    m.addAction(a)
+    m.exec(anchor.mapToGlobal(anchor.rect().bottomLeft()))
+
+
+def help_btn(text):
+    b = QToolButton()
+    b.setText("?")
+    b.setFixedSize(22, 22)
+    b.setCursor(Qt.PointingHandCursor)
+    b.setToolTip(tr("Подсказка"))
+    b.setProperty("boxed", "true")
+    b.clicked.connect(lambda _=False: help_popup(b, text))
+    return b
+
+
+def card(title, *items, help=None):
     f = QFrame()
     f.setObjectName("card")
     l = vbox(spacing=9, margins=(13, 12, 13, 12))
     if title:
-        l.addWidget(lbl(title, "title"))
+        l.addWidget(lbl(title, "title")) if not help else l.addLayout(hbox(lbl(title, "title"), None, help_btn(help)))
     for it in items:
         _add(l, it)
     f.setLayout(l)
@@ -5073,17 +5098,19 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         self.sw_border.toggled.connect(lambda on: self._epson_set("border", on))
         self.sw_ccor = Switch(False)
         self.sw_ccor.toggled.connect(lambda on: self._epson_set("ccor", on))
-        self.w_epson = QWidget()
         self.cb_quality = QComboBox()
         shrinkable_combo(self.cb_quality, 110, 200)
         self.cb_quality.activated.connect(lambda _i: self._epson_set("quality", self.cb_quality.currentData()))
         self.l_quality = WrapLabel(tr("Качество печати"))
-        self.w_epson.setLayout(vbox(row(self.l_quality, self.cb_quality), row("Печать без полей", self.sw_border), row("Отключить цветокоррекцию драйвера", self.sw_ccor), spacing=6, margins=(0, 0, 0, 0)))
-        self.w_maint = QWidget()
-        self.w_maint.setLayout(hbox(btn("Проверка дюз", lambda: self._epson_maint("nozzle_check"), ico="settings"),
-                                    btn("Прочистка головки", lambda: self._epson_maint("clean"), ico="settings"), spacing=6))
-        self.w_maint.hide()
-        self.w_epson.hide()
+        self.l_border = WrapLabel(tr("Печать без полей"))
+        self.l_ccor = WrapLabel(tr("Отключить цветокоррекцию драйвера"))
+        self.b_nozzle = btn("Проверка дюз", lambda: self._epson_maint("nozzle_check"), ico="settings")
+        self.b_clean = btn("Прочистка головки", lambda: self._epson_maint("clean"), ico="settings")
+        self.epson_groups = {"quality": (self.l_quality, self.cb_quality), "border": (self.l_border, self.sw_border),
+                             "ccor": (self.l_ccor, self.sw_ccor), "maint": (self.b_nozzle, self.b_clean)}
+        for ws in self.epson_groups.values():
+            for w_ in ws:
+                w_.hide()
         self.l_prof = lbl("", wrap=True)
         self.b_prof_reset = btn("Сбросить к стандарту", self.profile_reset, "link", tip="Забыть сохранённые настройки этой связки (принтер, формат, тип бумаги)")
         self.sw_cm2 = Switch(self.s["cm_on"])
@@ -5094,9 +5121,16 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
                        row("Тип бумаги", self.cb_media), self.l_paper_drv, row("Подача", self.cb_source),
                        hbox(btn("Свойства драйвера…", self.driver_props, ico="settings"),
                             ibtn("reset", "Обновить список принтеров", self.reload_printers, 34, True), spacing=6),
-                       self.w_epson, self.w_maint, self.l_drv, self.l_prof, hbox(self.b_prof_reset, None),
+                       row(self.l_quality, self.cb_quality), row(self.l_border, self.sw_border), row(self.l_ccor, self.sw_ccor),
+                       hbox(self.b_nozzle, self.b_clean, spacing=6),
+                       self.l_drv, self.l_prof, hbox(self.b_prof_reset, None),
                        row("Профиль принтера", self.sw_cm2), self.l_icc2,
-                       btn("Выбрать профиль…", self.open_cm_dialog, ico="profile"))
+                       btn("Выбрать профиль…", self.open_cm_dialog, ico="profile"),
+                       help=("Тип бумаги, качество и поля задаются здесь или в «Свойствах драйвера», настройки запоминаются. "
+                             "Размер бумаги драйвера берётся из формата листа вверху. "
+                             "Профиль внизу (в строке «Профиль: …») запоминается отдельно для каждой связки «формат, тип бумаги, качество» "
+                             "и сохраняется автоматически; «Сбросить к стандарту» забывает его. "
+                             "Цветокоррекцию драйвера нужно отключать, когда включён цветовой профиль принтера."))
         self.cb_ppi = QComboBox()
         shrinkable_combo(self.cb_ppi, 80, 140)
         self.cb_ppi.addItems(pc.PPI_CHOICES)
@@ -5203,14 +5237,13 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
             self.l_drv.setText(tr("Принтеры не найдены. Листы можно сохранить в файлы."))
         elif self.blob is None:
             self.l_drv.setText(tr("Не удалось получить настройки драйвера этого принтера."))
-        elif not media:
-            self.l_drv.setText(tr("Тип бумаги, качество и печать без полей этот драйвер отдаёт только через «Свойства драйвера». Настройки запоминаются."))
         else:
-            self.l_drv.setText(tr("Качество и печать без полей задаются в «Свойствах драйвера». Настройки запоминаются."))
+            self.l_drv.setText("")
+        self.l_drv.setVisible(bool(self.l_drv.text()))
         self._fill_epson()
         self.l_icc2.setText(self.l_icc.text())
         if self.pr["paper_auto"] or self.cb_paper.currentData() is None:
-            self.l_paper_drv.setText(trf("Бумага в драйвере: подбирается автоматически по размеру листа ({f})", f=self.s["format"]))
+            self.l_paper_drv.setText(trf("Бумага в драйвере: авто, {f}", f=self.s["format"]))
         else:
             self.l_paper_drv.setText(trf("Бумага в драйвере: {p} (выбрана вручную)", p=self.cb_paper.currentText()))
         self.profile_apply()
@@ -5248,7 +5281,7 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         return tuple(p + [""] * (4 - len(p)))[:4]
 
     def profile_title(self, key=None):
-        return " · ".join(x for x in self._kparts(key or self.profile_key()) if x)
+        return " · ".join(x for x in self._kparts(key or self.profile_key())[1:] if x)
 
     def _profiles(self):
         return self.settings.setdefault("print_profiles", {})
@@ -5446,11 +5479,11 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         key = self.profile_key()
         own = key in self._profiles()
         if own:
-            txt = trf("Профиль: {t}. Изменения сохраняются автоматически.", t=self.profile_title(key))
+            txt = trf("Профиль: {t}", t=self.profile_title(key))
         elif how and how != "own":
-            txt = trf("Профиль: {t}. Взяты настройки из «{n}», изменения сохранятся для этой связки.", t=self.profile_title(key), n=self.profile_title(how))
+            txt = trf("Профиль: {t} (взято из «{n}»)", t=self.profile_title(key), n=self.profile_title(how))
         else:
-            txt = trf("Профиль: {t}. Пока общие настройки, при первом изменении запомнятся для этой связки.", t=self.profile_title(key))
+            txt = trf("Профиль: {t} (общие настройки)", t=self.profile_title(key))
         self.l_prof.setText(txt)
         self.b_prof_reset.setVisible(own)
 
@@ -5489,25 +5522,27 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         return ep.EpsonPriv(self.pr.get("printer", ""), ep.load_profiles(str(pc.AGENT_DIR / "epson_profiles.json")))
 
     def _fill_epson(self):
-        """Переключатели «без полей» и «цветокоррекция» видны, только если для модели известны смещения."""
+        """Поля «качество», «без полей», «цветокоррекция» и кнопки обслуживания видны, только если для модели известны смещения."""
         e = self._epson()
-        ok = self.blob is not None and any(e.supported(f) for f in ("border", "ccor", "quality"))
-        try:
-            if ok:
-                self.sw_border.set(bool(e.get(self.blob, "border")))
-                self.sw_ccor.set(bool(e.color_correction_off(self.blob)))
-                self.cb_quality.clear()
-                for v, name in e.quality_modes(self.blob):
-                    self.cb_quality.addItem(tr(name), v)
-                self.cb_quality.setCurrentIndex(max(0, self.cb_quality.findData(e.get(self.blob, "quality"))))
-                self.l_quality.setVisible(e.supported("quality"))
-                self.cb_quality.setVisible(e.supported("quality"))
-                self.sw_border.setVisible(e.supported("border"))
-                self.sw_ccor.setVisible(e.supported("ccor"))
-        except ValueError:
-            ok = False
-        self.w_epson.setVisible(ok)
-        self.w_maint.setVisible(self.blob is not None and e.supported("maint"))
+        vis = {k: False for k in self.epson_groups}
+        if self.blob is not None:
+            try:
+                for k, feat in (("quality", "quality"), ("border", "border"), ("ccor", "ccor"), ("maint", "maint")):
+                    vis[k] = e.supported(feat)
+                if vis["border"]:
+                    self.sw_border.set(bool(e.get(self.blob, "border")))
+                if vis["ccor"]:
+                    self.sw_ccor.set(bool(e.color_correction_off(self.blob)))
+                if vis["quality"]:
+                    self.cb_quality.clear()
+                    for v, name in e.quality_modes(self.blob):
+                        self.cb_quality.addItem(tr(name), v)
+                    self.cb_quality.setCurrentIndex(max(0, self.cb_quality.findData(e.get(self.blob, "quality"))))
+            except (ValueError, struct.error):
+                vis = {k: False for k in self.epson_groups}
+        for k, ws in self.epson_groups.items():
+            for w_ in ws:
+                w_.setVisible(vis[k])
 
     def _epson_maint(self, action):
         text = {"nozzle_check": "Напечатать тест дюз? Будет израсходовано немного чернил и бумаги.",
@@ -5550,19 +5585,27 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         return slots
 
     def _quick_card(self):
+        """Три строки: кнопка-ячейка на всю ширину и справа маленькие «сохранить» и «переименовать»."""
         self.qs_btns, self.qs_save, self.qs_ren = [], [], []
-        cols = []
+        rows = []
         for i in range(pqk.SLOTS):
             b = MotionButton("")
+            b.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+            b.setMinimumWidth(60)
             b.clicked.connect(lambda _=False, i=i: self._qs_apply(i))
-            sv = btn("Сохранить", lambda i=i: self._qs_save(i), "link", tip="Запомнить текущие настройки принтера, бумаги, формата и цвета в эту ячейку")
-            rn = btn("Переименовать", lambda i=i: self._qs_rename(i), "link")
+            sv = ibtn("save", "Сохранить сюда текущие настройки", lambda i=i: self._qs_save(i), 34, True)
+            rn = ibtn("edit", "Переименовать", lambda i=i: self._qs_rename(i), 34, True)
             self.qs_btns.append(b)
             self.qs_save.append(sv)
             self.qs_ren.append(rn)
-            cols.append(vbox(b, hbox(sv, None, rn, spacing=2), spacing=2))
+            rows.append(hbox(b, sv, rn, spacing=6))
         self.l_qs = lbl("", "muted", wrap=True)
-        card_ = card("Быстрый старт", hbox(*cols, spacing=8), self.l_qs)
+        self.l_qs.hide()
+        card_ = card("Быстрый старт", *rows, self.l_qs,
+                     help=("Ячейка запоминает принтер, формат листа, тип бумаги, качество, «без полей», цветокоррекцию драйвера, "
+                           "цветовой профиль и обработку. Нажмите на ячейку, чтобы всё выставить разом; значок дискеты сохраняет "
+                           "текущие настройки в ячейку. Зелёная точка: настройка привязана к принтеру. Оранжевая: без привязки, "
+                           "подходит любому принтеру. Красная: принтер из ячейки не найден. Серая: ячейка пуста."))
         self._qs_refresh()
         return card_
 
@@ -5577,16 +5620,8 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
             b = self.qs_btns[i]
             b.setText("%s%s" % ("" if sl.get("empty") else "● ", tr(sl["name"]) if sl.get("empty") else sl["name"]))
             b.setStyleSheet("QPushButton { border: 2px solid %s; border-radius: 8px; padding: 8px 6px; }" % col if col else "")
-            tips = {pqk.GREEN: "Все настройки заданы, принтер найден: нажмите, чтобы применить",
-                    pqk.ORANGE: "Настройки без привязки к принтеру: применятся к выбранному принтеру",
-                    pqk.RED: "Принтер из этой ячейки не найден: применятся остальные настройки",
-                    pqk.GRAY: "Пустая ячейка: настройте всё как нужно и нажмите «Сохранить»"}
-            tip = tr(tips[st])
-            if not sl.get("empty"):
-                tip += "\n" + self._qs_describe(sl)
-            b.setToolTip(tip)
+            b.setToolTip(tr("Пустая ячейка") if sl.get("empty") else self._qs_describe(sl))
             self.qs_ren[i].setEnabled(not sl.get("empty"))
-        self.l_qs.setText(tr("Зелёная: настройка привязана к принтеру. Оранжевая: без привязки, подходит любому принтеру."))
 
     def _qs_describe(self, sl):
         s = sl["state"]
@@ -5709,7 +5744,8 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         self.profile_label()
         if self._ccor_on() and self.s.get("cm_on") and self.s.get("icc", "").strip():
             notes.append(tr("Цветокоррекция драйвера включена при цветовом профиле."))
-        self.l_qs.setText(" ".join(notes) if notes else trf("Применено: {n}", n=sl["name"]))
+        self.l_qs.setText(" ".join(notes))
+        self.l_qs.setVisible(bool(notes))
 
     def _ccor_on(self):
         """True, если у модели известна цветокоррекция драйвера и она включена (искажает цвет профиля)."""
