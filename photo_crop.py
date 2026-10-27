@@ -4268,6 +4268,14 @@ class AgentSession:
         if not ch:
             raise AgentError("Нет полей для изменения.", "bad_request")
         new = devmode_write(self.blob, ch)
+        if "media_type" in ch:
+            try:                                                 # у моделей Epson по рецептам тип бумаги хранится ещё и в приватной зоне
+                import epson_priv
+                ep_ = epson_priv.EpsonPriv(self.printer, driver_name=printer_driver_name(self.printer))
+                if ep_.recipe:
+                    new = ep_.set_media(new, devmode_read(new)["settings"]["media_type"])
+            except Exception:
+                pass
         merged = merge_devmode(self.printer, new)
         after = devmode_read(merged)
         rejected = {}
