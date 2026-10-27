@@ -37,5 +37,24 @@ class PrintQuickTests(unittest.TestCase):
         self.assertFalse(pq.driver_compatible({"printer": "Цех", "model": "L8050", "state": {}}, "Принтер 2", ep.model_of, "L18050"))
 
 
+class StoreTests(unittest.TestCase):
+    def test_slots_per_printer(self):
+        st = pq.norm_store(None, "P1")
+        self.assertEqual(list(st), ["P1"])
+        st["P1"][0] = {"name": "a", "bound": True, "printer": "P1", "model": "", "state": {"x": 1}}
+        st = pq.norm_store(st, "P2")
+        self.assertEqual(sorted(st), ["P1", "P2"])
+        self.assertFalse(st["P1"][0].get("empty"))
+        self.assertTrue(all(x.get("empty") for x in st["P2"]))
+
+    def test_legacy_list_migrates(self):
+        old = [{"name": "a", "bound": True, "printer": "P1", "state": {}},
+               {"name": "b", "bound": False, "printer": "P1", "state": {}}, {"empty": True}]
+        st = pq.norm_store(old, "P2")
+        self.assertEqual(st["P1"][0]["name"], "a")
+        self.assertEqual(st["P2"][1]["name"], "b")
+        self.assertTrue(st["P2"][1]["bound"] and st["P2"][1]["printer"] == "P2")
+
+
 if __name__ == "__main__":
     unittest.main()

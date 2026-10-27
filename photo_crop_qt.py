@@ -5409,6 +5409,7 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
     def _printer_changed(self):
         self.pr["printer"] = self.cb_printer.currentText()
         self._load_printer()
+        self._qs_refresh()
 
     def _load_printer(self):
         """Настройки драйвера и возможности выбранного принтера -> списки «тип бумаги», «размер», «подача»."""
@@ -5826,9 +5827,11 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
     QS_COLORS = {pqk.GREEN: "#3fb950", pqk.ORANGE: "#f0883e", pqk.RED: "#e5534b", pqk.GRAY: ""}
 
     def _qs_slots(self):
-        slots = pqk.norm_slots(self.settings.get("print_quick"))
-        self.settings["print_quick"] = slots
-        return slots
+        """Три ячейки текущего принтера: у каждого принтера свои."""
+        name = self.pr.get("printer", "")
+        store = pqk.norm_store(self.settings.get("print_quick"), name)
+        self.settings["print_quick"] = store
+        return store[name]
 
     def _quick_card(self):
         """Три строки: кнопка-ячейка на всю ширину и справа маленькие «сохранить» и «переименовать»."""
@@ -5848,10 +5851,9 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         self.l_qs = lbl("", "muted", wrap=True)
         self.l_qs.hide()
         card_ = card("Быстрый старт", *rows, self.l_qs,
-                     help=("Ячейка запоминает принтер, формат листа, тип бумаги, качество, «без полей», цветокоррекцию драйвера, "
+                     help=("Ячейки привязаны к принтеру: у каждого принтера свои три, при смене принтера показываются только его. Ячейка запоминает формат листа, тип бумаги, качество, «без полей», цветокоррекцию драйвера, "
                            "цветовой профиль и обработку. Нажмите на ячейку, чтобы всё выставить разом; значок дискеты сохраняет "
-                           "текущие настройки в ячейку. Зелёная точка: настройка привязана к принтеру. Оранжевая: без привязки, "
-                           "подходит любому принтеру. Красная: принтер из ячейки не найден. Серая: ячейка пуста."))
+                           "текущие настройки в ячейку. Зелёная рамка: ячейка сохранена. Серая: ячейка пуста."))
         self._qs_refresh()
         return card_
 
@@ -5897,22 +5899,18 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         name = QLineEdit(old["name"] if not old.get("empty") else "")
         name.setPlaceholderText(tr("Например: матовая, высокое, зеркально"))
         name.setMaxLength(24)
-        bind = QPushButton(tr("Привязать к принтеру: %s") % (self.pr.get("printer") or "—"))
-        bind.setCheckable(True)
-        bind.setChecked(bool(self.pr.get("printer")) and (old.get("empty") or old.get("bound")))
-        bind.setEnabled(bool(self.pr.get("printer")))
+        who = lbl(trf("Принтер: {p}", p=self.pr.get("printer") or "—"), "muted")
         ok, cancel = btn("Сохранить", None, "primary"), btn("Отмена")
         ok.clicked.connect(dlg.accept)
         cancel.clicked.connect(dlg.reject)
-        dlg.setLayout(vbox(lbl("Название"), name, bind, hbox(None, cancel, ok), spacing=8, margins=(14, 14, 14, 14)))
+        dlg.setLayout(vbox(lbl("Название"), name, who, hbox(None, cancel, ok), spacing=8, margins=(14, 14, 14, 14)))
         dlg.setMinimumWidth(380)
         if not dlg.exec():
             return
         nm = " ".join(name.text().split())[:24] or "Быстрый старт %d" % (i + 1)
         printer = self.pr.get("printer", "")
-        slots[i] = {"name": nm, "bound": bool(bind.isChecked() and printer), "printer": printer,
+        slots[i] = {"name": nm, "bound": True, "printer": printer,
                     "model": self._epson().model or "", "state": self._qs_capture()}
-        self.settings["print_quick"] = slots
         self.persist()
         self._qs_refresh()
 
@@ -5931,7 +5929,6 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         nm = " ".join(dlg.textValue().split())[:24]
         if nm:
             slots[i]["name"] = nm
-            self.settings["print_quick"] = slots
             self.persist()
             self._qs_refresh()
 

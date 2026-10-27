@@ -28,6 +28,28 @@ def norm_slots(raw):
     return out
 
 
+def norm_store(raw, printer=""):
+    """Ячейки по принтерам: {имя очереди: [3 ячейки]}. Старый формат (один список на всех) переносится:
+    привязанные ячейки — к своему принтеру, остальные — к текущему; занятое место не затирается."""
+    store = {}
+    if isinstance(raw, dict):
+        for name, lst in raw.items():
+            if isinstance(name, str) and isinstance(lst, list):
+                store[name] = norm_slots(lst)
+    elif isinstance(raw, list):
+        for i, s in enumerate(norm_slots(raw)):
+            if s.get("empty"):
+                continue
+            name = s["printer"] if s.get("bound") and s.get("printer") else printer
+            s["bound"], s["printer"] = True, name
+            row = store.setdefault(name, norm_slots(None))
+            j = i if row[i].get("empty") else next((k for k, x in enumerate(row) if x.get("empty")), None)
+            if j is not None:
+                row[j] = s
+    store.setdefault(printer, norm_slots(None))
+    return store
+
+
 def status(slot, printers):
     """Цвет кнопки: green — настройка привязана к принтеру и он есть; orange — без привязки к принтеру;
     red — привязан, но принтер не найден; gray — ячейка пуста."""
