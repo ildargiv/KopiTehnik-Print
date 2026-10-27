@@ -1,7 +1,7 @@
 """Автообновление: скачивает новую версию из релиза GitHub, проверяет её и запускает замену программы.
 
 Обновление ставит установщик релиза (KopiTehnikPrint-Setup-*.exe) в тихом режиме поверх текущей установки.
-Это делает маленький bat-файл: он ждёт, пока программа закроется, запускает установщик и потом сам открывает программу. Без Qt: проверяется отдельно в tests/test_updater.py.
+Это делает маленький скрипт PowerShell: он ждёт, пока программа закроется, запускает установщик и потом сам открывает программу. Без Qt: проверяется отдельно в tests/test_updater.py.
 """
 import hashlib
 import os
@@ -90,28 +90,37 @@ def download(asset, dest_dir=None, progress=None, cancelled=None, timeout=30):
     return dest
 
 
-def build_script(setup_file, app_exe, pid):
-    """Текст bat-файла: дождаться закрытия программы, тихо поставить обновление, запустить программу снова."""
-    lines = ["@echo off",
-             "chcp 65001 >nul",
-             ":wait",
-             r'%%SystemRoot%%\System32\tasklist.exe /FI "PID eq %d" 2>nul | %%SystemRoot%%\System32\find.exe "%d" >nul' % (pid, pid),
-             "if not errorlevel 1 (",
-             "  timeout /t 1 /nobreak >nul",
-             "  goto wait",
-             ")",
-             'start "" /wait "%s" /SILENT /SUPPRESSMSGBOXES /NORESTART /CLOSEAPPLICATIONS' % setup_file,
-             'start "" "%s"' % app_exe,
-             '(goto) 2>nul & del "%~f0"']
+def _ps(text):
+    """Строка в одинарных кавычках PowerShell."""
+    return "'" + str(text).replace("'", "''") + "'"
+
+
+def needs_elevation(app_exe):
+    """Программа стоит в папке, куда обычный пользователь писать не может (Program Files): установщик должен просить права администратора."""
+    folder = os.path.dirname(str(app_exe)) or "."
+    return not os.access(folder, os.W_OK)
+
+
+def build_script(setup_file, app_exe, pid, elevate=False):
+    """Текст скрипта PowerShell: дождаться закрытия программы, тихо поставить обновление (с запросом UAC, если программа в Program Files),
+    запустить программу снова. cmd-цикл с tasklist | find в процессе без консоли зависал и до установщика не доходил."""
+    verb = " -Verb RunAs" if elevate else ""
+    lines = ["$ErrorActionPreference = 'SilentlyContinue'",
+             "Wait-Process -Id %d -Timeout 120" % int(pid),
+             "$a = '/SILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/CLOSEAPPLICATIONS'",
+             "Start-Process -FilePath %s -ArgumentList $a -Wait%s" % (_ps(setup_file), verb),
+             "Start-Process -FilePath %s" % _ps(app_exe),
+             "Remove-Item -LiteralPath $PSCommandPath -Force"]
     return "\r\n".join(lines) + "\r\n"
 
 
 def launch(setup_file, app_exe=None, pid=None):
     """Запускает замену в отдельном процессе; после этого программа должна сразу закрыться."""
     app_exe = app_exe or sys.executable
-    script = Path(tempfile.mkdtemp(prefix="kopitehnik_apply_")) / "apply_update.bat"
-    script.write_text(build_script(setup_file, app_exe, pid or os.getpid()), encoding="utf-8")
+    script = Path(tempfile.mkdtemp(prefix="kopitehnik_apply_")) / "apply_update.ps1"
+    script.write_text(build_script(setup_file, app_exe, pid or os.getpid(), needs_elevation(app_exe)), encoding="utf-8-sig")   # BOM: кириллица в путях
     flags = 0x00000008 | 0x00000200 | 0x08000000          # DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW
-    subprocess.Popen(["cmd.exe", "/c", str(script)], creationflags=flags, close_fds=True,
-                     stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    ps = os.path.join(os.environ.get("SystemRoot", r"C:\Windows"), "System32", "WindowsPowerShell", "v1.0", "powershell.exe")
+    subprocess.Popen([ps, "-NoProfile", "-ExecutionPolicy", "Bypass", "-WindowStyle", "Hidden", "-File", str(script)],
+                     creationflags=flags, close_fds=True, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     return script
