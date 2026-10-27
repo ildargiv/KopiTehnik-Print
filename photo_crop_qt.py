@@ -5786,6 +5786,8 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
     def _epson_maint(self, action):
         text = {"nozzle_check": "Напечатать тест дюз? Будет израсходовано немного чернил и бумаги.",
                 "clean": "Запустить прочистку печатающей головки? Тратит чернила и заполняет ёмкость отработки; делайте её, только если тест дюз показал пропуски."}[action]
+        if not self._epson().maintenance_verified():
+            text += " " + "Для этой модели команда стандартная для Epson, но на ней ещё не проверялась: если принтер не отреагирует, воспользуйтесь кнопками на самом принтере или в драйвере."
         if not ask(self, tr(text)):
             return
         b = self.b_nozzle if action == "nozzle_check" else self.b_clean

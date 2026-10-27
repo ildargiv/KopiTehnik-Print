@@ -24,7 +24,7 @@ CCOR_AUTO, CCOR_MANUAL = 1, 2              # «Автоматический» / 
 PROFILES = {
     "L8050": {"border": 7700, "ccor": 188, "maint": 1, "quality": 7788},
     # L18050: качество (0/1/2) найдено по снимкам драйвера, «без полей» и цветокоррекция сняты вручную через диалог — совпадают с L8050
-    "L18050": {"quality": 7788, "border": 7700, "ccor": 188},
+    "L18050": {"quality": 7788, "border": 7700, "ccor": 188, "maint": 1},
 }
 
 DM_MEDIATYPE_OFFSET = 196   # DEVMODEW.dmMediaType: 1 — простая бумага, остальное (396 и др.) — фото.
@@ -97,7 +97,7 @@ class EpsonPriv:
 
     def supported(self, feature):
         if self.recipe is not None:
-            return feature == "quality" or (feature == "border" and "border" in self.recipe)
+            return feature in ("quality", "maint") or (feature == "border" and "border" in self.recipe)
         return feature in self.map
 
     # --- модели по рецептам ---------------------------------------------------------------------------
@@ -153,6 +153,10 @@ class EpsonPriv:
         sets = QUALITY_SETS.get(self.model, {})
         bad = QUALITY_UNSUPPORTED.get(self.model, {})
         return [(v, n) for v, n in modes if (paper, v) in sets and media not in bad.get(v, ())]
+
+    def maintenance_verified(self):
+        """Команды обслуживания проверены на железе только для L8050; на остальных моделях — стандартные команды Epson."""
+        return self.model == "L8050"
 
     def maintenance(self, printer_name, action):
         """Проверка дюз / прочистка. Только для моделей с ключом maint."""

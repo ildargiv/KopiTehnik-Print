@@ -32,7 +32,7 @@ class EpsonPrivTests(unittest.TestCase):
         b = blob()
         self.assertTrue(e.supported("quality"))
         self.assertTrue(e.supported("border"))
-        self.assertFalse(e.supported("maint"))
+        self.assertTrue(e.supported("maint"))
         e2 = ep.EpsonPriv("EPSON L3250 Series")
         self.assertFalse(e2.supported("border"))
         self.assertEqual(e2.set(b, "border", True), b)
@@ -111,7 +111,7 @@ class EpsonPrivTests(unittest.TestCase):
         self.assertIn(b"REMOTE1NC", j)
         self.assertIn(b"REMOTE1CH", ep.maintenance_job("clean"))
         with self.assertRaises(ValueError):
-            ep.EpsonPriv("EPSON L18050 Series").maintenance("EPSON L18050 Series", "clean")
+            ep.EpsonPriv("EPSON L3250 Series").maintenance("EPSON L3250 Series", "clean")
 
     def test_short_devmode_raises(self):
         e = ep.EpsonPriv("EPSON L8050 Series")
@@ -149,7 +149,8 @@ class RecipeModelTests(unittest.TestCase):
         for m in ep.RECIPES:
             e = ep.EpsonPriv("EPSON %s Series" % m)
             self.assertTrue(e.supported("quality") and e.supported("border"), m)
-            self.assertFalse(e.supported("ccor") or e.supported("maint"), m)
+            self.assertFalse(e.supported("ccor"), m)
+            self.assertTrue(e.supported("maint"), m)
             b = self.blob(m)
             self.assertEqual(e.get(b, "quality"), 1)
             b = e.set(b, "quality", 2)
