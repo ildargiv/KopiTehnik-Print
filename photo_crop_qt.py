@@ -5104,6 +5104,9 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         self.l_quality = WrapLabel(tr("Качество печати"))
         self.l_border = WrapLabel(tr("Печать без полей"))
         self.l_ccor = WrapLabel(tr("Отключить цветокоррекцию драйвера"))
+        for c_ in (self.cb_printer, self.cb_media, self.cb_source, self.cb_quality):
+            c_.setMinimumWidth(160)
+            c_.setMaximumWidth(240)
         self.b_nozzle = btn("Проверка дюз", lambda: self._epson_maint("nozzle_check"), ico="settings")
         self.b_clean = btn("Прочистка головки", lambda: self._epson_maint("clean"), ico="settings")
         self.epson_groups = {"quality": (self.l_quality, self.cb_quality), "border": (self.l_border, self.sw_border),
@@ -5122,7 +5125,7 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
                        hbox(btn("Свойства драйвера…", self.driver_props, ico="settings"),
                             ibtn("reset", "Обновить список принтеров", self.reload_printers, 34, True), spacing=6),
                        row(self.l_quality, self.cb_quality), row(self.l_border, self.sw_border), row(self.l_ccor, self.sw_ccor),
-                       hbox(self.b_nozzle, self.b_clean, spacing=6),
+                       self.b_nozzle, self.b_clean,
                        self.l_drv, self.l_prof, hbox(self.b_prof_reset, None),
                        row("Профиль принтера", self.sw_cm2), self.l_icc2,
                        btn("Выбрать профиль…", self.open_cm_dialog, ico="profile"),
@@ -5618,9 +5621,10 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
             st = pqk.status(sl, printers)
             col = self.QS_COLORS[st]
             b = self.qs_btns[i]
-            b.setText("%s%s" % ("" if sl.get("empty") else "● ", tr(sl["name"]) if sl.get("empty") else sl["name"]))
-            b.setStyleSheet("QPushButton { border: 2px solid %s; border-radius: 8px; padding: 8px 6px; }" % col if col else "")
-            b.setToolTip(tr("Пустая ячейка") if sl.get("empty") else self._qs_describe(sl))
+            nm = tr(sl["name"]) if sl.get("empty") else sl["name"]
+            b.setText(("" if sl.get("empty") else "● ") + (nm if len(nm) <= 20 else nm[:19] + "…"))
+            b.setStyleSheet("QPushButton { border: 2px solid %s; border-radius: 8px; padding: 8px 4px; font-size: 12px; }" % col if col else "")
+            b.setToolTip(tr("Пустая ячейка") if sl.get("empty") else sl["name"] + "\n" + self._qs_describe(sl))
             self.qs_ren[i].setEnabled(not sl.get("empty"))
 
     def _qs_describe(self, sl):
