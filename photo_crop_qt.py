@@ -151,6 +151,11 @@ ICONS = {
     "zoom_in": '<circle cx="10.5" cy="10.5" r="6.5"/><path d="M15.5 15.5l5 5M10.5 7.8v5.4M7.8 10.5h5.4"/>',
     "zoom_out": '<circle cx="10.5" cy="10.5" r="6.5"/><path d="M15.5 15.5l5 5M7.8 10.5h5.4"/>',
     "copy": '<rect x="8.5" y="8.5" width="11" height="11" rx="2"/><path d="M5.5 15.5h-.3A1.7 1.7 0 0 1 3.5 13.8V5.2a1.7 1.7 0 0 1 1.7-1.7h8.6a1.7 1.7 0 0 1 1.7 1.7v.3"/>',
+    "nozzle": '<path d="M12 3.3c3.4 4.2 5.8 7.3 5.8 10.4a5.8 5.8 0 0 1-11.6 0c0-3.1 2.4-6.2 5.8-10.4z"/><path d="M9.3 14.2a2.8 2.8 0 0 0 2.7 2.8"/>',
+    "head_clean": '<rect x="5" y="3.5" width="14" height="7" rx="1.8"/><path d="M8.5 10.5v1.8M12 10.5v1.8M15.5 10.5v1.8"/><path d="M8 15.3l-1.2 2.4M12 15.3v2.7M16 15.3l1.2 2.4M6.3 20.6h.01M12 20.8h.01M17.7 20.6h.01"/>',
+    "driver": ('<path d="M6.5 7.5V3.8h9v3.7"/><path d="M11 15.5H5a1.8 1.8 0 0 1-1.8-1.8V9.3A1.8 1.8 0 0 1 5 7.5h12a1.8 1.8 0 0 1 1.8 1.8v1.7"/>'
+               '<path d="M6.5 13v6.2h4.5"/><circle cx="17" cy="17.5" r="2.3"/>'
+               '<path d="M17 13.2v1.2M17 20.6v1.2M12.7 17.5h1.2M20.1 17.5h1.2M14 14.5l.8.8M20 20.5l-.8-.8M14 20.5l.8-.8M20 14.5l-.8.8"/>'),
 }
 
 
@@ -696,6 +701,224 @@ def btn(text, slot=None, kind=None, big=False, ico=None, ico_color=None, tip=Non
     if ico:
         b.setIcon(icon(ico, ico_color or (T["accent_text"] if kind == "primary" else T["text"])))
         b.setIconSize(QSize(18, 18))
+    if tip:
+        b.setToolTip(tr(tip))
+    if slot:
+        b.clicked.connect(lambda _=False: slot())
+    b.setCursor(Qt.PointingHandCursor)
+    return b
+
+
+class ActionButton(MotionButton):
+    """Плитка действия на всю ширину: значок в цветной подложке, название и короткая серая подпись.
+    При нажатии плитка слегка «вдавливается», волна мягкая и широкая; busy() — бегущая полоска по нижнему краю
+    и пульс вокруг значка, done() — короткая вспышка цветом результата."""
+
+    def __init__(self, text="", sub="", ico="settings", tone="accent"):
+        super().__init__(text)
+        self.sub, self.ico, self.tone = sub, ico, tone
+        self._pr, self._bz, self._fl, self._fc, self._want_flash = 0.0, 1.0, 0.0, "ok", False
+        self._ar.setDuration(560)
+        self._ap = QPropertyAnimation(self, b"pr", self)
+        self._ab = QPropertyAnimation(self, b"bz", self)
+        self._ab.setDuration(900)
+        self._ab.setEasingCurve(QEasingCurve.InOutCubic)
+        self._ab.setStartValue(0.0)
+        self._ab.setEndValue(1.0)
+        self._ab.finished.connect(self._busy_end)
+        self._af = QPropertyAnimation(self, b"fl", self)
+        self._af.setDuration(650)
+        self._af.setEasingCurve(QEasingCurve.OutQuad)
+        self._af.setStartValue(1.0)
+        self._af.setEndValue(0.0)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+
+    def getPr(self):
+        return self._pr
+
+    def setPr(self, v):
+        self._pr = float(v)
+        self.update()
+
+    def getBz(self):
+        return self._bz
+
+    def setBz(self, v):
+        self._bz = float(v)
+        self.update()
+
+    def getFl(self):
+        return self._fl
+
+    def setFl(self, v):
+        self._fl = float(v)
+        self.update()
+
+    pr = Property(float, getPr, setPr)
+    bz = Property(float, getBz, setBz)
+    fl = Property(float, getFl, setFl)
+
+    def _fonts(self):
+        f1, f2 = QFont(self.font()), QFont(self.font())
+        f1.setPixelSize(14)
+        f1.setWeight(QFont.DemiBold)
+        f2.setPixelSize(12)
+        return f1, f2
+
+    def sizeHint(self):
+        f1, f2 = self._fonts()
+        m1, m2 = QFontMetrics(f1), QFontMetrics(f2)
+        tw = max(m1.horizontalAdvance(self.text()), m2.horizontalAdvance(self.sub) if self.sub else 0)
+        th = m1.height() + (m2.height() + 1 if self.sub else 0)
+        return QSize(10 + 34 + 11 + tw + 34, max(34, th) + 18)
+
+    def minimumSizeHint(self):
+        return QSize(120, self.sizeHint().height())
+
+    def _tint(self):
+        if not self.isEnabled():
+            return QColor(T["muted"])
+        if self.tone == "select" and T["select"].lower() == T["accent"].lower():
+            return QColor(T["text"])
+        return QColor(T.get(self.tone, T["accent"]))
+
+    def _press(self, to):
+        self._ap.stop()
+        if not ANIM_ON[0]:
+            self.setPr(to)
+            return
+        self._ap.setDuration(120 if to else 260)
+        self._ap.setEasingCurve(QEasingCurve.OutQuad if to else QEasingCurve.InOutCubic)
+        self._ap.setStartValue(self._pr)
+        self._ap.setEndValue(to)
+        self._ap.start()
+
+    def mousePressEvent(self, e):
+        if e.button() == Qt.LeftButton and self.isEnabled():
+            self._press(1.0)
+            if not ANIM_ON[0]:
+                QPushButton.mousePressEvent(self, e)
+                return
+        super().mousePressEvent(e)
+
+    def mouseReleaseEvent(self, e):
+        if e.button() == Qt.LeftButton:
+            self._press(0.0)                            # до super(): по щелчку может открыться модальный диалог
+        super().mouseReleaseEvent(e)
+
+    def busy(self):
+        self._want_flash = False
+        if ANIM_ON[0]:
+            self._ab.stop()
+            self._ab.start()
+
+    def done(self, ok=True):
+        self._fc = "ok" if ok else "bad"
+        if not ANIM_ON[0]:
+            return
+        if self._ab.state() == QVariantAnimation.Running:
+            self._want_flash = True
+        else:
+            self._af.stop()
+            self._af.start()
+
+    def _busy_end(self):
+        if self._want_flash:
+            self._want_flash = False
+            self._af.stop()
+            self._af.start()
+
+    def paintEvent(self, e):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+        on, k, hv = self.isEnabled(), self._pr, (self._hv if self.isEnabled() else 0.0)
+        tint = self._tint()
+        tn = tint.name()
+        r = QRectF(self.rect()).adjusted(0.5 + 1.5 * k, 0.5 + 1.5 * k, -0.5 - 1.5 * k, -0.5 - 0.5 * k)
+        path = QPainterPath()
+        path.addRoundedRect(r, 11, 11)
+        bg = mix(mix(T["raised"], T["hover"], hv), tn, 0.04 + 0.05 * hv)
+        bg = mix(bg, T["border"], 0.55 * k)
+        edge = mix(T["border"], tn, (0.18 + 0.47 * hv) if on else 0.0)
+        if self._fl > 0.0:
+            bg = mix(bg, T[self._fc], 0.14 * self._fl)
+            edge = mix(edge, T[self._fc], self._fl)
+        p.setPen(QPen(QColor(edge), 1))
+        p.setBrush(QColor(bg))
+        p.drawPath(path)
+        p.save()
+        p.setClipPath(path)
+        if self._rp < 1.0:
+            R = math.hypot(r.width(), r.height()) * (0.15 + 0.95 * self._rp)
+            fade = 1.0 - self._rp
+            g = QRadialGradient(self._pt, max(1.0, R))
+            for at, a in ((0.0, 0.24), (0.7, 0.16), (1.0, 0.0)):
+                c = QColor(tint)
+                c.setAlphaF(a * fade)
+                g.setColorAt(at, c)
+            p.setPen(Qt.NoPen)
+            p.setBrush(QBrush(g))
+            p.drawEllipse(self._pt, R, R)
+            ring = QColor(tint)
+            ring.setAlphaF(0.35 * fade)
+            p.setPen(QPen(ring, 1.5))
+            p.setBrush(Qt.NoBrush)
+            p.drawEllipse(self._pt, R * 0.92, R * 0.92)
+        dy = 1.0 * k
+        badge = QRectF(r.left() + 9, r.center().y() - 17 + dy * 0.5, 34, 34)
+        if self._bz < 1.0:
+            seg = r.width() * 0.38
+            x = r.left() - seg + (r.width() + seg) * self._bz
+            under = QColor(tint)
+            under.setAlphaF(0.12)
+            p.fillRect(QRectF(r.left(), r.bottom() - 3, r.width() * self._bz, 3), under)
+            lg = QLinearGradient(QPointF(x, 0), QPointF(x + seg, 0))
+            c0, c1 = QColor(tint), QColor(tint)
+            c0.setAlphaF(0.0)
+            lg.setColorAt(0.0, c0)
+            lg.setColorAt(0.65, c1)
+            lg.setColorAt(1.0, c0)
+            p.fillRect(QRectF(x, r.bottom() - 3, seg, 3), QBrush(lg))
+            for ph in (0.0, 0.5):
+                q = (self._bz * 2 + ph) % 1.0
+                pc_ = QColor(tint)
+                pc_.setAlphaF(0.45 * (1.0 - q))
+                p.setPen(QPen(pc_, 1.5))
+                p.setBrush(Qt.NoBrush)
+                s = 1 + 7 * q
+                p.drawRoundedRect(badge.adjusted(-s, -s, s, s), 9 + s, 9 + s)
+        p.restore()
+        bc = QColor(tint)
+        bc.setAlphaF((0.16 + 0.08 * hv) if on else 0.10)
+        p.setPen(Qt.NoPen)
+        p.setBrush(bc)
+        p.drawRoundedRect(badge, 9, 9)
+        sc = 1.0 - 0.08 * k
+        p.save()
+        p.translate(badge.center())
+        p.scale(sc, sc)
+        p.drawPixmap(QPointF(-10, -10), pix(self.ico, tn, 20))
+        p.restore()
+        f1, f2 = self._fonts()
+        m1, m2 = QFontMetrics(f1), QFontMetrics(f2)
+        tx = badge.right() + 11
+        tw = max(10.0, r.right() - 28 - tx)
+        th = m1.height() + (m2.height() + 1 if self.sub else 0)
+        ty = r.center().y() - th / 2 + dy
+        p.setFont(f1)
+        p.setPen(QColor(T["text"] if on else T["muted"]))
+        p.drawText(QRectF(tx, ty, tw, m1.height()), Qt.AlignLeft | Qt.AlignVCenter, m1.elidedText(self.text(), Qt.ElideRight, int(tw)))
+        if self.sub:
+            p.setFont(f2)
+            p.setPen(QColor(T["muted"]))
+            p.drawText(QRectF(tx, ty + m1.height() + 1, tw, m2.height()), Qt.AlignLeft | Qt.AlignVCenter,
+                       m2.elidedText(self.sub, Qt.ElideRight, int(tw)))
+        p.drawPixmap(QPointF(r.right() - 26 + 2 * hv, r.center().y() - 8 + dy), pix("next", mix(T["muted"], tn, hv) if on else T["border"], 16))
+        p.end()
+
+
+def tile(text, slot=None, sub="", ico="settings", tone="accent", tip=None):
+    b = ActionButton(tr(text), tr(sub) if sub else "", ico, tone)
     if tip:
         b.setToolTip(tr(tip))
     if slot:
@@ -5107,8 +5330,8 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         for c_ in (self.cb_printer, self.cb_media, self.cb_source, self.cb_quality):
             c_.setMinimumWidth(160)
             c_.setMaximumWidth(240)
-        self.b_nozzle = btn("Проверка дюз", lambda: self._epson_maint("nozzle_check"), ico="settings")
-        self.b_clean = btn("Прочистка головки", lambda: self._epson_maint("clean"), ico="settings")
+        self.b_nozzle = tile("Проверка дюз", lambda: self._epson_maint("nozzle_check"), "Узор из дюз", "nozzle")
+        self.b_clean = tile("Прочистка головки", lambda: self._epson_maint("clean"), "Если есть полосы", "head_clean")
         self.epson_groups = {"quality": (self.l_quality, self.cb_quality), "border": (self.l_border, self.sw_border),
                              "ccor": (self.l_ccor, self.sw_ccor), "maint": (self.b_nozzle, self.b_clean)}
         for ws in self.epson_groups.values():
@@ -5120,10 +5343,9 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         self.sw_cm2.toggled.connect(lambda on: (self._cm_set("cm_on", on), self.sw_cm.set(on)))
         self.l_icc2 = lbl("", "muted", wrap=True)
         printer = card("Принтер и бумага",
-                       row("Принтер", hbox(self.cb_printer, spacing=4)),
+                       row("Принтер", hbox(self.cb_printer, ibtn("reset", "Обновить список принтеров", self.reload_printers, 34, True), spacing=4)),
                        row("Тип бумаги", self.cb_media), self.l_paper_drv, row("Подача", self.cb_source),
-                       hbox(btn("Свойства драйвера…", self.driver_props, ico="settings"),
-                            ibtn("reset", "Обновить список принтеров", self.reload_printers, 34, True), spacing=6),
+                       tile("Свойства драйвера…", self.driver_props, "Все настройки печати", "driver", "select"),
                        row(self.l_quality, self.cb_quality), row(self.l_border, self.sw_border), row(self.l_ccor, self.sw_ccor),
                        self.b_nozzle, self.b_clean,
                        self.l_drv, self.l_prof, hbox(self.b_prof_reset, None),
@@ -5553,10 +5775,18 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
                 "clean": "Запустить прочистку печатающей головки? Тратит чернила и заполняет ёмкость отработки; делайте её, только если тест дюз показал пропуски."}[action]
         if not ask(self, tr(text)):
             return
+        b = self.b_nozzle if action == "nozzle_check" else self.b_clean
+        b.busy()
+        QTimer.singleShot(120 if ANIM_ON[0] else 0, lambda: self._epson_maint_send(action, b))     # кадр анимации успевает отрисоваться
+
+    def _epson_maint_send(self, action, b):
         try:
             self._epson().maintenance(self.pr["printer"], action)
         except Exception as ex:
+            b.done(False)
             warn(self, tr("Не удалось отправить команду принтеру") + ":\n%s" % ex)
+            return
+        b.done(True)
 
     def _epson_set(self, feature, on):
         if self.blob is None or getattr(self, "_prof_lock", False):
@@ -9158,6 +9388,8 @@ pc.EN.update({
     "Вернуть это фото в сетку": "Put this photo back on the grid", "Убрать фото с листа": "Remove the photo from the sheet",
     "Принтер": "Printer", "Принтер и бумага": "Printer and paper", "Тип бумаги": "Media type", "Размер бумаги": "Paper size", "Подача": "Source",
     "Свойства драйвера…": "Driver properties…", "Обновить список принтеров": "Refresh the printer list", "Обработка": "Processing",
+    "Все настройки печати": "All print settings", "Проверка дюз": "Nozzle check", "Узор из дюз": "Nozzle pattern",
+    "Прочистка головки": "Head cleaning", "Если есть полосы": "If you see banding",
     "Разрешение печати, ppi": "Print resolution, ppi", "Резкость": "Sharpen", "Метки реза": "Cut marks", "Уменьшить лист, %": "Shrink sheet, %",
     "Насколько уменьшить лист, чтобы принтер не срезал края при печати без полей. 0 — не менять.": "How much to shrink the sheet so the printer does not trim the edges in borderless printing. 0 — no change.",
     "Цвет Windows (ICM) отключён": "Windows colour (ICM) off", "Задание": "Job", "Копий каждого листа": "Copies of each sheet",
