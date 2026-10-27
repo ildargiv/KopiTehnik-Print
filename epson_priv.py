@@ -43,6 +43,11 @@ QUALITY_SETS = {
     }},
 }
 
+# носители (dmMediaType), на которых драйвер не принимает режим и сам возвращает «Стандарт»:
+# проверено перебором 10 носителей × 28 размеров на L8050 — «Высокое» не работает на «Бланк письма» (828),
+# «Photo Quality Ink Jet» (318), «Photo Stickers» (338) и «Конверты» (353).
+QUALITY_UNSUPPORTED = {"L8050": {2: {828, 318, 338, 353}}}
+
 # режимы качества по моделям: (значение байта, название). У L8050 в драйвере нет «Черновика».
 QUALITY_MODES = {
     "L8050": [(1, "Стандарт"), (2, "Высокое")],
@@ -96,9 +101,11 @@ class EpsonPriv:
         modes = QUALITY_MODES.get(self.model, []) if self.supported("quality") else []
         if blob is None:
             return modes
-        paper = "plain" if struct.unpack_from("<I", blob, DM_MEDIATYPE_OFFSET)[0] == 1 else "photo"
+        media = struct.unpack_from("<I", blob, DM_MEDIATYPE_OFFSET)[0]
+        paper = "plain" if media == 1 else "photo"
         sets = QUALITY_SETS.get(self.model, {})
-        return [(v, n) for v, n in modes if (paper, v) in sets]
+        bad = QUALITY_UNSUPPORTED.get(self.model, {})
+        return [(v, n) for v, n in modes if (paper, v) in sets and media not in bad.get(v, ())]
 
     def maintenance(self, printer_name, action):
         """Проверка дюз / прочистка. Только для моделей с ключом maint."""

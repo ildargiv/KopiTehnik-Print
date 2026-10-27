@@ -93,6 +93,13 @@ class EpsonPrivTests(unittest.TestCase):
         struct.pack_into("<I", b, 196, 1)
         self.assertEqual(e.set(bytes(b), "quality", 2)[220 + 124], 3)
 
+    def test_l8050_high_hidden_on_unsupported_media(self):
+        e = ep.EpsonPriv("EPSON L8050 Series")
+        b = bytearray(blob())
+        for media, want in ((1, [1, 2]), (396, [1, 2]), (326, [1, 2]), (828, [1]), (318, [1]), (338, [1]), (353, [1])):
+            struct.pack_into("<I", b, 196, media)
+            self.assertEqual([v for v, _ in e.quality_modes(bytes(b))], want, media)
+
     def test_quality_modes_per_model(self):
         self.assertEqual([v for v, _ in ep.EpsonPriv("EPSON L8050 Series").quality_modes()], [1, 2])
         self.assertEqual([v for v, _ in ep.EpsonPriv("EPSON L18050 Series").quality_modes()], [0, 1, 2])
