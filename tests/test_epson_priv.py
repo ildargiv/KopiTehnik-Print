@@ -20,6 +20,13 @@ class EpsonPrivTests(unittest.TestCase):
         self.assertEqual(ep.model_of("EPSON L18050 Series"), "L18050")
         self.assertIsNone(ep.model_of("HP LaserJet 1020"))
 
+    def test_renamed_queue_uses_model_from_driver(self):
+        e = ep.EpsonPriv("Принтер в цехе", driver_name="EPSON L8050 Series")
+        self.assertEqual(e.model, "L8050")
+        self.assertTrue(e.supported("border") and e.supported("quality") and e.supported("maint"))
+        self.assertIsNone(ep.EpsonPriv("Принтер в цехе").model)
+        self.assertIsNone(ep.EpsonPriv("Принтер в цехе", driver_name="HP Universal").model)
+
     def test_unknown_model_changes_nothing(self):
         e = ep.EpsonPriv("EPSON L18050 Series")
         b = blob()

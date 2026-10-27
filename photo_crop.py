@@ -1918,6 +1918,36 @@ def _win():
     return _WIN
 
 
+_DRIVER_NAMES = {}
+
+
+def printer_driver_name(name):
+    """Имя драйвера очереди («EPSON L8050 Series»); не меняется, если очередь переименовали. Пустая строка при неудаче."""
+    if name in _DRIVER_NAMES:
+        return _DRIVER_NAMES[name]
+    out = ""
+    try:
+        wp, gd, wt = _win()
+        wp.GetPrinterW.argtypes = [wt.HANDLE, wt.DWORD, ctypes.c_void_p, wt.DWORD, ctypes.POINTER(wt.DWORD)]
+        wp.GetPrinterW.restype = wt.BOOL
+        h = wt.HANDLE()
+        if wp.OpenPrinterW(name, ctypes.byref(h), None):
+            try:
+                need = wt.DWORD(0)
+                wp.GetPrinterW(h, 2, None, 0, ctypes.byref(need))
+                if need.value:
+                    buf = ctypes.create_string_buffer(need.value)
+                    if wp.GetPrinterW(h, 2, buf, need.value, ctypes.byref(need)):
+                        ptrs = ctypes.cast(buf, ctypes.POINTER(ctypes.c_void_p))   # PRINTER_INFO_2W: server, printer, share, port, driver
+                        out = ctypes.wstring_at(ptrs[4]) if ptrs[4] else ""
+            finally:
+                wp.ClosePrinter(h)
+    except Exception:
+        out = ""
+    _DRIVER_NAMES[name] = out
+    return out
+
+
 def list_printers():
     """Установленные принтеры Windows (имя по умолчанию — первым)."""
     if sys.platform != "win32":

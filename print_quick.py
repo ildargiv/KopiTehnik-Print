@@ -38,11 +38,13 @@ def status(slot, printers):
     return GREEN if slot.get("printer") in (printers or []) else RED
 
 
-def driver_compatible(slot, printer, model_of):
-    """Можно ли применить сохранённые настройки драйвера (blob) к текущему принтеру: тот же принтер или та же модель."""
+def driver_compatible(slot, printer, model_of, current_model=None):
+    """Можно ли применить сохранённые настройки драйвера (blob) к текущему принтеру: та же очередь или та же модель.
+    current_model — модель текущего принтера по драйверу (очередь могли переименовать)."""
     if slot.get("empty") or not printer:
         return False
     if slot.get("printer") == printer:
         return True
-    m = model_of(slot.get("printer", "")) or slot.get("model")
-    return bool(m) and m == model_of(printer)
+    m = slot.get("model") or model_of(slot.get("printer", ""))
+    cur = current_model or model_of(printer)
+    return bool(m) and m == cur

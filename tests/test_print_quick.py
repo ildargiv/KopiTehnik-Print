@@ -32,6 +32,9 @@ class PrintQuickTests(unittest.TestCase):
         self.assertTrue(pq.driver_compatible(slot, "EPSON L8050 Series (копия 1)", ep.model_of))
         self.assertFalse(pq.driver_compatible(slot, "EPSON L18050 Series", ep.model_of))
         self.assertFalse(pq.driver_compatible(slot, "", ep.model_of))
+        # очередь переименована: модель берётся из драйвера
+        self.assertTrue(pq.driver_compatible({"printer": "Цех", "model": "L8050", "state": {}}, "Принтер 2", ep.model_of, "L8050"))
+        self.assertFalse(pq.driver_compatible({"printer": "Цех", "model": "L8050", "state": {}}, "Принтер 2", ep.model_of, "L18050"))
 
 
 if __name__ == "__main__":

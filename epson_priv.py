@@ -75,8 +75,9 @@ def load_profiles(extra_path=None):
 
 
 class EpsonPriv:
-    def __init__(self, printer_name, profiles=None):
-        self.model = model_of(printer_name)
+    def __init__(self, printer_name, profiles=None, driver_name=None):
+        # очередь могли переименовать («Принтер в цехе»): модель берём по имени драйвера, по имени очереди — запасной вариант
+        self.model = model_of(driver_name) or model_of(printer_name)
         self.map = (profiles or PROFILES).get(self.model or "", {})
 
     def supported(self, feature):

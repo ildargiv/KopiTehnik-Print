@@ -5522,7 +5522,8 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         self._fill_driver()
 
     def _epson(self):
-        return ep.EpsonPriv(self.pr.get("printer", ""), ep.load_profiles(str(pc.AGENT_DIR / "epson_profiles.json")))
+        return ep.EpsonPriv(self.pr.get("printer", ""), ep.load_profiles(str(pc.AGENT_DIR / "epson_profiles.json")),
+                           pc.printer_driver_name(self.pr.get("printer", "")))
 
     def _fill_epson(self):
         """Поля «качество», «без полей», «цветокоррекция» и кнопки обслуживания видны, только если для модели известны смещения."""
@@ -5668,7 +5669,7 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         nm = " ".join(name.text().split())[:24] or "Быстрый старт %d" % (i + 1)
         printer = self.pr.get("printer", "")
         slots[i] = {"name": nm, "bound": bool(bind.isChecked() and printer), "printer": printer,
-                    "model": ep.model_of(printer) or "", "state": self._qs_capture()}
+                    "model": self._epson().model or "", "state": self._qs_capture()}
         self.settings["print_quick"] = slots
         self.persist()
         self._qs_refresh()
@@ -5712,7 +5713,7 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
             if st.get("format") in pc.FORMATS:
                 self.cb_format.setCurrentText(st["format"])
             if st.get("blob"):
-                if pqk.driver_compatible(sl, self.pr.get("printer", ""), ep.model_of):
+                if pqk.driver_compatible(sl, self.pr.get("printer", ""), ep.model_of, self._epson().model):
                     try:
                         b = base64.b64decode(st["blob"])
                         if pc.devmode_valid(b):
