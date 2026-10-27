@@ -5652,7 +5652,8 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
             self._pc_slider("Гамма", key_get("gamma"), key_set("gamma"), "темнее", "светлее"),
             self._pc_slider("Цвета", key_get("sat"), key_set("sat"), "бледнее", "ярче"),
             self.l_pcorr, self.l_pc_prof,
-            hbox(btn("Сбросить", self.pcorr_reset), btn("Тестовая страница", self.add_pcorr_test, ico="image"), None, spacing=6),
+            hbox(btn("Сбросить", self.pcorr_reset), btn("Тестовая страница", self.add_pcorr_test, ico="image"),
+                 btn("Тестовый лист", self.add_test_sheet, ico="image"), None, spacing=6),
             spacing=6)
         self.w_pcorr_body = QWidget()
         self.w_pcorr_body.setLayout(body)
@@ -5696,6 +5697,17 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         d.mkdir(parents=True, exist_ok=True)
         p = d / ("Тест_поправки_%s.png" % tag)
         pcr.make_test_page(w, h, 300).save(p, dpi=(300, 300))
+        self.load_files([p], add=True)
+
+    def add_test_sheet(self):
+        """Тестовый лист печати (клин, цвета, кожа, градиенты, резкость) на выбранный формат -> в список фото."""
+        import test_sheet
+        short, long_, tag = pc.FORMATS[self.s["format"]]
+        w, h = (long_, short) if pc.ORIENTS[self.s["orient"]] == "landscape" else (short, long_)
+        d = Path(tempfile.gettempdir()) / "PhotoCrop"
+        d.mkdir(parents=True, exist_ok=True)
+        p = d / ("Тестовый_лист_%s.png" % tag)
+        test_sheet.build(w, h, 300).save(p, dpi=(300, 300))
         self.load_files([p], add=True)
 
     def profile_label(self, how="own"):
@@ -9182,7 +9194,7 @@ pc.EN.update({
     "Нейтраль (серый)": "Neutral (grey)", "По цветам": "By colour", "Общее": "General", "Тени": "Shadows", "Средние": "Midtones", "Света": "Highlights",
     "Тепло": "Warmth", "Пурпур": "Magenta", "Оттенок": "Hue", "Насыщ.": "Sat.", "Яркость": "Brightness", "Гамма": "Gamma", "Цвета": "Colours",
     "холоднее": "cooler", "теплее": "warmer", "зеленее": "greener", "пурпурнее": "more magenta", "темнее": "darker", "светлее": "lighter", "бледнее": "paler", "ярче": "more vivid",
-    "Двойной щелчок — сбросить": "Double-click to reset", "Сбросить": "Reset", "Тестовая страница": "Test page",
+    "Двойной щелчок — сбросить": "Double-click to reset", "Сбросить": "Reset", "Тестовая страница": "Test page", "Тестовый лист": "Test sheet",
     "Поправка включена и будет применена при печати.": "The correction is on and will be applied when printing.",
     "Включено, но все значения нулевые.": "On, but all values are zero.", "Выключена: печать без поправки.": "Off: printing without correction.",
     "Поправка принтера: включена": "Printer correction: on",
