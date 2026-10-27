@@ -9,6 +9,11 @@
 import json
 import struct
 
+try:
+    from epson_recipes import RECIPES        # модели, снятые по снимкам DEVMODE (tools/make_epson_recipes.py)
+except ImportError:                          # pragma: no cover
+    RECIPES = {}
+
 SRC_NORMAL, SRC_BORDERLESS = 261, 262      # dmDefaultSource: без этого драйвер сбрасывает флаг «без полей»
 DM_DEFAULTSOURCE_OFFSET = 88               # DEVMODEW.dmDefaultSource
 DM_FIELDS_OFFSET = 72
@@ -60,7 +65,10 @@ def model_of(printer_name):
     up = (printer_name or "").upper()
     if "EPSON" not in up:
         return None
-    for tok in up.replace("(", " ").replace(")", " ").split():
+    toks = up.replace("(", " ").replace(")", " ").split()
+    if "1410" in toks:                                       # Stylus Photo 1410: в названии одни цифры
+        return "1410"
+    for tok in toks:
         if tok != "EPSON" and any(c.isdigit() for c in tok) and any(c.isalpha() for c in tok):
             return tok
     return None
@@ -84,9 +92,45 @@ class EpsonPriv:
         # очередь могли переименовать («Принтер в цехе»): модель берём по имени драйвера, по имени очереди — запасной вариант
         self.model = model_of(driver_name) or model_of(printer_name)
         self.map = (profiles or PROFILES).get(self.model or "", {})
+        # модели без смещений в PROFILES: рецепт из снимков драйвера (байты целиком, потом merge)
+        self.recipe = RECIPES.get(self.model or "") if not self.map else None
 
     def supported(self, feature):
+        if self.recipe is not None:
+            return feature == "quality" or (feature == "border" and "border" in self.recipe)
         return feature in self.map
+
+    # --- модели по рецептам ---------------------------------------------------------------------------
+    _DPI_LEVEL = {180: 0, 360: 1, 720: 2}
+
+    @staticmethod
+    def _put(ba, part):
+        start = struct.unpack_from("<H", ba, 68)[0]
+        for off, val in part["pub"].items():
+            ba[off] = val
+        for off, val in part["priv"].items():
+            if start + off < len(ba):
+                ba[start + off] = val
+
+    def _recipe_get(self, blob, feature):
+        if feature == "quality":
+            return self._DPI_LEVEL.get(struct.unpack_from("<H", blob, 90)[0])
+        return struct.unpack_from("<H", blob, DM_DEFAULTSOURCE_OFFSET)[0] == self.recipe["border"]["src_on"]
+
+    def _recipe_set(self, blob, feature, value):
+        ba = bytearray(blob)
+        if feature == "quality":
+            q = self.recipe["quality"].get(int(value))
+            if q:
+                self._put(ba, q)
+            return bytes(ba)
+        b = self.recipe["border"]
+        self._put(ba, b["on"] if value else b["off"])
+        struct.pack_into("<H", ba, DM_DEFAULTSOURCE_OFFSET, b["src_on"] if value else b["src_off"])
+        if value and b["media"] and struct.unpack_from("<I", ba, DM_MEDIATYPE_OFFSET)[0] == 1:
+            struct.pack_into("<I", ba, DM_MEDIATYPE_OFFSET, b["media"])     # без полей — только на фотобумаге
+        struct.pack_into("<I", ba, DM_FIELDS_OFFSET, struct.unpack_from("<I", ba, DM_FIELDS_OFFSET)[0] | DM_DEFAULTSOURCE_FLAG)
+        return bytes(ba)
 
     def _quality_patch(self, blob, value):
         """Набор байтов режима качества из реальных снимков драйвера: драйвер выводит байт 7788 из зеркальных
@@ -98,6 +142,9 @@ class EpsonPriv:
 
     def quality_modes(self, blob=None):
         """Режимы качества модели; с blob — только те, для которых известен набор байтов на текущем носителе."""
+        if self.recipe is not None:
+            names = {0: "Черновик", 1: "Стандарт", 2: "Высокое"}
+            return [(k, names[k]) for k in sorted(self.recipe["quality"])]
         modes = QUALITY_MODES.get(self.model, []) if self.supported("quality") else []
         if blob is None:
             return modes
@@ -126,6 +173,8 @@ class EpsonPriv:
     def get(self, blob, feature):
         if not self.supported(feature):
             return None
+        if self.recipe is not None:
+            return self._recipe_get(blob, feature)
         pos = self._pos(blob, feature)
         return bool(blob[pos] & 1) if feature == "border" else blob[pos]
 
@@ -133,6 +182,8 @@ class EpsonPriv:
         """Возвращает новый blob. Нужно потом пропустить его через merge_devmode (драйвер досчитает поля)."""
         if not self.supported(feature):
             return bytes(blob)
+        if self.recipe is not None:
+            return self._recipe_set(blob, feature, value)
         ba = bytearray(blob)
         pos = self._pos(blob, feature)
         if feature == "border":

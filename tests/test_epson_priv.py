@@ -128,5 +128,42 @@ class EpsonPrivTests(unittest.TestCase):
             self.assertTrue(e.supported("border"))
 
 
+
+
+class RecipeModelTests(unittest.TestCase):
+    def blob(self, model):
+        extra = 3704 if model.startswith("L") and model != "1410" else 796
+        b = bytearray(220 + extra)
+        struct.pack_into("<HH", b, 68, 220, extra)
+        struct.pack_into("<H", b, 90, 360)
+        struct.pack_into("<H", b, 88, 261 if extra == 3704 else 7)
+        struct.pack_into("<I", b, 196, 1)
+        return bytes(b)
+
+    def test_model_names(self):
+        for name, m in (("EPSON Stylus Photo 1410 Series", "1410"), ("EPSON Stylus Photo R290 Series", "R290"),
+                        ("EPSON TX650 Series", "TX650"), ("EPSON L805 Series", "L805"), ("EPSON PX660 Series", "PX660")):
+            self.assertEqual(ep.model_of(name), m)
+
+    def test_quality_and_border_roundtrip(self):
+        for m in ep.RECIPES:
+            e = ep.EpsonPriv("EPSON %s Series" % m)
+            self.assertTrue(e.supported("quality") and e.supported("border"), m)
+            self.assertFalse(e.supported("ccor") or e.supported("maint"), m)
+            b = self.blob(m)
+            self.assertEqual(e.get(b, "quality"), 1)
+            b = e.set(b, "quality", 2)
+            self.assertEqual(e.get(b, "quality"), 2)
+            b = e.set(b, "border", True)
+            self.assertTrue(e.get(b, "border"))
+            b = e.set(b, "border", False)
+            self.assertFalse(e.get(b, "border"))
+
+    def test_1410_borderless_switches_to_photo_media(self):
+        e = ep.EpsonPriv("EPSON Stylus Photo 1410 Series")
+        b = e.set(self.blob("1410"), "border", True)
+        self.assertEqual(struct.unpack_from("<I", b, 196)[0], 359)
+
+
 if __name__ == "__main__":
     unittest.main()
