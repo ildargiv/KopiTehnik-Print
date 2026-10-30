@@ -10081,6 +10081,14 @@ pc.EN.update({
     "Сейчас на листе несколько фото или белые поля — подрезка не применяется.": "There are several photos or white margins on the sheet now — the crop is not applied.",
 })
 pc.EN_FMT.update({"{n} фото": "{n} photos", "Действует: лево {a}, верх {b}, право {c}, низ {d} мм": "Active: left {a}, top {b}, right {c}, bottom {d} mm"})
+import i18n_161                                          # noqa: E402  (строки версий 1.5-1.6; уже заданные переводы не затираются)
+for _k, _v in i18n_161.EN.items():
+    pc.EN.setdefault(_k, _v)
+for _k, _v in i18n_161.EN_FMT.items():
+    pc.EN_FMT.setdefault(_k, _v)
+for _code, _tab in i18n_161.OTHER.items():
+    for _k, _v in _tab.items():
+        i18n.TABLE.get(_code, {}).setdefault(_k, _v)
 pc.EN.update({
     "После анализа сортировать фото: красные первыми": "After analysis sort photos: red first",
     "Красные и жёлтые кадры — в начало списка, зелёные — в конец. Поправленные вручную становятся зелёными.": "Red and yellow shots go to the top of the list, green to the end. Shots you fix by hand turn green.",

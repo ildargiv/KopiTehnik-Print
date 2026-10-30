@@ -3,6 +3,7 @@
 # Release notes — v1.6.1
 
 - **AI agent (MCP)**: new tools `multi_print` (printers, Quick Start slot per printer, blocks / one-at-a-time modes, resume), `zoom_photo` (percent, fit, fill, original) and `crop_apply` (crop to the frame into the "Обрезанные" subfolder). With several printers ticked, `print_photos` distributes the sheets between them.
+- **Translations**: English for all strings added in 1.5–1.6 (multi-printer, Quick Start, Epson controls, zoom/crop); key labels in the other interface languages (machine-assisted, not reviewed by native speakers).
 - The portable file is now `KopiTehnikPrint-Portable-<version>.exe`.
 - The data folder is now `%APPDATA%\KopiTehnik Print`; the old `PhotoCrop` folder (settings, projects, logs, models) is moved there on first start.
 
