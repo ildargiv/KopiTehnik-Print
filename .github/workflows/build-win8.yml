@@ -4,6 +4,7 @@ name: build-win8
 on:
   push:
     tags: ["win8-v*"]
+    branches: ["legacy-win8"]
   workflow_dispatch:
 
 permissions:
