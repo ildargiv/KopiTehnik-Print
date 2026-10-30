@@ -4482,7 +4482,7 @@ class SmartMixin:
 
 
 # ---------------------------------------------------------------- обновление с GitHub
-APP_VERSION = "1.6.0"
+APP_VERSION = "1.6.1"
 RELEASES_API = "https://api.github.com/repos/ildargiv/KopiTehnik-Print/releases/latest"
 RELEASES_PAGE = "https://github.com/ildargiv/KopiTehnik-Print/releases/latest"
 GITHUB_URL = "https://github.com/ildargiv/KopiTehnik-Print"
@@ -10730,6 +10730,46 @@ def selftest(app):
         if abs(win.states[new].scale - 1.0) > 1e-6 or new not in win.checked or f0 in win.states:
             raise RuntimeError("состояние нового фото неверно")
     step("«Обрезать» кадрирует по рамке", crop_apply_flow)
+    def agent_new_tools():
+        """Команды агента 1.6.1: увеличение, «Обрезать», печать на нескольких принтерах."""
+        ag = ga.GuiAgent(win)
+        win.show_photo(0)
+        app.processEvents()
+        r = ag.execute({"cmd": "zoom_photo", "mode": "percent", "percent": 50})
+        if not r["ok"] or abs(r["result"]["percent"] - 50) > 0.1:
+            raise RuntimeError("zoom_photo percent: %s" % r)
+        r = ag.execute({"cmd": "zoom_photo", "mode": "fit"})
+        if not r["ok"]:
+            raise RuntimeError("zoom_photo fit: %s" % r)
+        r = ag.execute({"cmd": "zoom_photo", "mode": "original"})
+        if not r["ok"] or abs(r["result"]["percent"] - 100) > 0.1:
+            raise RuntimeError("zoom_photo original: %s" % r)
+        if ag.execute({"cmd": "zoom_photo", "mode": "bogus"})["ok"]:
+            raise RuntimeError("zoom_photo принял чужой mode")
+        saved = (win.settings.get("multi_enabled"), win.settings.get("multi_printers"), win.printers)
+        try:
+            win.settings["multi_enabled"] = False
+            if ag.execute({"cmd": "multi_print", "action": "set", "printers": []})["ok"]:
+                raise RuntimeError("multi_print set прошёл при выключенном режиме")
+            win.settings["multi_enabled"] = True
+            win.printers = ["Принтер A", "Принтер B"]
+            r = ag.execute({"cmd": "multi_print", "action": "set", "printers": ["Принтер A", "Принтер B"], "blocks": True})
+            if not r["ok"] or not r["result"]["active"] or r["result"]["selected"] != ["Принтер A", "Принтер B"] or not r["result"]["blocks"]:
+                raise RuntimeError("multi_print set: %s" % r)
+            if ag.execute({"cmd": "multi_print", "action": "set", "printers": ["Нет такого"]})["ok"]:
+                raise RuntimeError("multi_print принял несуществующий принтер")
+            r = ag.execute({"cmd": "multi_print", "action": "set", "on": False})
+            if r["result"]["active"]:
+                raise RuntimeError("multi_print on=false не выключил режим")
+            if ag.execute({"cmd": "multi_print", "action": "resume"})["ok"]:
+                raise RuntimeError("resume без остатка должен отказать")
+        finally:
+            win.settings["multi_enabled"], win.settings["multi_printers"], win.printers = saved
+            win.settings["multi_on"] = True
+            win.settings.pop("multi_blocks", None)
+            win.multi_refresh()
+    step("команды агента: увеличение и несколько принтеров", agent_new_tools)
+
     step("вкладка «Принтер»", lambda: (win.show_page(2), shot("printer"), win.show_page(0)))
     step("параметры сохранения", lambda: win.options() or (_ for _ in ()).throw(RuntimeError("options() вернул пусто")))
     text = "PhotoCrop Qt selftest  %s\nPySide6 %s, Python %s\n\n%s\n" % (

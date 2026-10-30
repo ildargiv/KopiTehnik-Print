@@ -13,6 +13,7 @@ import csv
 import hashlib
 import hmac
 import json
+import app_dirs
 import os
 import secrets
 import threading
@@ -27,7 +28,7 @@ _lock = threading.Lock()
 
 
 def _dir():
-    return Path(os.environ.get("APPDATA", str(Path.home()))) / "PhotoCrop"
+    return app_dirs.data_dir()
 
 
 def _log_path():

@@ -26,6 +26,7 @@ import hashlib
 import ctypes
 import io
 import json
+import app_dirs
 import math
 import os
 import queue
@@ -104,7 +105,7 @@ CMS_BPC, CMS_SOFTPROOF, CMS_GAMUTCHECK = 0x2000, 0x4000, 0x1000   # компен
 UNDO_LIMIT = 500   # шагов отмены
 MIN_SCALE, MAX_SCALE = 0.05, 3.0   # размер рамки относительно максимально вписанной в фото
 
-SETTINGS_PATH = Path(os.environ.get("APPDATA", str(Path.home()))) / "PhotoCrop" / "settings.json"
+SETTINGS_PATH = app_dirs.data_dir() / "settings.json"
 
 
 # ---------------------------------------------------------------- логика

@@ -37,6 +37,12 @@ jobs:
           & $iscc "/DAppVersion=$ver" installer\PhotoCrop.iss
           if ($LASTEXITCODE -ne 0) { throw "ISCC failed" }
 
+      - name: Portable copy under the programme name
+        shell: pwsh
+        run: |
+          $ver = (python installer/app_version.py).Trim()
+          Copy-Item dist\PhotoCropQt.exe "dist\KopiTehnikPrint-Portable-$ver.exe"
+
       - name: Check build output
         run: dir dist
 
@@ -44,7 +50,7 @@ jobs:
         with:
           name: PhotoCrop-windows
           path: |
-            dist/PhotoCropQt.exe
+            dist/KopiTehnikPrint-Portable-*.exe
             dist/KopiTehnikPrint-Setup-*.exe
 
       - name: Publish GitHub Release
@@ -52,6 +58,6 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            dist/PhotoCropQt.exe
+            dist/KopiTehnikPrint-Portable-*.exe
             dist/KopiTehnikPrint-Setup-*.exe
           body_path: RELEASE_NOTES.md

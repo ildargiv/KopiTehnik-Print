@@ -79,6 +79,22 @@ GUI_SPEC = {
                     [("action", "string", "list | apply | save | clear"), ("n", "integer", "Slot 1..8."), ("name", "string", "Name for save (up to 24 chars).")]),
     "add_test_sheet": ("Add the print test sheet (grey wedge, shadows/highlights, colours and saturation, skin tones I-VI, gradients, "
                        "sharpness targets) of the current paper size to the open photos. Print it with the normal pipeline to judge the profile.", []),
+    "multi_print": ("Printing on several printers at once. action=get shows the mode: switch state, printers of the system, ticked ones, "
+                    "the Quick Start slot chosen for each, order mode. action=set changes it: printers (list of names to tick), on (false = the "
+                    "«disable» button of the dialog), modes ({printer: Quick Start slot 1..8 or null}), blocks (consecutive sheets to one printer), "
+                    "serialize (one printer at a time). With more than one printer ticked print_photos distributes the sheets by readiness. "
+                    "action=resume prints what did not print in the last run.",
+                    [("action", "string", "get | set | resume"), ("printers", "any", "Printers to tick (list of names)."),
+                     ("on", "boolean", "Mode on/off while the printers stay ticked."),
+                     ("modes", "object", "{printer: slot 1..8 | null}"), ("blocks", "boolean", ""), ("serialize", "boolean", "")]),
+    "zoom_photo": ("Zoom of the open photo like Epson Photo+, only for this photo, centred: mode=percent with percent (100 = the photo fills the frame, "
+                   "less = smaller with white margins), fit = the whole photo inside the frame («Fit»), fill = fills the frame, original = back "
+                   "to the original frame. Crop view only.",
+                   [("mode", "string", "percent | fit | fill | original"), ("percent", "number", "For mode=percent, 5..2000."),
+                    ("photo", "any", "Photo ref; default: the current photo.")]),
+    "crop_apply": ("«Crop»: the photo becomes what is inside the frame (everything outside is removed, white margins inside stay). "
+                   "A new JPEG is saved in the subfolder «Обрезанные» next to the original, which stays untouched, and replaces the photo in the list.",
+                   [("photo", "any", "Photo ref; default: the current photo.")]),
     "print_photos": ("Print like the «Print photo» button: sheets are built from the window's settings (format, photos per sheet, margins, "
                      "printer profile, Printer tab) and sent to the selected printer.",
                      [("which", "string", "current | checked (default checked)"), ("photo", "any", "Print only these photos (ref or list)."),
@@ -99,7 +115,7 @@ GUI_SPEC = {
     "check_update": ("Is there a newer version of the programme on GitHub.", []),
 }
 GUI_READONLY = {"app_state", "app_guide", "color_presets", "print_status", "doc_info", "print_stats", "check_update"}
-GUI_REQUIRED = {"open_files": ["paths"], "color_preset_save": ["n"], "color_preset_apply": ["n"], "set_view": ["view"],
+GUI_REQUIRED = {"multi_print": ["action"], "zoom_photo": ["mode"], "open_files": ["paths"], "color_preset_save": ["n"], "color_preset_apply": ["n"], "set_view": ["view"],
                 "set_app_mode": ["mode"], "doc_open": ["path"]}
 GUI_DESTRUCTIVE = ("printer_maintenance", "print", "save_files", "export_sheets", "clear_queue", "cancel_job", "job_control", "print_photos", "doc_print")
 
@@ -132,7 +148,7 @@ class GuiAgent:
                        "color_preset_apply": self.c_preset_apply, "copy_adjust": self.c_copy_adjust, "paste_adjust": self.c_paste_adjust,
                        "set_layout": self.c_set_layout, "set_view": self.c_set_view, "set_app_mode": self.c_set_app_mode,
                        "epson_settings": self.c_epson_settings, "printer_maintenance": self.c_maintenance,
-                       "quick_start": self.c_quick_start, "add_test_sheet": self.c_test_sheet,
+                       "quick_start": self.c_quick_start, "multi_print": self.c_multi_print, "zoom_photo": self.c_zoom_photo, "crop_apply": self.c_crop_apply, "add_test_sheet": self.c_test_sheet,
                        "add_edge_test": self.c_edge_test, "print_status": self.c_print_status, "doc_open": self.c_doc_open,
                        "doc_info": self.c_doc_info, "doc_set": self.c_doc_set, "doc_convert": self.c_doc_convert,
                        "printer_correction": self.c_printer_correction, "app_settings": self.c_app_settings, "print_stats": self.c_print_stats, "check_update": self.c_check_update,
@@ -647,6 +663,98 @@ class GuiAgent:
             w._qs_refresh()
             return {"cleared": n, "printer": w.pr.get("printer") or None}
         raise pc.AgentError("action: list | apply | save | clear", "bad_value")
+
+    def _select(self, req):
+        """Открыть фото из запроса (photo) или убедиться, что оно открыто."""
+        w = self.win
+        if req.get("photo") is not None:
+            f = self.files_of(req)[0]
+            if w.idx < 0 or w.files[w.idx] != f:
+                w.show_photo(w.files.index(f))
+        if w.idx < 0:
+            raise pc.AgentError("Нет открытого фото.", "bad_photo")
+        if w.mode() != "crop":
+            raise pc.AgentError("Окно не в режиме кадрирования (set_view crop).", "wrong_view")
+
+    def c_zoom_photo(self, req):
+        w = self.win
+        self._select(req)
+        mode = str(req.get("mode") or "").lower()
+        if mode == "percent":
+            try:
+                pct = float(str(req.get("percent")).replace(",", "."))
+            except ValueError:
+                raise pc.AgentError("percent: число", "bad_value")
+            if not 5 <= pct <= 2000:
+                raise pc.AgentError("percent: от 5 до 2000", "bad_value")
+            w.zoom_pct_set(pct)
+        elif mode == "fit":
+            w.zoom_fit()
+        elif mode in ("fill", "original"):
+            w.zoom_fill()
+        else:
+            raise pc.AgentError("mode: percent | fit | fill | original", "bad_value")
+        st = w.cur()[1]
+        return {"photo": w.files[w.idx].name, "percent": round(100.0 / st.scale, 1), "cx": round(st.cx, 4), "cy": round(st.cy, 4)}
+
+    def c_crop_apply(self, req):
+        w = self.win
+        self._select(req)
+        old = w.files[w.idx]
+        w.crop_apply()
+        new = w.files[w.idx] if w.idx >= 0 else None
+        if new is None or new == old:
+            raise pc.AgentError("Обрезать не удалось.", "failed")
+        return {"photo": new.name, "path": str(new), "original": str(old)}
+
+    def c_multi_print(self, req):
+        w = self.win
+        action = str(req.get("action") or "get").lower()
+        s = w.settings
+        if action == "resume":
+            left = list(getattr(w, "_multi_left", []) or [])
+            if not left:
+                raise pc.AgentError("Допечатывать нечего.", "nothing_to_resume")
+            pol = policy(s)
+            if not pol["allow_print"]:
+                raise pc.AgentError("Владелец запретил агенту печать в настройках программы.", "print_not_allowed")
+            w.multi_resume()
+            return {"started": True, "left": len(left)}
+        if action == "set":
+            if not w.multi_enabled():
+                raise pc.AgentError("Печать на нескольких принтерах выключена в настройках программы (Режимы печати): её включает человек.", "not_allowed")
+            if req.get("printers") is not None:
+                want = req["printers"] if isinstance(req["printers"], list) else [req["printers"]]
+                bad = [p_ for p_ in want if p_ not in w.printers]
+                if bad:
+                    raise pc.AgentError("Нет таких принтеров: %s. Список: list_printers" % ", ".join(map(str, bad)), "bad_value")
+                s["multi_printers"] = [str(p_) for p_ in want]
+            if "on" in req:
+                s["multi_on"] = bool(req["on"])
+            for k in ("blocks", "serialize"):
+                if k in req:
+                    s["multi_" + k] = bool(req[k])
+            if isinstance(req.get("modes"), dict):
+                modes = dict(s.get("multi_modes") or {})
+                for name, n in req["modes"].items():
+                    if n is None:
+                        modes.pop(name, None)
+                        continue
+                    try:
+                        n = int(n)
+                    except (TypeError, ValueError):
+                        raise pc.AgentError("modes: номер ячейки 1..8 или null", "bad_value")
+                    if n - 1 not in [i for i, _ in w.multi_slots(name)]:
+                        raise pc.AgentError("У принтера «%s» нет ячейки %s в «Быстром старте»." % (name, n), "empty_slot")
+                    modes[name] = n - 1
+                s["multi_modes"] = modes
+            w.persist()
+            w.multi_refresh()
+        sel = w.multi_selected()
+        return {"enabled": w.multi_enabled(), "active": w.multi_active(), "on": bool(s.get("multi_on", True)), "printers": list(w.printers),
+                "selected": sel, "blocks": bool(s.get("multi_blocks", False)), "serialize": bool(s.get("multi_serialize", False)),
+                "modes": {p_: (None if w.multi_mode(p_) is None else w.multi_mode(p_).get("name")) for p_ in sel},
+                "unprinted_left": len(getattr(w, "_multi_left", []) or [])}
 
     def c_test_sheet(self, req):
         w = self.win

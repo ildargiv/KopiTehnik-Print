@@ -7,6 +7,7 @@
 Модуль без Qt: его импортирует и консольный режим.
 """
 import json
+import app_dirs
 import os
 import secrets
 import sys
@@ -21,7 +22,7 @@ MAX_BODY = 64 * 1024 * 1024
 
 
 def settings_dir():
-    return Path(os.environ.get("APPDATA", str(Path.home()))) / "PhotoCrop"
+    return app_dirs.data_dir()
 
 
 def endpoint_path():

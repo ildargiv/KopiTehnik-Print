@@ -52,7 +52,7 @@ License: free for personal use and for a business with one workstation at one lo
 
 ## Installation
 
-- Easiest: download `PhotoCropQt.exe` (GUI) or `PhotoCropAgent.exe` (AI-agent / MCP) from the [Releases page](https://github.com/ildargiv/KopiTehnik-Print/releases/latest) and run it. No Python needed.
+- Easiest: download `KopiTehnikPrint-Setup-<version>.exe` (installer) or `KopiTehnikPrint-Portable-<version>.exe` (GUI, no install) or `PhotoCropAgent.exe` (AI-agent / MCP) from the [Releases page](https://github.com/ildargiv/KopiTehnik-Print/releases/latest) and run it. No Python needed.
 - Windows with Python 3.9+ ("Add python.exe to PATH"), or run `install.bat`: it installs Python (if missing), the packages and creates shortcuts. Internet is required.
 - Manual install: `pip install -r requirements.txt`.
 
