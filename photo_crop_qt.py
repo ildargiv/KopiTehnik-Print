@@ -121,6 +121,7 @@ ICONS = {
     "check_all": '<rect x="3.5" y="3.5" width="17" height="17" rx="4"/><path d="M8 12.3l2.8 2.8L16.2 9"/>',
     "check_none": '<rect x="3.5" y="3.5" width="17" height="17" rx="4"/>',
     "trash": '<path d="M4.5 7h15M9.5 7V4.8h5V7M6.5 7l.9 12.2h9.2L17.5 7M10 10.5v5.5M14 10.5v5.5"/>',
+    "printer_cfg": '<path d="M7 8V3.8h10V8"/><rect x="3.5" y="8" width="17" height="8.5" rx="2"/><path d="M7 13.5h10v6.7H7z"/><path d="M6 11.6h5.5"/><circle cx="15.3" cy="11.6" r="1.1"/>',
     "print": '<path d="M7 8V3.8h10V8"/><rect x="3.5" y="8" width="17" height="8.5" rx="2"/><path d="M7 13.5h10v6.7H7z"/>',
     "edit": '<path d="M4 20h4L19.2 8.8a1.9 1.9 0 0 0 0-2.7l-1.3-1.3a1.9 1.9 0 0 0-2.7 0L4 16z"/><path d="M13.5 6.5l4 4"/>',
     "save": '<path d="M5 3.8h11l3.2 3.2V19a1.2 1.2 0 0 1-1.2 1.2H5A1.2 1.2 0 0 1 3.8 19V5A1.2 1.2 0 0 1 5 3.8z"/><path d="M8 3.8v5h7v-5M7.5 20v-6.5h9V20"/>',
@@ -5403,7 +5404,8 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         self.b_cancel = btn("Отменить печать", self.cancel.set, "link")
         self.b_cancel.hide()
         self.b_save = btn("Сохранить отмеченные", lambda: self.save(True), big=True, ico="save", tip="Ctrl+Shift+S; Ctrl+S — только текущее фото")
-        self.b_multi = btn("Принтеры…", self.multi_dialog, ico="print")
+        self.b_multi = btn("", self.multi_dialog, ico="printer_cfg")      # квадратная кнопка рядом с «Печать»: принтер с ползунками настройки
+        self.b_multi.setIconSize(QSize(24, 24))
         self.b_multi.setToolTip(tr("Печать на нескольких принтерах: отметьте больше одного, и листы разойдутся между ними"))
         self.b_multi.setVisible(self.multi_enabled())
         self.b_print = PrintButton(tr("Печать"))
@@ -5414,7 +5416,10 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         self.b_print.setToolTip("Ctrl+P")
         self.b_print.setCursor(Qt.PointingHandCursor)
         self.b_print.clicked.connect(lambda _=False: self.print_now())
-        lay = vbox(hbox(self.seg_page, margins=(0, 0, 16, 0)), self.pages, self.progress, self.l_prog, self.b_cancel, self.b_save, self.b_multi, self.b_print,
+        self.b_multi.setProperty("big", "true")
+        side = max(44, self.b_print.sizeHint().height())
+        self.b_multi.setFixedSize(side, side)
+        lay = vbox(hbox(self.seg_page, margins=(0, 0, 16, 0)), self.pages, self.progress, self.l_prog, self.b_cancel, self.b_save, hbox(self.b_print, self.b_multi, spacing=8),
                    spacing=10, margins=(4, 12, 14, 12))
         lay.setStretch(1, 1)
         w.setLayout(lay)
@@ -6360,7 +6365,8 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
     def multi_refresh(self):
         self.b_multi.setVisible(self.multi_enabled())
         n = len(self.multi_selected())
-        self.b_multi.setText(tr("Принтеры…") + (" (%d)" % n if n > 1 else ""))
+        self.b_multi.setText(str(n) if n > 1 else "")
+        self.b_multi.setToolTip(tr("Принтеры…") + (" (%d)" % n if n > 1 else "") + ": " + tr("печать на нескольких принтерах, отметьте больше одного"))
 
     def multi_dialog(self):
         dlg = MultiPrinterDialog(self)
@@ -10379,6 +10385,13 @@ def selftest(app):
             win._qs_on = win._qs_fp = None
             win._qs_refresh()
     step("«Быстрый старт»: включённая ячейка зелёная и гаснет", quick_active_flow)
+    def multi_button_shot():
+        win.settings["multi_enabled"] = True
+        win.multi_refresh()
+        shot("multi_button")
+        win.settings["multi_enabled"] = False
+        win.multi_refresh()
+    step("кнопка «Принтеры…» рядом с «Печать»", multi_button_shot)
     step("вкладка «Принтер»", lambda: (win.show_page(2), shot("printer"), win.show_page(0)))
     step("параметры сохранения", lambda: win.options() or (_ for _ in ()).throw(RuntimeError("options() вернул пусто")))
     text = "PhotoCrop Qt selftest  %s\nPySide6 %s, Python %s\n\n%s\n" % (
