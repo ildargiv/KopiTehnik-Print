@@ -9277,7 +9277,10 @@ class MultiPrinterDialog(QDialog):
             k = mode.findData((app.settings.get("multi_modes") or {}).get(name))
             mode.setCurrentIndex(max(0, k))
             mode.setEnabled(mode.count() > 1)
-            mode.setToolTip(tr("Режим печати из «Быстрого старта» этого принтера: бумага, качество, цвет"))
+            if mode.count() == 1:
+                mode.setItemText(0, tr("Нет ячеек «Быстрого старта»"))
+            mode.setToolTip(tr("Режим печати из «Быстрого старта» этого принтера: бумага, качество, цвет.") if mode.count() > 1 else
+                            tr("У этого принтера нет сохранённых ячеек «Быстрого старта»: выберите принтер на вкладке «Принтер», настройте бумагу и качество и нажмите дискету в ячейке."))
             cb.mode = mode
             lay.addLayout(hbox(cb, None, mode, spacing=8))
         if not app.printers:
@@ -10287,6 +10290,30 @@ def selftest(app):
             globals()["ask"] = saved[6]
             win.multi_refresh()
     step("печать на нескольких принтерах (с подменой драйвера)", multi_flow)
+
+    def multi_dialog_flow():
+        """Окно «Принтеры…»: список принтеров, выбор режима «Быстрого старта» для принтера, сохранение выбора."""
+        saved = (win.settings.get("multi_printers"), win.settings.get("multi_modes"), win.settings.get("print_quick"), win.printers)
+        try:
+            win.printers = ["Принтер A", "Принтер B"]
+            win.settings["print_quick"] = {"Принтер A": [{"name": "Глянец высокое", "bound": True, "printer": "Принтер A", "model": "", "state": {"format": "10x15"}},
+                                                       pqk.empty_slot(1), pqk.empty_slot(2)]}
+            dlg = MultiPrinterDialog(win)
+            dlg.show()
+            app.processEvents()
+            dlg.grab().save(str(out / "selftest_multi_dialog.png"))
+            a_, b_ = dlg.boxes
+            if not a_.mode.isEnabled() or a_.mode.count() != 2:
+                raise RuntimeError("у принтера с ячейкой нет выбора режима: %s/%d" % (a_.mode.isEnabled(), a_.mode.count()))
+            a_.setChecked(True)
+            b_.setChecked(True)
+            a_.mode.setCurrentIndex(1)
+            if dlg.chosen() != ["Принтер A", "Принтер B"] or dlg.modes() != {"Принтер A": 0}:
+                raise RuntimeError("выбор не сохранился: %s %s" % (dlg.chosen(), dlg.modes()))
+            dlg.close()
+        finally:
+            win.settings["multi_printers"], win.settings["multi_modes"], win.settings["print_quick"], win.printers = saved
+    step("окно «Принтеры…»: режим для принтера", multi_dialog_flow)
     step("вкладка «Принтер»", lambda: (win.show_page(2), shot("printer"), win.show_page(0)))
     step("параметры сохранения", lambda: win.options() or (_ for _ in ()).throw(RuntimeError("options() вернул пусто")))
     text = "PhotoCrop Qt selftest  %s\nPySide6 %s, Python %s\n\n%s\n" % (
