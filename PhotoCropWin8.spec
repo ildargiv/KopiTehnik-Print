@@ -24,7 +24,6 @@ a = Analysis(
     runtime_hooks=[],
     excludes=['PySide6.QtPdf', 'PySide6.QtPdfWidgets'],
     noarchive=False,
-    optimize=0,
 )
 pyz = PYZ(a.pure)
 
