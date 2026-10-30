@@ -6388,8 +6388,17 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
 
     def multi_slots(self, printer):
         """Занятые ячейки «Быстрого старта» этого принтера: [(номер, ячейка)]."""
-        row = pqk.norm_store(self.settings.get("print_quick"), self.pr.get("printer", "")).get(printer) or []
-        return [(i, sl) for i, sl in enumerate(row) if not sl.get("empty")]
+        store = pqk.norm_store(self.settings.get("print_quick"), self.pr.get("printer", ""))
+        out = [(i, sl) for i, sl in enumerate(store.get(printer) or []) if not sl.get("empty")]
+        model = self._epson().model if printer == self.pr.get("printer") else None
+        model = model or ep.model_of(printer)
+        for q, row in store.items():                    # ячейки других очередей той же модели (копии принтера, другое имя очереди)
+            if q == printer:
+                continue
+            for i, sl in enumerate(row):
+                if not sl.get("empty") and model and (sl.get("model") or ep.model_of(sl.get("printer") or q)) == model:
+                    out.append(("%s	%d" % (q, i), dict(sl, name="%s (%s)" % (sl["name"], q))))
+        return out
 
     def multi_mode(self, printer):
         """Выбранная для принтера ячейка «Быстрого старта» или None (тогда профиль принтера / настройки окна)."""
