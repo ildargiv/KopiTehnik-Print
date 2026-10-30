@@ -6782,8 +6782,9 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         self.sl_zoom.valueChanged.connect(lambda v: self.zoom_pct_set(v) if not self._zoom_lock else None)
         self._zoom_lock = False
         zoom_row = hbox(self.e_zoom, lbl("%", "muted"), self.sl_zoom, spacing=6)
-        zoom_btns = hbox(btn("Обрезать", self.zoom_fill, tip="Фото заполняет рамку целиком, лишнее обрезается (100%)"),
-                         btn("Поместить", self.zoom_fit, tip="Фото целиком внутри рамки, по краям остаются поля"), spacing=6)
+        zoom_btns = hbox(btn("Оригинал", self.zoom_fill, tip="Вернуть исходный кадр: фото заполняет рамку (100%), по центру"),
+                         btn("Поместить", self.zoom_fit, tip="Фото целиком внутри рамки, по краям остаются поля"),
+                         btn("Обрезать", self.crop_apply, tip="Кадрировать по рамке: всё за рамкой удаляется, белые поля внутри рамки остаются. Исходный файл не меняется."), spacing=6)
         photo = card("Кадр", lbl("Ориентация рамки", "muted"), hbox(self.seg_orient, None),
                      lbl("Как фото ложится в рамку", "muted"), hbox(self.seg_mode, None),
                      lbl("Увеличение этого фото", "muted"), zoom_row, zoom_btns,
@@ -7916,6 +7917,50 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
             return
         f, st, W, H, paper = cur
         self.zoom_pct_set(100.0 / self._zoom_fit_scale(W, H, paper))
+
+    def crop_apply(self):
+        """«Обрезать»: фото становится тем, что внутри рамки (за рамкой всё удаляется, белые поля внутри остаются).
+        Результат сохраняется новым файлом в подпапке «Обрезанные» рядом с оригиналом и подставляется вместо фото в списке;
+        исходный файл не меняется. Цветокоррекция и число копий сохраняются, рамка становится 100% по центру."""
+        cur = self.cur()
+        if not cur or self.mode() != "crop":
+            return
+        f, st, W, H, paper = cur
+        if not ask_soft(self, "Обрезать фото по рамке? Всё за рамкой будет удалено из этого фото (исходный файл останется нетронутым)."):
+            return
+        try:
+            with pc.Image.open(f) as im0:
+                icc = im0.info.get("icc_profile")
+                im = pc.ImageOps.exif_transpose(im0)
+                if st.rotation:
+                    im = pc.orient_img(im, st.rotation)
+                im = pc.to_rgb(im, icc)
+            g = pc.frame_geom(im.size[0], im.size[1], paper, st)
+            out = pc.render_frame(im, g)
+            d = Path(f).parent / "Обрезанные"
+            d.mkdir(exist_ok=True)
+            n, dest = 1, d / (Path(f).stem + "_кадр.jpg")
+            while dest.exists():
+                n += 1
+                dest = d / ("%s_кадр%d.jpg" % (Path(f).stem, n))
+            out.save(dest, "JPEG", quality=97, subsampling=0, dpi=(300, 300))
+        except Exception as ex:
+            warn(self, tr("Не удалось обрезать фото") + ":\n%s" % ex)
+            return
+        i = self.idx
+        ns = pc.CropState()
+        ns.adj, ns.copies, ns.edited = dict(st.adj), st.copies, True
+        was = f in self.checked
+        self.files = self.files[:i] + [dest] + self.files[i + 1:]
+        self.states.pop(f, None)
+        self.states[dest] = ns
+        self.checked.discard(f)
+        if was:
+            self.checked.add(dest)
+        self.thumbs_view.model().refresh()
+        self.upd_counts()
+        self.idx = -1
+        self.show_photo(i)
 
     def zoom_sync(self):
         """Поле и ползунок показывают увеличение открытого фото."""
@@ -10662,6 +10707,29 @@ def selftest(app):
         if win.e_zoom.text() != "100":
             raise RuntimeError("поле не показывает 100%%: %r" % win.e_zoom.text())
     step("увеличение в процентах для открытого фото", zoom_pct_flow)
+
+    def crop_apply_flow():
+        """«Обрезать»: фото заменяется кадром по рамке (с белыми полями), исходник не тронут."""
+        win.show_photo(0)
+        app.processEvents()
+        f0 = win.files[0]
+        n_files = len(win.files)
+        win.states[f0].cx, win.states[f0].cy, win.states[f0].scale = 0.5, 0.5, 1.0
+        win.zoom_pct_set(50)                                    # рамка вдвое больше фото: по краям белые поля
+        orig_size = pc.Image.open(f0).size
+        win.crop_apply()
+        app.processEvents()
+        new = win.files[0]
+        if new == f0 or "Обрезанные" not in str(new) or not new.exists() or len(win.files) != n_files:
+            raise RuntimeError("фото не заменено обрезанным: %s %d" % (new, len(win.files)))
+        if not f0.exists():
+            raise RuntimeError("исходный файл тронут")
+        im = pc.Image.open(new).convert("RGB")
+        if im.getpixel((0, 0)) != (255, 255, 255):
+            raise RuntimeError("белые поля внутри рамки не сохранились: %s" % (im.getpixel((0, 0)),))
+        if abs(win.states[new].scale - 1.0) > 1e-6 or new not in win.checked or f0 in win.states:
+            raise RuntimeError("состояние нового фото неверно")
+    step("«Обрезать» кадрирует по рамке", crop_apply_flow)
     step("вкладка «Принтер»", lambda: (win.show_page(2), shot("printer"), win.show_page(0)))
     step("параметры сохранения", lambda: win.options() or (_ for _ in ()).throw(RuntimeError("options() вернул пусто")))
     text = "PhotoCrop Qt selftest  %s\nPySide6 %s, Python %s\n\n%s\n" % (
