@@ -31,7 +31,7 @@ class MultiPrint(unittest.TestCase):
         self.assertEqual(len(rep["sent"]["fast"]) + len(rep["sent"]["slow"]), 40)
 
     def test_broken_printer_excluded_sheets_rerouted(self):
-        rep = mp.MultiRun(range(12), ["A", "B"], fake({}, broken=("B",))).run()
+        rep = mp.MultiRun(range(12), ["A", "B"], fake({"A": .01}, broken=("B",))).run()     # A не успевает разобрать всю очередь до первого захода B
         self.assertIn("B", rep["excluded"])
         self.assertEqual(sorted(rep["sent"]["A"]), list(range(12)))
         self.assertEqual(rep["failed"], [])
