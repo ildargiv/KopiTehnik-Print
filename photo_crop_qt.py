@@ -5970,6 +5970,11 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
     def _quick_card(self):
         """Три строки: кнопка-ячейка на всю ширину и справа маленькие «сохранить» и «переименовать»."""
         self.qs_btns, self.qs_save, self.qs_ren, self.qs_rows = [], [], [], []
+        self._qs_on, self._qs_fp = None, None
+        self._qs_timer = QTimer(self)
+        self._qs_timer.setInterval(500)
+        self._qs_timer.timeout.connect(self._qs_watch)
+        self._qs_timer.start()
         rows = []
         for i in range(pqk.SLOTS):
             b = MotionButton("")
@@ -5996,6 +6001,31 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         self._qs_apply_visible()
         self._qs_refresh()
         return card_
+
+    def _qs_fingerprint(self):
+        try:
+            return json.dumps(self._qs_capture(), sort_keys=True, default=str)
+        except Exception:
+            return None
+
+    def _qs_mark(self, i):
+        """Ячейка i включена: запоминаем снимок настроек, чтобы заметить ручное изменение. Снимок берём чуть позже,
+        когда окно закончило подстраиваться под применённые настройки."""
+        self._qs_on, self._qs_fp = (self.pr.get("printer", ""), i), None
+        self._qs_refresh()
+
+        def snap(i=i, key=self._qs_on):
+            if self._qs_on == key:
+                self._qs_fp = self._qs_fingerprint()
+        QTimer.singleShot(400, snap)
+
+    def _qs_watch(self):
+        """Включённая ячейка гаснет, как только настройки печати стали другими (бумага, качество, цвет, принтер, формат)."""
+        if self._qs_on is None or self._qs_fp is None:
+            return
+        if self._qs_on[0] != self.pr.get("printer", "") or self._qs_fingerprint() != self._qs_fp:
+            self._qs_on = self._qs_fp = None
+            self._qs_refresh()
 
     def _qs_visible(self):
         try:
@@ -6036,7 +6066,11 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
             b = self.qs_btns[i]
             nm = tr(sl["name"]) if sl.get("empty") else sl["name"]
             b.setText(("" if sl.get("empty") else "● ") + (nm if len(nm) <= 20 else nm[:19] + "…"))
-            b.setStyleSheet("QPushButton { border: 2px solid %s; border-radius: 8px; padding: 8px 4px; font-size: 12px; }" % col if col else "")
+            on = self._qs_on == (self.pr.get("printer", ""), i) and not sl.get("empty")
+            if on:                                                   # ячейка сейчас включена: полностью зелёная, пока настройки не менялись вручную
+                b.setStyleSheet("QPushButton { background: %s; color: #ffffff; font-weight: 600; border: 2px solid %s; border-radius: 8px; padding: 8px 4px; font-size: 12px; }" % (self.QS_COLORS[pqk.GREEN], self.QS_COLORS[pqk.GREEN]))
+            else:
+                b.setStyleSheet("QPushButton { border: 2px solid %s; border-radius: 8px; padding: 8px 4px; font-size: 12px; }" % col if col else "")
             b.setToolTip(tr("Пустая ячейка") if sl.get("empty") else sl["name"] + "\n" + self._qs_describe(sl))
             self.qs_ren[i].setEnabled(not sl.get("empty"))
 
@@ -6080,7 +6114,7 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         slots[i] = {"name": nm, "bound": True, "printer": printer,
                     "model": self._epson().model or "", "state": self._qs_capture()}
         self.persist()
-        self._qs_refresh()
+        self._qs_mark(i)
 
     def _qs_rename(self, i):
         slots = self._qs_slots()
@@ -6158,6 +6192,7 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
             notes.append(tr("Цветокоррекция драйвера включена при цветовом профиле."))
         self.l_qs.setText(" ".join(notes))
         self.l_qs.setVisible(bool(notes))
+        self._qs_mark(i)
 
     def _ccor_on(self):
         """True, если у модели известна цветокоррекция драйвера и она включена (искажает цвет профиля)."""
@@ -10314,6 +10349,36 @@ def selftest(app):
         finally:
             win.settings["multi_printers"], win.settings["multi_modes"], win.settings["print_quick"], win.printers = saved
     step("окно «Принтеры…»: режим для принтера", multi_dialog_flow)
+
+    def quick_active_flow():
+        """«Быстрый старт»: включённая ячейка зелёная, пока настройки не менялись вручную."""
+        name = win.pr.get("printer", "")
+        slots = win._qs_slots()
+        old = slots[0]
+        slots[0] = {"name": "Тест", "bound": True, "printer": name, "model": "", "state": win._qs_capture()}
+        try:
+            win._qs_mark(0)
+            t_end = time.time() + 1.5
+            while time.time() < t_end:
+                app.processEvents()
+                time.sleep(0.05)
+            if win._qs_on is None or "background: #3fb950" not in win.qs_btns[0].styleSheet():
+                raise RuntimeError("включённая ячейка не стала зелёной")
+            other = next(f for f in pc.FORMATS if f != win.s["format"])
+            before = win.s["format"]
+            win.s["format"] = other                       # ручное изменение настроек
+            t_end = time.time() + 1.5
+            while win._qs_on is not None and time.time() < t_end:
+                app.processEvents()
+                time.sleep(0.05)
+            win.s["format"] = before
+            if win._qs_on is not None or "background: #3fb950" in win.qs_btns[0].styleSheet():
+                raise RuntimeError("ячейка не погасла после ручного изменения")
+        finally:
+            slots[0] = old
+            win._qs_on = win._qs_fp = None
+            win._qs_refresh()
+    step("«Быстрый старт»: включённая ячейка зелёная и гаснет", quick_active_flow)
     step("вкладка «Принтер»", lambda: (win.show_page(2), shot("printer"), win.show_page(0)))
     step("параметры сохранения", lambda: win.options() or (_ for _ in ()).throw(RuntimeError("options() вернул пусто")))
     text = "PhotoCrop Qt selftest  %s\nPySide6 %s, Python %s\n\n%s\n" % (
