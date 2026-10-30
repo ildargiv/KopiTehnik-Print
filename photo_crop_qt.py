@@ -5522,7 +5522,9 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         self.l_queue = lbl("Нажмите «Обновить», чтобы увидеть очередь.", "muted", wrap=True)
         queue = card("Очередь печати", self.l_queue,
                      hbox(btn("Обновить", self.queue_refresh), btn("Очистить", self.queue_clear), spacing=6))
-        return self._scroll(self._quick_card(), printer, screen, corr, proc, bleed, job, queue, btn("Старое окно печати…", self.open_print, "link"))
+        self.w_quick = self._quick_card()
+        self.w_quick.setVisible(bool(self.settings.get("qs_enabled", True)))
+        return self._scroll(self.w_quick, printer, screen, corr, proc, bleed, job, queue, btn("Старое окно печати…", self.open_print, "link"))
 
     def reload_printers(self):
         self.printers = pc.list_printers()
@@ -6037,6 +6039,10 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
             self._qs_on = self._qs_fp = None
             self._qs_refresh()
 
+    def quick_refresh(self):
+        if hasattr(self, "w_quick"):
+            self.w_quick.setVisible(bool(self.settings.get("qs_enabled", True)))
+
     def _qs_visible(self):
         try:
             n = int(self.settings.get("qs_visible", pqk.DEFAULT_VISIBLE))
@@ -6076,7 +6082,7 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
             b = self.qs_btns[i]
             nm = tr(sl["name"]) if sl.get("empty") else sl["name"]
             b.setText(("" if sl.get("empty") else "● ") + (nm if len(nm) <= 20 else nm[:19] + "…"))
-            on = self._qs_on == (self.pr.get("printer", ""), i) and not sl.get("empty")
+            on = self._qs_on == (self.pr.get("printer", ""), i) and not sl.get("empty") and bool(self.settings.get("qs_highlight", True))
             if on:                                                   # ячейка сейчас включена: полностью зелёная, пока настройки не менялись вручную
                 b.setStyleSheet("QPushButton { background: %s; color: #ffffff; font-weight: 600; border: 2px solid %s; border-radius: 8px; padding: 8px 4px; font-size: 12px; }" % (self.QS_COLORS[pqk.GREEN], self.QS_COLORS[pqk.GREEN]))
             else:
@@ -8620,7 +8626,7 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         s = self.s
         self._bleed_flush()
         fresh = pc.load_settings()                    # окно печати пишет свои разделы в тот же файл — не затираем их
-        for k in ("last_dir", "start_dir_mode", "snap_px", "anim", "icc_dir", "check_updates", "skip_update", "doc_paper", "doc_fit", "doc_margin", "doc_cm_on", "doc_icc", "converter_path", "adj_presets", "adj_preset_names", "confirm_actions", "agent_enabled", "agent_badge", "agent_lock", "agent_token", "agent_port", "agent_allow_print", "agent_max_sheets", "agent_confirm_print", "multi_enabled", "multi_printers", "multi_modes", "multi_on", "multi_serialize", "qs_visible"):
+        for k in ("last_dir", "start_dir_mode", "snap_px", "anim", "icc_dir", "check_updates", "skip_update", "doc_paper", "doc_fit", "doc_margin", "doc_cm_on", "doc_icc", "converter_path", "adj_presets", "adj_preset_names", "confirm_actions", "agent_enabled", "agent_badge", "agent_lock", "agent_token", "agent_port", "agent_allow_print", "agent_max_sheets", "agent_confirm_print", "multi_enabled", "multi_printers", "multi_modes", "multi_on", "multi_serialize", "qs_visible", "qs_enabled", "qs_highlight"):
             if k in self.settings:
                 fresh[k] = self.settings[k]
         fresh.update(format=s["format"], orient=s["orient"], mode=s["mode"], recursive=s["recursive"], subfolder=s["subfolder"],
@@ -9544,9 +9550,15 @@ class SettingsDialog(QDialog):
 
         first = section("Интерфейс", "settings", [("Оформление", [look]), ("Язык и общие", [general])])
         section("Фото", "image", [("Кадрирование", [crop]), ("Сохранение", [self._save_card()])])
-        multi_card = card("Несколько принтеров", row("Печать на нескольких принтерах (кнопка «Принтеры…» рядом с «Печать»)", sw_multi),
-                          lbl("Листы расходятся между отмеченными принтерами. Отметить принтеры можно кнопкой «Принтеры…» рядом с «Печать».", "muted", wrap=True))
-        section("Печать", "print", [("Несколько принтеров", [multi_card]), ("Профили печати", [self._profiles_card()]),
+        sw_qs = Switch(bool(st.get("qs_enabled", True)))
+        sw_qs.toggled.connect(lambda on: (st.__setitem__("qs_enabled", bool(on)), app.quick_refresh()))
+        sw_hl = Switch(bool(st.get("qs_highlight", True)))
+        sw_hl.toggled.connect(lambda on: (st.__setitem__("qs_highlight", bool(on)), app._qs_refresh()))
+        multi_card = card("Режимы печати", row("Печать на нескольких принтерах (кнопка «Принтеры…» рядом с «Печать»)", sw_multi),
+                          lbl("Листы расходятся между отмеченными принтерами. Отметить принтеры можно кнопкой «Принтеры…» рядом с «Печать».", "muted", wrap=True),
+                          row("Быстрый старт (ячейки настроек на вкладке «Принтер»)", sw_qs),
+                          row("Подсвечивать включённую ячейку «Быстрого старта» зелёным", sw_hl))
+        section("Печать", "print", [("Режимы печати", [multi_card]), ("Профили печати", [self._profiles_card()]),
                                     ("Счётчик печати", [self._counter_card()])])
         section("ИИ-агент (MCP)", "sparkle", [("Подключение и права", [self._agent_card()])])
         section("О программе", "doc", [("Версия и обновления", [upd_card])])
