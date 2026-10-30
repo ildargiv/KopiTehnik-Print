@@ -1,13 +1,10 @@
 **English** | [Русский](RELEASE_NOTES.ru.md) | [Español](RELEASE_NOTES.es.md) | [简体中文](RELEASE_NOTES.zh-CN.md) | [繁體中文](RELEASE_NOTES.zh-Hant.md) | [Deutsch](RELEASE_NOTES.de.md) | [Français](RELEASE_NOTES.fr.md) | [Português](RELEASE_NOTES.pt.md) | [日本語](RELEASE_NOTES.ja.md) | [한국어](RELEASE_NOTES.ko.md) | [Türkçe](RELEASE_NOTES.tr.md) | [Bahasa Indonesia](RELEASE_NOTES.id.md) | [العربية](RELEASE_NOTES.ar.md) | [हिन्दी](RELEASE_NOTES.hi.md) | [Italiano](RELEASE_NOTES.it.md) | [Polski](RELEASE_NOTES.pl.md) | [Українська](RELEASE_NOTES.uk.md) | [Tiếng Việt](RELEASE_NOTES.vi.md) | [ไทย](RELEASE_NOTES.th.md) | [Татарча](RELEASE_NOTES.tt.md)
 
-# Release notes — v1.5.0
+# Release notes — v1.6.0
 
-- **Epson driver controls in the Printer tab** (T50, P50, TX650, PX660, R290, 1410, L805, L1800, L8050, L18050): print quality, borderless printing and the driver's colour correction; modes the driver would roll back on the chosen paper are hidden, and the program warns when borderless changes the paper type.
-- **Quick Start**: three slots per printer with format, paper, quality, borderless, colour profile and processing; save, rename, apply.
-- **Nozzle check and head cleaning** buttons (with a warning that cleaning uses ink and fills the waste tank).
-- **Print test sheet** (grey wedge, shadows/highlights, colours, skin tones I–VI, gradients, sharpness) for the current paper size.
-- **AI agent (MCP)**: new tools `epson_settings`, `quick_start` (list / save / apply / clear), `printer_maintenance` (needs `confirm=true`) and `add_test_sheet`; `select_printer` now really switches the printer in the window.
-- New **Settings** button in the header (gear with a label, turns on hover).
-- Photo counter no longer clips digits; the about box states that the program is not affiliated with Epson.
+- **Printing on several printers at once**: tick printers in the new square "Printers" button next to Print; with more than one ticked the photos are distributed by readiness (faster printers get more). Each printer uses its own Quick Start mode. Modes: queue, in turns, in blocks. Pause, per-printer progress, "print what is missing" after a failure, automatic exclusion of a failing printer, slowdown detection (Epson) via the Windows spooler, and a check for the FILE: port / offline printers. The button turns green while the mode is active. Everything can be turned off in Settings (off by default).
+- **Quick Start**: up to 8 cells (a small gear chooses how many are shown); the active cell turns fully green until you change settings by hand.
+- **Layout tab**: zoom of the open photo in percent as in Epson Photo+ with automatic centring, "Fit" for this photo only, "Original" (previous behaviour) and a real "Crop" (cuts everything outside the frame, keeps white margins inside).
+- Settings: a "Print modes" card with switches for these modes.
 
-Files in the release: `KopiTehnikPrint-Setup-1.5.0.exe`.
+Files in the release: `KopiTehnikPrint-Setup-1.6.0.exe`.
