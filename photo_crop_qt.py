@@ -6403,6 +6403,7 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
             self.settings["multi_modes"] = dlg.modes()
             self.settings["multi_on"] = dlg.mode_on
             self.settings["multi_serialize"] = dlg.cb_serial.isChecked()
+            self.settings["multi_blocks"] = dlg.cb_blocks.isChecked()
             try:
                 pc.save_settings(self.settings)
             except Exception:
@@ -6622,7 +6623,7 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
                 if not names:
                     raise RuntimeError(tr("Ни один из отмеченных принтеров не готов") + (":\n" + "\n".join(pre) if pre else ""))
                 run = runner[0] = mp.MultiRun(units, names, send, cancel=self.cancel, on_event=on_event, serialize=serialize,
-                                              backlog=lambda name: queue_n.get(name, 0), window=2)
+                                              blocks=bool(self.settings.get("multi_blocks", False)), backlog=lambda name: queue_n.get(name, 0), window=2)
                 for name in names:
                     threading.Thread(target=poll, args=(name,), daemon=True).start()
                 try:
@@ -8626,7 +8627,7 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         s = self.s
         self._bleed_flush()
         fresh = pc.load_settings()                    # окно печати пишет свои разделы в тот же файл — не затираем их
-        for k in ("last_dir", "start_dir_mode", "snap_px", "anim", "icc_dir", "check_updates", "skip_update", "doc_paper", "doc_fit", "doc_margin", "doc_cm_on", "doc_icc", "converter_path", "adj_presets", "adj_preset_names", "confirm_actions", "agent_enabled", "agent_badge", "agent_lock", "agent_token", "agent_port", "agent_allow_print", "agent_max_sheets", "agent_confirm_print", "multi_enabled", "multi_printers", "multi_modes", "multi_on", "multi_serialize", "qs_visible", "qs_enabled", "qs_highlight"):
+        for k in ("last_dir", "start_dir_mode", "snap_px", "anim", "icc_dir", "check_updates", "skip_update", "doc_paper", "doc_fit", "doc_margin", "doc_cm_on", "doc_icc", "converter_path", "adj_presets", "adj_preset_names", "confirm_actions", "agent_enabled", "agent_badge", "agent_lock", "agent_token", "agent_port", "agent_allow_print", "agent_max_sheets", "agent_confirm_print", "multi_enabled", "multi_printers", "multi_modes", "multi_on", "multi_serialize", "multi_blocks", "qs_visible", "qs_enabled", "qs_highlight"):
             if k in self.settings:
                 fresh[k] = self.settings[k]
         fresh.update(format=s["format"], orient=s["orient"], mode=s["mode"], recursive=s["recursive"], subfolder=s["subfolder"],
@@ -9432,6 +9433,9 @@ class MultiPrinterDialog(QDialog):
         self.cb_serial = QCheckBox(tr("Отправлять на принтеры по очереди (если драйвер зависает при параллельной печати)"))
         self.cb_serial.setChecked(bool(app.settings.get("multi_serialize", False)))
         lay.addWidget(self.cb_serial)
+        self.cb_blocks = QCheckBox(tr("Раздавать блоками: каждому принтеру подряд идущие листы, стопки не перемешиваются"))
+        self.cb_blocks.setChecked(bool(app.settings.get("multi_blocks", False)))
+        lay.addWidget(self.cb_blocks)
         self.mode_on = bool(app.settings.get("multi_on", True))
         self.b_off = btn("", self._toggle_mode, "link")
         self._sync_off()

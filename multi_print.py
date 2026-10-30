@@ -18,12 +18,14 @@ class Cancelled(Exception):
 
 class MultiRun:
     def __init__(self, sheets, printers, send, cancel=None, max_errors=2, serialize=False, on_event=None,
-                 backlog=None, window=2, slow_factor=3.0, poll=0.2):
+                 backlog=None, window=2, slow_factor=3.0, poll=0.2, blocks=False):
         """sheets — идентификаторы листов в порядке печати; printers — имена; send(printer, sheet) блокирует
         до отправки и бросает исключение при сбое; cancel — threading.Event; on_event(kind, printer, sheet, info).
         backlog(printer) -> число ещё не напечатанных заданий этого прогона в очереди принтера (или None, если неизвестно).
         Новый лист принтер получает, только когда в очереди меньше window заданий: так медленный или застрявший принтер
-        сам получает меньше листов. Если принтер не освобождает окно в slow_factor раз дольше своего обычного темпа, шлётся событие «slow»."""
+        сам получает меньше листов. Если принтер не освобождает окно в slow_factor раз дольше своего обычного темпа, шлётся событие «slow».
+        blocks=True: каждому принтеру сначала достаётся свой подряд идущий блок листов (стопки не перемешиваются),
+        а освободившийся раньше берёт листы с конца чужого блока."""
         if not printers:
             raise ValueError("нет принтеров")
         self.sheets = list(sheets)
@@ -35,6 +37,15 @@ class MultiRun:
         self._lock = threading.RLock()
         self._send_lock = threading.Lock() if serialize else None      # драйверы, не терпящие параллельной отправки
         self._queue = deque(self.sheets)
+        self._own = {}
+        if blocks and len(self.printers) > 1:
+            self._queue = deque()                                      # общая очередь нужна только для повторов
+            n, k = len(self.sheets), len(self.printers)
+            lo = 0
+            for i, p in enumerate(self.printers):
+                hi = lo + n // k + (1 if i < n % k else 0)
+                self._own[p] = deque(self.sheets[lo:hi])
+                lo = hi
         self._cond = threading.Condition(self._lock)
         self.state = {s: QUEUED for s in self.sheets}
         self.tries = {s: {p: 0 for p in self.printers} for s in self.sheets}   # неудачные попытки листа на принтере
@@ -63,13 +74,33 @@ class MultiRun:
         """Листу больше некуда идти: на каждом живом принтере исчерпаны попытки."""
         return not any(p in self._alive and self._eligible(s, p) for p in self.printers)
 
+    def _queues(self):
+        return [self._queue] + list(self._own.values())
+
+    def _remove(self, s):
+        for q in self._queues():
+            try:
+                q.remove(s)
+                return
+            except ValueError:
+                pass
+
     def _take(self, printer):
         """Следующий по порядку лист для принтера или None. Порядок очереди сохраняется."""
-        for i, s in enumerate(self._queue):
-            if self._eligible(s, printer):
-                del self._queue[i]
-                self.state[s] = SENDING
-                return s
+        for q in [self._queue, self._own.get(printer, deque())]:       # сначала повторы, затем свой блок
+            for i, s in enumerate(q):
+                if self._eligible(s, printer):
+                    del q[i]
+                    self.state[s] = SENDING
+                    return s
+        donors = sorted((q for p, q in self._own.items() if p != printer and q), key=len, reverse=True)
+        for q in donors:                                               # своё кончилось: берём с конца самого длинного чужого блока
+            for i in range(len(q) - 1, -1, -1):
+                if self._eligible(q[i], printer):
+                    s = q[i]
+                    del q[i]
+                    self.state[s] = SENDING
+                    return s
         return None
 
     def _gate(self, printer):
@@ -141,10 +172,13 @@ class MultiRun:
                         self._alive.discard(printer)
                     self.state[s] = QUEUED
                     self._queue.appendleft(s)
-                    for x in list(self._queue):                 # исход листов, которым больше некуда идти, известен
+                    if drop and printer in self._own:           # блок выбывшего принтера уходит в общую очередь
+                        self._queue.extend(self._own[printer])
+                        self._own[printer].clear()
+                    for x in [y for q in self._queues() for y in q]:      # исход листов, которым больше некуда идти, известен
                         if self._dead(x):
                             self.state[x] = FAILED
-                            self._queue.remove(x)
+                            self._remove(x)
                     self._cond.notify_all()
                 self._emit("error", printer, s, str(ex))
                 if drop:

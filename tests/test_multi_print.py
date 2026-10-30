@@ -149,6 +149,23 @@ class MultiPrint(unittest.TestCase):
         mp.MultiRun(range(5), ["A"], fake({}), cancel=ev, backlog=lambda p: 99).run()
         self.assertLess(time.time() - t0, 2)
 
+    def test_blocks_are_contiguous(self):
+        rep = mp.MultiRun(range(10), ["A", "B"], fake({"A": .003, "B": .003}), blocks=True).run()
+        self.assertEqual(sorted(rep["sent"]["A"]), list(range(0, 5)))
+        self.assertEqual(sorted(rep["sent"]["B"]), list(range(5, 10)))
+        self.assertEqual(rep["sent"]["A"], sorted(rep["sent"]["A"]))
+
+    def test_blocks_fast_printer_steals_tail(self):
+        rep = mp.MultiRun(range(20), ["fast", "slow"], fake({"fast": .002, "slow": .03}), blocks=True).run()
+        self.assertEqual(sorted(rep["sent"]["fast"] + rep["sent"]["slow"]), list(range(20)))
+        self.assertGreater(len(rep["sent"]["fast"]), 10)
+        self.assertEqual(rep["sent"]["slow"], sorted(rep["sent"]["slow"]))     # у медленного свой блок идёт подряд
+
+    def test_blocks_broken_printer_block_rerouted(self):
+        rep = mp.MultiRun(range(10), ["A", "B"], fake({"A": .003}, broken=("B",)), blocks=True).run()
+        self.assertEqual(sorted(rep["sent"]["A"]), list(range(10)))
+        self.assertEqual(rep["failed"], [])
+
 
 if __name__ == "__main__":
     unittest.main()
