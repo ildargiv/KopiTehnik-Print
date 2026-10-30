@@ -6278,7 +6278,7 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         if not files:
             info(self, "Ни одно фото не отмечено. Отметьте нужные («+» в углу превью).")
             return
-        if len(self.multi_selected()) > 1:                # отмечено больше одного принтера: режим включается сам
+        if self.multi_active():                           # отмечено больше одного принтера и режим не отключён: включается сам
             return self._print_multi(files, only)
         pr = self.pr
         if not pr["printer"] or self.blob is None:
@@ -6362,17 +6362,26 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         want = self.settings.get("multi_printers") or []
         return [p_ for p_ in self.printers if p_ in want]
 
+    def multi_active(self):
+        """Режим печати на нескольких принтерах сейчас включён: он разрешён в настройках, не отключён кнопкой и отмечено больше одного принтера."""
+        return len(self.multi_selected()) > 1 and bool(self.settings.get("multi_on", True))
+
     def multi_refresh(self):
         self.b_multi.setVisible(self.multi_enabled())
         n = len(self.multi_selected())
-        self.b_multi.setText(str(n) if n > 1 else "")
-        self.b_multi.setToolTip(tr("Принтеры…") + (" (%d)" % n if n > 1 else "") + ": " + tr("печать на нескольких принтерах, отметьте больше одного"))
+        on = self.multi_active()
+        self.b_multi.setText(str(n) if on else "")
+        self.b_multi.setToolTip(tr("Печать на нескольких принтерах") + ": " + (trf("включена, принтеров: {n}", n=n) if on else tr("выключена")))
+        green = self.QS_COLORS[pqk.GREEN]
+        self.b_multi.setStyleSheet("QPushButton { background: %s; border: 2px solid %s; border-radius: 8px; color: #ffffff; font-weight: 600; }" % (green, green) if on else "")
+        self.b_multi.setIcon(icon("printer_cfg", "#ffffff" if on else T["text"]))
 
     def multi_dialog(self):
         dlg = MultiPrinterDialog(self)
         if dlg.exec():
             self.settings["multi_printers"] = dlg.chosen()
             self.settings["multi_modes"] = dlg.modes()
+            self.settings["multi_on"] = dlg.mode_on
             try:
                 pc.save_settings(self.settings)
             except Exception:
@@ -8532,7 +8541,7 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         s = self.s
         self._bleed_flush()
         fresh = pc.load_settings()                    # окно печати пишет свои разделы в тот же файл — не затираем их
-        for k in ("last_dir", "start_dir_mode", "snap_px", "anim", "icc_dir", "check_updates", "skip_update", "doc_paper", "doc_fit", "doc_margin", "doc_cm_on", "doc_icc", "converter_path", "adj_presets", "adj_preset_names", "confirm_actions", "agent_enabled", "agent_badge", "agent_lock", "agent_token", "agent_port", "agent_allow_print", "agent_max_sheets", "agent_confirm_print", "multi_enabled", "multi_printers", "multi_modes", "qs_visible"):
+        for k in ("last_dir", "start_dir_mode", "snap_px", "anim", "icc_dir", "check_updates", "skip_update", "doc_paper", "doc_fit", "doc_margin", "doc_cm_on", "doc_icc", "converter_path", "adj_presets", "adj_preset_names", "confirm_actions", "agent_enabled", "agent_badge", "agent_lock", "agent_token", "agent_port", "agent_allow_print", "agent_max_sheets", "agent_confirm_print", "multi_enabled", "multi_printers", "multi_modes", "multi_on", "qs_visible"):
             if k in self.settings:
                 fresh[k] = self.settings[k]
         fresh.update(format=s["format"], orient=s["orient"], mode=s["mode"], recursive=s["recursive"], subfolder=s["subfolder"],
@@ -9335,9 +9344,19 @@ class MultiPrinterDialog(QDialog):
             lay.addLayout(hbox(cb, None, mode, spacing=8))
         if not app.printers:
             lay.addWidget(lbl(tr("Принтеры не найдены.")))
-        lay.addLayout(hbox(None, btn(tr("Отмена"), self.reject, "link"), btn(tr("Готово"), self.accept, "primary"), spacing=8))
+        self.mode_on = bool(app.settings.get("multi_on", True))
+        self.b_off = btn("", self._toggle_mode, "link")
+        self._sync_off()
+        lay.addLayout(hbox(self.b_off, None, btn(tr("Отмена"), self.reject, "link"), btn(tr("Готово"), self.accept, "primary"), spacing=8))
         self.setLayout(lay)
         self.setMinimumWidth(420)
+
+    def _sync_off(self):
+        self.b_off.setText(tr("Отключить печать на нескольких принтерах") if self.mode_on else tr("Включить печать на нескольких принтерах"))
+
+    def _toggle_mode(self):
+        self.mode_on = not self.mode_on
+        self._sync_off()
 
     def chosen(self):
         return [b.name for b in self.boxes if b.isChecked()]
@@ -10319,6 +10338,14 @@ def selftest(app):
             if win.multi_mode("Принтер A") is None or win.multi_mode("Принтер B") is not None:
                 raise RuntimeError("режим «Быстрого старта» для принтера выбран неверно")
             win.settings["multi_modes"] = {}
+            if "#3fb950" not in win.b_multi.styleSheet():
+                raise RuntimeError("при включённом режиме кнопка не зелёная")
+            win.settings["multi_on"] = False
+            win.multi_refresh()
+            if win.multi_active() or "#3fb950" in win.b_multi.styleSheet():
+                raise RuntimeError("отключённый режим остался активным или зелёным")
+            win.settings["multi_on"] = True
+            win.multi_refresh()
             n_sheets = len(win.sheet_plan()[0]["sheets"])
             win.print_now()
             t_end = time.time() + 20
