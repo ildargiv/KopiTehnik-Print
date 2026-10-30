@@ -5404,6 +5404,10 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         self.b_cancel = btn("Отменить печать", self.cancel.set, "link")
         self.b_cancel.hide()
         self.b_save = btn("Сохранить отмеченные", lambda: self.save(True), big=True, ico="save", tip="Ctrl+Shift+S; Ctrl+S — только текущее фото")
+        self.b_resume = btn("", self.multi_resume, ico="reset")
+        self.b_resume.hide()
+        self.l_multi = lbl("", "muted", wrap=True)
+        self.l_multi.hide()
         self.b_multi = btn("", self.multi_dialog, ico="printer_cfg")      # квадратная кнопка рядом с «Печать»: принтер с ползунками настройки
         self.b_multi.setIconSize(QSize(24, 24))
         self.b_multi.setToolTip(tr("Печать на нескольких принтерах: отметьте больше одного, и листы разойдутся между ними"))
@@ -5419,7 +5423,7 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         self.b_multi.setProperty("big", "true")
         side = max(44, self.b_print.sizeHint().height())
         self.b_multi.setFixedSize(side, side)
-        lay = vbox(hbox(self.seg_page, margins=(0, 0, 16, 0)), self.pages, self.progress, self.l_prog, self.b_cancel, self.b_save, hbox(self.b_print, self.b_multi, spacing=8),
+        lay = vbox(hbox(self.seg_page, margins=(0, 0, 16, 0)), self.pages, self.progress, self.l_prog, self.l_multi, self.b_cancel, self.b_resume, self.b_save, hbox(self.b_print, self.b_multi, spacing=8),
                    spacing=10, margins=(4, 12, 14, 12))
         lay.setStretch(1, 1)
         w.setLayout(lay)
@@ -6332,6 +6336,8 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
                                     a="%g" % L["PW"], b="%g" % L["PH"])
         if (SOFT[0] or "⚠" in text) and not ask(self, text + "\n\n" + tr("Начать печать?")):       # без предупреждений печать идёт сразу
             return
+        self.l_multi.hide()
+        self.b_resume.hide()
         c = {"kind": "print", "printer": pr["printer"], "blob": blob, "title": "PhotoCrop", "o": o, "idxs": list(range(len(plan["sheets"]))),
              "plan": plan, "photos": photos, "ppi": pc.resolve_ppi(o, geom), "mode": self.mode(), "cm": cm,
              "pcorr": pcr.norm(self.s["pcorr"]) if pcr.active(self.s["pcorr"]) else None}
@@ -6390,6 +6396,7 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
             self.settings["multi_printers"] = dlg.chosen()
             self.settings["multi_modes"] = dlg.modes()
             self.settings["multi_on"] = dlg.mode_on
+            self.settings["multi_serialize"] = dlg.cb_serial.isChecked()
             try:
                 pc.save_settings(self.settings)
             except Exception:
@@ -6509,15 +6516,38 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         for c in ctxs.values():
             c["job"] = {"kind": "print", "printer": c["printer"], "blob": c["blob"], "title": "PhotoCrop", "o": c["o"], "plan": plan,
                         "photos": photos, "ppi": pc.resolve_ppi(c["o"], c["geom"]), "mode": self.mode(), "cm": c["cm"], "pcorr": c["pcorr"]}
+        self._multi_ctxs, self._multi_copies, self._multi_total = ctxs, copies, n
+        self._multi_launch(units, files)
+
+    def _multi_launch(self, units, files):
+        """Запуск (или повтор) печати списка единиц работы (лист, копия) на уже подготовленных принтерах."""
+        ctxs, copies, n = self._multi_ctxs, self._multi_copies, len(units)
+        pr = self.pr
+        pause = max(0.0, min(60.0, float(str(pr.get("pause", 2)).replace(",", ".") or 0)))
+        serialize = bool(self.settings.get("multi_serialize", False))
+        self._multi_left = []
+        self.b_resume.hide()
         self.cancel.clear()
         self.printing = True
         self._print_files = files
         self._busy(n, tr("Подготовка…"), [], "print")
         self.b_print.set_progress(0.0)
         self.b_cancel.show()
+        self.l_multi.setText("")
+        self.l_multi.show()
 
         prefix = "PhotoCrop " + time.strftime("%H%M%S")                   # метка прогона: по ней находим свои задания в очереди принтера
         queue_n, stop, runner = {}, threading.Event(), [None]
+        stats, slock = {nm: {"n": 0, "t0": None, "err": 0, "note": ""} for nm in ctxs}, threading.Lock()
+
+        def render():
+            lines = []
+            for nm, st_ in stats.items():
+                speed = ""
+                if st_["n"] >= 2 and st_["t0"]:
+                    speed = ", %.1f %s" % (st_["n"] / max(1e-6, (time.time() - st_["t0"]) / 60.0), tr("листов/мин"))
+                lines.append("%s: %d %s%s%s" % (nm, st_["n"], tr("листов"), speed, ("  " + st_["note"]) if st_["note"] else ""))
+            return "\n".join(lines)
 
         def poll(name):
             """Раз в 2 секунды смотрим очередь Windows этого принтера: сколько наших заданий ещё не напечатано."""
@@ -6539,15 +6569,33 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
             res = pc.run_sheets_job(job, lambda *_: None, self.cancel)
             if res[0] != "done":
                 raise mp.Cancelled()
+            t_end = time.time() + pause                               # пауза между заданиями на этом принтере, отмена её прерывает
+            while time.time() < t_end and not self.cancel.is_set():
+                time.sleep(0.1)
 
         def on_event(kind, printer, unit, info):
+            with slock:
+                st_ = stats.get(printer)
+                if kind == "sent" and st_ is not None:
+                    st_["t0"] = st_["t0"] or time.time()
+                    st_["n"] += 1
+                    st_["err"] = 0
+                    on_event.sent = info
+                elif kind == "error" and st_ is not None:
+                    st_["err"] += 1
+                    st_["note"] = "⚠ " + tr("ошибка")
+                elif kind == "excluded" and st_ is not None:
+                    st_["note"] = "⚠ " + tr("выбыл")
+                elif kind == "slow" and st_ is not None:
+                    st_["note"] = "⚠ " + tr("замедлился, получает меньше листов")
+                elif kind == "recovered" and st_ is not None:
+                    st_["note"] = ""
+                text = render()
+            self.sig.progress.emit(max(0, on_event.sent - 1), n, "\x02" + text)
             if kind == "sent":
-                on_event.sent = info
                 self.sig.progress.emit(info - 1, n, "\x01%s: %s" % (printer, trf("лист {a} из {b}", a=info, b=n)))
-            elif kind == "excluded":
-                self.sig.progress.emit(0, n, tr("Принтер выбыл") + ": " + printer)
-            elif kind == "slow":
-                self.sig.progress.emit(max(0, on_event.sent - 1), n, "\x01" + tr("Принтер замедлился, получает меньше листов") + ": " + printer)
+            elif kind in ("slow", "excluded"):
+                self.sig.progress.emit(max(0, on_event.sent - 1), n, "\x04" + (tr("Принтер замедлился, получает меньше листов") if kind == "slow" else tr("Принтер выбыл")) + ": " + printer)
 
         on_event.sent = 0
 
@@ -6567,7 +6615,7 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
                         pre.append("%s — %s" % (name, tr("порт FILE: (печать в файл), на каждый лист спросит имя файла; смените порт в свойствах принтера")))
                 if not names:
                     raise RuntimeError(tr("Ни один из отмеченных принтеров не готов") + (":\n" + "\n".join(pre) if pre else ""))
-                run = runner[0] = mp.MultiRun(units, names, send, cancel=self.cancel, on_event=on_event,
+                run = runner[0] = mp.MultiRun(units, names, send, cancel=self.cancel, on_event=on_event, serialize=serialize,
                                               backlog=lambda name: queue_n.get(name, 0), window=2)
                 for name in names:
                     threading.Thread(target=poll, args=(name,), daemon=True).start()
@@ -6576,6 +6624,7 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
                 finally:
                     stop.set()
                 self._multi_summary = pre + mp.summarize(rep)
+                self._multi_left = list(rep["failed"]) + list(rep["not_started"])          # их можно допечатать кнопкой
                 total = sum(len(v) for v in rep["sent"].values())
                 if rep["cancelled"]:
                     self.sig.printed.emit("cancelled", total, "")
@@ -6586,6 +6635,15 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
             except Exception as ex:
                 self.sig.printed.emit("error", 0, "%s: %s" % (ex.__class__.__name__, ex))
         threading.Thread(target=work, daemon=True).start()
+
+    def multi_resume(self):
+        """Допечатать то, что не напечаталось в прошлом прогоне (сбой или отмена): те же принтеры и режимы."""
+        left = list(getattr(self, "_multi_left", []) or [])
+        if not left or self.saving or self.printing:
+            return
+        if not ask(self, trf("Допечатать недостающее: листов {n}. Начать?", n=len(left))):
+            return
+        self._multi_launch(left, getattr(self, "_print_files", []))
 
     def _sheet_sent(self, i, n):
         """Лист i (с нуля) из n ушёл на принтер: первый — большая анимация в центре, остальные летят к кнопке «Печать»."""
@@ -6625,6 +6683,9 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         self.b_cancel.hide()
         self.progress.hide()
         multi, self._multi_summary = getattr(self, "_multi_summary", None), None
+        left = getattr(self, "_multi_left", []) if multi is not None else []
+        self.b_resume.setText(trf("Допечатать недостающее ({n})", n=len(left)) if left else "")
+        self.b_resume.setVisible(bool(left))
         if kind == "done":
             self.l_prog.setText(trf("Отправлено на печать листов: {n}", n=n) + (" (" + "; ".join(multi) + ")" if multi else ""))
             self.queue_refresh()
@@ -8508,6 +8569,13 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
 
     def _save_progress(self, i, n, name):
         self.progress.setValue(i)
+        if name.startswith("\x02"):                          # несколько принтеров: строки «принтер: листов, скорость»
+            self.l_multi.setText(name[1:])
+            return
+        if name.startswith("\x04"):                          # заметное предупреждение: принтер замедлился или выбыл
+            self.l_prog.setText("⚠ " + name[1:])
+            QApplication.beep()
+            return
         if name.startswith("\x01"):                          # печать: текст движка и анимация на каждый отправленный лист
             name = name[1:]
             self.l_prog.setText(tr(name))
@@ -8552,7 +8620,7 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         s = self.s
         self._bleed_flush()
         fresh = pc.load_settings()                    # окно печати пишет свои разделы в тот же файл — не затираем их
-        for k in ("last_dir", "start_dir_mode", "snap_px", "anim", "icc_dir", "check_updates", "skip_update", "doc_paper", "doc_fit", "doc_margin", "doc_cm_on", "doc_icc", "converter_path", "adj_presets", "adj_preset_names", "confirm_actions", "agent_enabled", "agent_badge", "agent_lock", "agent_token", "agent_port", "agent_allow_print", "agent_max_sheets", "agent_confirm_print", "multi_enabled", "multi_printers", "multi_modes", "multi_on", "qs_visible"):
+        for k in ("last_dir", "start_dir_mode", "snap_px", "anim", "icc_dir", "check_updates", "skip_update", "doc_paper", "doc_fit", "doc_margin", "doc_cm_on", "doc_icc", "converter_path", "adj_presets", "adj_preset_names", "confirm_actions", "agent_enabled", "agent_badge", "agent_lock", "agent_token", "agent_port", "agent_allow_print", "agent_max_sheets", "agent_confirm_print", "multi_enabled", "multi_printers", "multi_modes", "multi_on", "multi_serialize", "qs_visible"):
             if k in self.settings:
                 fresh[k] = self.settings[k]
         fresh.update(format=s["format"], orient=s["orient"], mode=s["mode"], recursive=s["recursive"], subfolder=s["subfolder"],
@@ -9355,6 +9423,9 @@ class MultiPrinterDialog(QDialog):
             lay.addLayout(hbox(cb, None, mode, spacing=8))
         if not app.printers:
             lay.addWidget(lbl(tr("Принтеры не найдены.")))
+        self.cb_serial = QCheckBox(tr("Отправлять на принтеры по очереди (если драйвер зависает при параллельной печати)"))
+        self.cb_serial.setChecked(bool(app.settings.get("multi_serialize", False)))
+        lay.addWidget(self.cb_serial)
         self.mode_on = bool(app.settings.get("multi_on", True))
         self.b_off = btn("", self._toggle_mode, "link")
         self._sync_off()
@@ -10340,6 +10411,9 @@ def selftest(app):
             win._multi_ctx, pc.run_sheets_job = fake_ctx, fake_run
             pc.spooler_printer_status = lambda name: {"offline": False}
             globals()["ask"] = lambda *a, **k: True
+            saved_warn = globals()["warn"]
+            warns = []
+            globals()["warn"] = lambda parent, text, *a, **k: warns.append(text)       # окно ошибки модальное: в самопроверке только запоминаем
             win.multi_refresh()
             if not win.b_multi.isVisibleTo(win):
                 raise RuntimeError("кнопка «Принтеры…» не показана при включённом режиме")
@@ -10369,6 +10443,39 @@ def selftest(app):
             idx = sorted(i for _, ix in sent for i in ix)
             if idx != list(range(n_sheets)):
                 raise RuntimeError("листы ушли неверно: %s из %d" % (idx, n_sheets))
+            if "Принтер A" not in win.l_multi.text() or "Принтер B" not in win.l_multi.text():
+                raise RuntimeError("нет строк прогресса по принтерам: %r" % win.l_multi.text())
+            # сбой листа 0 на всех принтерах -> «Допечатать недостающее»
+            sent.clear()
+            fail_first = [True]
+
+            def flaky_run(c, progress, cancel):
+                if fail_first[0] and c["idxs"] == [0]:
+                    raise OSError("нет бумаги")
+                with lock:
+                    sent.append((c["printer"], tuple(c["idxs"])))
+                return ("done", 1, None, [])
+            pc.run_sheets_job = flaky_run
+            win.print_now()
+            t_end = time.time() + 20
+            while win.printing and time.time() < t_end:
+                app.processEvents()
+                time.sleep(0.01)
+            app.processEvents()
+            if n_sheets > 0 and ((0, 0) not in win._multi_left or not win.b_resume.isVisibleTo(win)):
+                raise RuntimeError("недопечатанный лист не предложен: %s" % (win._multi_left,))
+            fail_first[0] = False
+            win.multi_resume()
+            t_end = time.time() + 20
+            while win.printing and time.time() < t_end:
+                app.processEvents()
+                time.sleep(0.01)
+            app.processEvents()
+            if win._multi_left or win.b_resume.isVisibleTo(win) or (0,) not in [ix for _, ix in sent]:
+                raise RuntimeError("допечатка не сработала: %s %s" % (win._multi_left, sent))
+            if not warns:
+                raise RuntimeError("итог со сбоем не показан")
+            globals()["warn"] = saved_warn
             win.settings["multi_enabled"] = False
             win.multi_refresh()
             if win.b_multi.isVisibleTo(win) or win.multi_selected():
@@ -10376,6 +10483,8 @@ def selftest(app):
         finally:
             win.settings["multi_enabled"], win.settings["multi_printers"], win.printers, win._multi_ctx, pc.run_sheets_job, pc.spooler_printer_status = saved[:6]
             globals()["ask"] = saved[6]
+            if "saved_warn" in dir():
+                globals()["warn"] = saved_warn
             win.multi_refresh()
     step("печать на нескольких принтерах (с подменой драйвера)", multi_flow)
 
