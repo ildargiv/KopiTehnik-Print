@@ -11,7 +11,8 @@ import epson_priv as ep
 class PrintQuickTests(unittest.TestCase):
     def test_norm_pads_and_cleans(self):
         s = pq.norm_slots(None)
-        self.assertEqual(len(s), 3)
+        self.assertEqual(len(s), pq.MAX_SLOTS)
+        self.assertEqual(pq.MAX_SLOTS, 8)
         self.assertTrue(all(x.get("empty") for x in s))
         s = pq.norm_slots([{"name": "  Матовая   высокое ", "bound": 1, "printer": "P", "state": {"a": 1}}, "junk", {"state": 5}])
         self.assertEqual(s[0]["name"], "Матовая высокое")

@@ -76,7 +76,7 @@ GUI_SPEC = {
                             [("action", "string", "nozzle_check | clean"), ("confirm", "boolean", "Must be true.")]),
     "quick_start": ("Quick Start: three slots per printer with saved format, paper, quality, borderless, colour profile and processing. "
                     "action=list shows the slots of the selected printer, apply applies slot n, save stores the current settings into slot n, clear empties slot n.",
-                    [("action", "string", "list | apply | save | clear"), ("n", "integer", "Slot 1..3."), ("name", "string", "Name for save (up to 24 chars).")]),
+                    [("action", "string", "list | apply | save | clear"), ("n", "integer", "Slot 1..8."), ("name", "string", "Name for save (up to 24 chars).")]),
     "add_test_sheet": ("Add the print test sheet (grey wedge, shadows/highlights, colours and saturation, skin tones I-VI, gradients, "
                        "sharpness targets) of the current paper size to the open photos. Print it with the normal pipeline to judge the profile.", []),
     "print_photos": ("Print like the «Print photo» button: sheets are built from the window's settings (format, photos per sheet, margins, "
@@ -626,9 +626,9 @@ class GuiAgent:
         try:
             n = int(req.get("n"))
         except (TypeError, ValueError):
-            raise pc.AgentError("n: номер ячейки 1..3", "bad_value")
+            raise pc.AgentError("n: номер ячейки 1..8", "bad_value")
         if not 1 <= n <= len(slots):
-            raise pc.AgentError("n: номер ячейки 1..3", "bad_value")
+            raise pc.AgentError("n: номер ячейки 1..8", "bad_value")
         if action == "apply":
             if slots[n - 1].get("empty"):
                 raise pc.AgentError("Ячейка пуста.", "empty_slot")

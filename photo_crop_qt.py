@@ -5969,7 +5969,7 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
 
     def _quick_card(self):
         """Три строки: кнопка-ячейка на всю ширину и справа маленькие «сохранить» и «переименовать»."""
-        self.qs_btns, self.qs_save, self.qs_ren = [], [], []
+        self.qs_btns, self.qs_save, self.qs_ren, self.qs_rows = [], [], [], []
         rows = []
         for i in range(pqk.SLOTS):
             b = MotionButton("")
@@ -5981,6 +5981,7 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
             self.qs_btns.append(b)
             self.qs_save.append(sv)
             self.qs_ren.append(rn)
+            self.qs_rows.append((b, sv, rn))
             rows.append(hbox(b, sv, rn, spacing=6))
         self.l_qs = lbl("", "muted", wrap=True)
         self.l_qs.hide()
@@ -5988,8 +5989,41 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
                      help=("Ячейки привязаны к принтеру: у каждого принтера свои три, при смене принтера показываются только его. Ячейка запоминает формат листа, тип бумаги, качество, «без полей», цветокоррекцию драйвера, "
                            "цветовой профиль и обработку. Нажмите на ячейку, чтобы всё выставить разом; значок дискеты сохраняет "
                            "текущие настройки в ячейку. Зелёная рамка: ячейка сохранена. Серая: ячейка пуста."))
+        gear = ibtn("settings", "Сколько ячеек показывать", None, 26, True, isize=15)
+        gear.clicked.connect(lambda _=False, g=gear: self._qs_count_menu(g))
+        head = card_.layout().itemAt(0).layout()
+        head.insertWidget(max(0, head.count() - 1), gear)
+        self._qs_apply_visible()
         self._qs_refresh()
         return card_
+
+    def _qs_visible(self):
+        try:
+            n = int(self.settings.get("qs_visible", pqk.DEFAULT_VISIBLE))
+        except (TypeError, ValueError):
+            n = pqk.DEFAULT_VISIBLE
+        return max(1, min(pqk.MAX_SLOTS, n))
+
+    def _qs_apply_visible(self):
+        n = self._qs_visible()
+        for i, row_ in enumerate(getattr(self, "qs_rows", [])):
+            for w_ in row_:
+                w_.setVisible(i < n)
+
+    def _qs_count_menu(self, anchor):
+        """Микро-настройка: сколько ячеек «Быстрого старта» показывать (сохранённые скрытые ячейки не удаляются)."""
+        m = QMenu(self)
+        for n in range(1, pqk.MAX_SLOTS + 1):
+            a = m.addAction(trf("Показывать ячеек: {n}", n=n))
+            a.setCheckable(True)
+            a.setChecked(n == self._qs_visible())
+            a.triggered.connect(lambda _=False, n=n: self._qs_set_visible(n))
+        m.exec(anchor.mapToGlobal(anchor.rect().bottomLeft()))
+
+    def _qs_set_visible(self, n):
+        self.settings["qs_visible"] = int(n)
+        self._qs_apply_visible()
+        self.persist()
 
     def _qs_refresh(self):
         if not hasattr(self, "qs_btns"):
@@ -8448,7 +8482,7 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         s = self.s
         self._bleed_flush()
         fresh = pc.load_settings()                    # окно печати пишет свои разделы в тот же файл — не затираем их
-        for k in ("last_dir", "start_dir_mode", "snap_px", "anim", "icc_dir", "check_updates", "skip_update", "doc_paper", "doc_fit", "doc_margin", "doc_cm_on", "doc_icc", "converter_path", "adj_presets", "adj_preset_names", "confirm_actions", "agent_enabled", "agent_badge", "agent_lock", "agent_token", "agent_port", "agent_allow_print", "agent_max_sheets", "agent_confirm_print", "multi_enabled", "multi_printers", "multi_modes"):
+        for k in ("last_dir", "start_dir_mode", "snap_px", "anim", "icc_dir", "check_updates", "skip_update", "doc_paper", "doc_fit", "doc_margin", "doc_cm_on", "doc_icc", "converter_path", "adj_presets", "adj_preset_names", "confirm_actions", "agent_enabled", "agent_badge", "agent_lock", "agent_token", "agent_port", "agent_allow_print", "agent_max_sheets", "agent_confirm_print", "multi_enabled", "multi_printers", "multi_modes", "qs_visible"):
             if k in self.settings:
                 fresh[k] = self.settings[k]
         fresh.update(format=s["format"], orient=s["orient"], mode=s["mode"], recursive=s["recursive"], subfolder=s["subfolder"],
