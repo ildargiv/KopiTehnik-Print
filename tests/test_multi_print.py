@@ -119,6 +119,36 @@ class MultiPrint(unittest.TestCase):
         mp.MultiRun(units, ["A", "B"], fake({}), on_event=lambda k, p, u, i: counts.append(i) if k == "sent" else None).run()
         self.assertEqual(sorted(counts), list(range(1, 7)))
 
+    def test_backlog_window_slow_printer_gets_less(self):
+        """Принтер быстро «принимает» задания, но печатает медленно: окно в 2 задания не даёт ему набрать всю очередь."""
+        pending = {"fast": [], "slow": []}
+        lock = threading.Lock()
+        speed = {"fast": 0.01, "slow": 0.08}
+
+        def send(p, s):
+            with lock:
+                pending[p].append(time.time())
+
+        def backlog(p):
+            with lock:
+                now = time.time()
+                pending[p] = [t0 for t0 in pending[p] if now - t0 < speed[p]]   # задание вышло из очереди, когда напечаталось
+                return len(pending[p])
+        rep = mp.MultiRun(range(30), ["fast", "slow"], send, backlog=backlog, window=2, poll=0.005).run()
+        self.assertEqual(sum(len(v) for v in rep["sent"].values()), 30)
+        self.assertGreater(len(rep["sent"]["fast"]), len(rep["sent"]["slow"]) * 2)
+
+    def test_backlog_unknown_does_not_block(self):
+        rep = mp.MultiRun(range(6), ["A", "B"], fake({}), backlog=lambda p: None).run()
+        self.assertEqual(rep["failed"], [])
+
+    def test_backlog_cancel_while_waiting(self):
+        ev = threading.Event()
+        threading.Timer(0.1, ev.set).start()
+        t0 = time.time()
+        mp.MultiRun(range(5), ["A"], fake({}), cancel=ev, backlog=lambda p: 99).run()
+        self.assertLess(time.time() - t0, 2)
+
 
 if __name__ == "__main__":
     unittest.main()

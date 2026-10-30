@@ -5686,9 +5686,25 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         self.b_print.set_progress(0.0)
         self.b_cancel.show()
 
+        prefix = "PhotoCrop " + time.strftime("%H%M%S")                   # метка прогона: по ней находим свои задания в очереди принтера
+        queue_n, stop, runner = {}, threading.Event(), [None]
+
+        def poll(name):
+            """Раз в 2 секунды смотрим очередь Windows этого принтера: сколько наших заданий ещё не напечатано."""
+            while not stop.is_set():
+                try:
+                    jobs = pc.spooler_queue(name)
+                    cnt = sum(1 for j in jobs if str(j.get("document") or "").startswith(prefix))
+                    if cnt < queue_n.get(name, 0) and runner[0]:
+                        runner[0].note_printed(name)
+                    queue_n[name] = cnt
+                except Exception:
+                    queue_n[name] = None                              # очередь не читается: окно не применяем
+                stop.wait(2.0)
+
         def send(printer, unit):
             k, r = unit
-            title = "PhotoCrop — %s %d" % (tr("лист"), k + 1) + (" (%s %d)" % (tr("копия"), r + 1) if copies > 1 else "")
+            title = "%s — %s %d" % (prefix, tr("лист"), k + 1) + (" (%s %d)" % (tr("копия"), r + 1) if copies > 1 else "")
             job = dict(ctxs[printer]["job"], idxs=[k], title=title)
             res = pc.run_sheets_job(job, lambda *_: None, self.cancel)
             if res[0] != "done":
@@ -5696,9 +5712,14 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
 
         def on_event(kind, printer, unit, info):
             if kind == "sent":
+                on_event.sent = info
                 self.sig.progress.emit(info - 1, n, "\x01%s: %s" % (printer, trf("лист {a} из {b}", a=info, b=n)))
             elif kind == "excluded":
                 self.sig.progress.emit(0, n, tr("Принтер выбыл") + ": " + printer)
+            elif kind == "slow":
+                self.sig.progress.emit(max(0, on_event.sent - 1), n, "\x01" + tr("Принтер замедлился, получает меньше листов") + ": " + printer)
+
+        on_event.sent = 0
 
         def work():
             try:
@@ -5716,7 +5737,14 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
                         pre.append("%s — %s" % (name, tr("порт FILE: (печать в файл), на каждый лист спросит имя файла; смените порт в свойствах принтера")))
                 if not names:
                     raise RuntimeError(tr("Ни один из отмеченных принтеров не готов") + (":\n" + "\n".join(pre) if pre else ""))
-                rep = mp.MultiRun(units, names, send, cancel=self.cancel, on_event=on_event).run()
+                run = runner[0] = mp.MultiRun(units, names, send, cancel=self.cancel, on_event=on_event,
+                                              backlog=lambda name: queue_n.get(name, 0), window=2)
+                for name in names:
+                    threading.Thread(target=poll, args=(name,), daemon=True).start()
+                try:
+                    rep = run.run()
+                finally:
+                    stop.set()
                 self._multi_summary = pre + mp.summarize(rep)
                 total = sum(len(v) for v in rep["sent"].values())
                 if rep["cancelled"]:

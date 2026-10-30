@@ -17,9 +17,13 @@ class Cancelled(Exception):
 
 
 class MultiRun:
-    def __init__(self, sheets, printers, send, cancel=None, max_errors=2, serialize=False, on_event=None):
+    def __init__(self, sheets, printers, send, cancel=None, max_errors=2, serialize=False, on_event=None,
+                 backlog=None, window=2, slow_factor=3.0, poll=0.2):
         """sheets — идентификаторы листов в порядке печати; printers — имена; send(printer, sheet) блокирует
-        до отправки и бросает исключение при сбое; cancel — threading.Event; on_event(kind, printer, sheet, info)."""
+        до отправки и бросает исключение при сбое; cancel — threading.Event; on_event(kind, printer, sheet, info).
+        backlog(printer) -> число ещё не напечатанных заданий этого прогона в очереди принтера (или None, если неизвестно).
+        Новый лист принтер получает, только когда в очереди меньше window заданий: так медленный или застрявший принтер
+        сам получает меньше листов. Если принтер не освобождает окно в slow_factor раз дольше своего обычного темпа, шлётся событие «slow»."""
         if not printers:
             raise ValueError("нет принтеров")
         self.sheets = list(sheets)
@@ -39,6 +43,11 @@ class MultiRun:
         self.excluded = {}                                             # принтер -> причина
         self.seconds = {p: 0.0 for p in self.printers}                 # время отправок: для оценки скорости
         self._alive = set(self.printers)
+        self.backlog, self.window, self.slow_factor = backlog, max(1, int(window)), float(slow_factor)
+        self.slow = set()
+        self.poll = poll
+        self._last_done = {p: time.time() for p in self.printers}
+        self._gaps = {p: deque(maxlen=5) for p in self.printers}
 
     def _emit(self, kind, printer, sheet, info=None):
         if self.on_event:
@@ -63,9 +72,41 @@ class MultiRun:
                 return s
         return None
 
+    def _gate(self, printer):
+        """Ждём, пока в очереди принтера освободится окно; False — прогон отменён."""
+        if not self.backlog:
+            return True
+        while not self.cancel.is_set():
+            try:
+                n = self.backlog(printer)
+            except Exception:
+                n = None
+            if n is None or n < self.window:
+                if printer in self.slow:
+                    self.slow.discard(printer)
+                    self._emit("recovered", printer, None, None)
+                return True
+            gaps = sorted(self._gaps[printer])
+            if gaps and printer not in self.slow:
+                typical = gaps[len(gaps) // 2]
+                if time.time() - self._last_done[printer] > max(typical * self.slow_factor, 20.0):
+                    self.slow.add(printer)
+                    self._emit("slow", printer, None, None)
+            time.sleep(self.poll)
+        return False
+
+    def note_printed(self, printer):
+        """Принтер реально закончил лист (вызывает опрос очереди): так считается обычный темп."""
+        now = time.time()
+        with self._lock:
+            self._gaps[printer].append(now - self._last_done[printer])
+            self._last_done[printer] = now
+
     def _worker(self, printer):
         streak = 0
         while True:
+            if not self._gate(printer):
+                return
             with self._cond:
                 s = None
                 while s is None:
