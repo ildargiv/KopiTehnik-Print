@@ -60,7 +60,7 @@ GUI_SPEC = {
                     ("border_mm", "number", "Margin in mm."), ("fill", "boolean", "Fill cells by cropping."),
                     ("cell_w", "number", "Frame width in mm: switches the sheet to «by size» mode (as many such frames as fit)."),
                     ("cell_h", "number", "Frame height in mm (use together with cell_w)."),
-                    ("by_size", "boolean", "false — back to «by number» (nup).")]),
+                    ("by_size", "boolean", "false — back to «by number» (nup). While by_size is on, nup is ignored: send nup together with by_size=false.")]),
     "set_view": ("Window view: crop (one photo with its frame) or sheet (layout of the sheets).", [("view", "string", "crop | sheet")]),
     "set_app_mode": ("PHOTO / DOCUMENT switch.", [("mode", "string", "photo | doc")]),
     "add_edge_test": ("Add the edge-test sheet (for borderless printing) of the current paper size to the open photos.", []),
@@ -74,7 +74,7 @@ GUI_SPEC = {
     "printer_maintenance": ("Nozzle check or head cleaning of the selected Epson printer. Both use ink and paper (cleaning also fills the waste "
                             "tank): do it only when the owner asked, and set confirm=true. Clean only if the nozzle check showed gaps.",
                             [("action", "string", "nozzle_check | clean"), ("confirm", "boolean", "Must be true.")]),
-    "quick_start": ("Quick Start: three slots per printer with saved format, paper, quality, borderless, colour profile and processing. "
+    "quick_start": ("Quick Start: up to 8 slots per printer with saved format, paper, quality, borderless, colour profile and processing. "
                     "action=list shows the slots of the selected printer, apply applies slot n, save stores the current settings into slot n, clear empties slot n.",
                     [("action", "string", "list | apply | save | clear"), ("n", "integer", "Slot 1..8."), ("name", "string", "Name for save (up to 24 chars).")]),
     "add_test_sheet": ("Add the print test sheet (grey wedge, shadows/highlights, colours and saturation, skin tones I-VI, gradients, "
@@ -90,7 +90,7 @@ GUI_SPEC = {
     "zoom_photo": ("Zoom of the open photo like Epson Photo+, only for this photo, centred: mode=percent with percent (100 = the photo fills the frame, "
                    "less = smaller with white margins), fit = the whole photo inside the frame («Fit»), fill = fills the frame, original = back "
                    "to the original frame. Crop view only.",
-                   [("mode", "string", "percent | fit | fill | original"), ("percent", "number", "For mode=percent, 5..2000."),
+                   [("mode", "string", "percent | fit | fill | original"), ("percent", "number", "For mode=percent; the frame limits it to about 33..2000 (smaller values are clamped)."),
                     ("photo", "any", "Photo ref; default: the current photo.")]),
     "crop_apply": ("«Crop»: the photo becomes what is inside the frame (everything outside is removed, white margins inside stay). "
                    "A new JPEG is saved in the subfolder «Обрезанные» next to the original, which stays untouched, and replaces the photo in the list.",
@@ -120,7 +120,7 @@ GUI_REQUIRED = {"multi_print": ["action"], "zoom_photo": ["mode"], "open_files":
 GUI_DESTRUCTIVE = ("printer_maintenance", "print", "save_files", "export_sheets", "clear_queue", "cancel_job", "job_control", "print_photos", "doc_print")
 
 SETTABLE = {"language": str, "theme": str, "anim": bool, "confirm_actions": bool, "check_updates": bool, "dpi": str, "filetype": str,
-            "quality": int, "out_mode": str, "out_name": str, "outdir": str, "subfolder": bool, "resize": bool, "copies_name": bool}
+            "qs_enabled": bool, "qs_highlight": bool, "quality": int, "out_mode": str, "out_name": str, "outdir": str, "subfolder": bool, "resize": bool, "copies_name": bool}
 
 
 def policy(settings):
@@ -710,6 +710,8 @@ class GuiAgent:
     def c_multi_print(self, req):
         w = self.win
         action = str(req.get("action") or "get").lower()
+        if action not in ("get", "set", "resume"):
+            raise pc.AgentError("action: get | set | resume", "bad_value")
         s = w.settings
         if action == "resume":
             left = list(getattr(w, "_multi_left", []) or [])
@@ -935,8 +937,12 @@ class GuiAgent:
                 w.settings[k] = v
                 import photo_crop_qt as q
                 q.SOFT[0] = v
-            elif k in ("anim", "check_updates"):
+            elif k in ("anim", "check_updates", "qs_enabled", "qs_highlight"):
                 w.settings[k] = v
+                if k == "qs_enabled":
+                    w.quick_refresh()
+                elif k == "qs_highlight":
+                    w._qs_refresh()
             else:
                 w.s[k] = ("%g" % float(v)) if k == "dpi" else v
             applied[k] = v
