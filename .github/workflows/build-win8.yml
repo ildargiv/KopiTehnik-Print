@@ -1,0 +1,51 @@
+name: build-win8
+
+# Отдельная сборка для Windows 8 / 8.1 (Python 3.8, Qt 5). Тег win8-v*, например win8-v1.6.1.
+on:
+  push:
+    tags: ["win8-v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.8"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install "numpy<1.25" "Pillow<10.5" "pillow-heif<0.19" "opencv-python<4.9" "PySide2==5.15.2.1" "pyinstaller<6"
+          pip install "onnxruntime<1.20"
+        continue-on-error: false
+
+      - name: Compile check (Python 3.8 syntax)
+        run: python -m compileall -q .
+
+      - name: Build KopiTehnikPrint-Win8.exe
+        run: pyinstaller --noconfirm PhotoCropWin8.spec
+
+      - name: Name the file by version
+        shell: pwsh
+        run: |
+          $ver = (python installer/app_version.py).Trim()
+          Copy-Item dist\KopiTehnikPrint-Win8.exe "dist\KopiTehnikPrint-Win8-$ver.exe"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: KopiTehnikPrint-Win8
+          path: dist/KopiTehnikPrint-Win8-*.exe
+
+      - name: Publish GitHub Release
+        if: startsWith(github.ref, 'refs/tags/win8-v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/KopiTehnikPrint-Win8-*.exe
+          body_path: RELEASE_NOTES.win8.md

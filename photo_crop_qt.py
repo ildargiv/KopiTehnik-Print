@@ -25,6 +25,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 if "--selftest" in sys.argv:                                # самопроверка пишет настройки, пресеты и журнал: только во временную папку,
     os.environ["APPDATA"] = tempfile.mkdtemp(prefix="photocrop_selftest_")      # настоящие настройки пользователя не трогаем
+import qt_flavor                                          # noqa: E402  (LEGACY: сборка для старых Windows на Qt 5: без «Документа» и печати на нескольких принтерах)
+LEGACY = qt_flavor.LEGACY
 import print_stats as ps                                  # noqa: E402  (счётчик печати)
 import logo_anim_led as la                                 # noqa: E402  (анимированный логотип «LED-табло»)
 import agent_badge_neural as abn                           # noqa: E402  (плашка «ИИ-агент работает»)
@@ -521,7 +523,7 @@ la.ANIM_ON = ANIM_ON
 class ModeSwitch(QWidget):
     """Переключатель режимов ФОТО / ДОКУМЕНТ: бегунок плавно переезжает с лёгким «пружинным» отскоком, значок подсвечивается."""
     changed = Signal(str)
-    ITEMS = (("photo", "Фото", "image"), ("doc", "Документ", "doc"))
+    ITEMS = (("photo", "Фото", "image"),) if LEGACY else (("photo", "Фото", "image"), ("doc", "Документ", "doc"))
 
     def __init__(self, value="photo"):
         super().__init__()
@@ -5059,7 +5061,7 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         self.center_stack = QStackedWidget()
         self.center_stack.addWidget(self.canvas)
         self.center_stack.addWidget(self.sheet_view)
-        self.doc_view = DocView(self)
+        self.doc_view = QWidget() if LEGACY else DocView(self)
         self.center_stack.addWidget(self.doc_view)
         self.overlay = SendOverlay(self.center_stack)
         outer = vbox(self._topbar(), spacing=0)
@@ -5238,6 +5240,7 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         self.cb_format.setMinimumWidth(120 if self.compact else 150)
         self.cb_format.currentTextChanged.connect(lambda v: self._layout_set("format", v))
         self.mode_switch = ModeSwitch(getattr(self, "app_mode", "photo"))
+        self.mode_switch.setVisible(not LEGACY)
         self.mode_switch.changed.connect(self.set_app_mode)
         self.seg_nup = NupPicker(self.s["nup"])
         self.seg_nup.setToolTip(tr("Сколько фото печатать на одном листе"))
@@ -6366,7 +6369,7 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
 
     # ---------- печать на нескольких принтерах (режим включается в настройках; работает, если отмечено больше одного принтера)
     def multi_enabled(self):
-        return bool(self.settings.get("multi_enabled", False))
+        return bool(self.settings.get("multi_enabled", False)) and not LEGACY
 
     def multi_selected(self):
         """Отмеченные принтеры, которые есть в системе. Режим выключен в настройках -> пусто."""
@@ -7217,6 +7220,8 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
 
     def set_app_mode(self, mode):
         """ФОТО / ДОКУМЕНТ: в режиме документа слева скрыты миниатюры, справа вместо «Фото» и «Умной рамки» — страница «Документ»."""
+        if LEGACY:
+            mode = "photo"                                # в сборке для старых Windows раздела «Документ» нет
         self.app_mode = mode
         doc = mode == "doc"
         self.center_stack.setCurrentIndex(2 if doc else (1 if self.view == "sheet" else 0))
@@ -7411,6 +7416,9 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         if not dlg.exec() or not dlg.choice:
             return
         kind, val, add = dlg.choice
+        if kind == "doc" and LEGACY:
+            info(self, "Документы в этой сборке не поддерживаются.")
+            return
         if kind == "doc":
             self.set_app_mode("doc")
             self.doc_load(Path(val))
@@ -7437,6 +7445,9 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         """Добавляет брошенные файлы и папки. Если бросили на лист — первое новое фото встаёт в точку, куда бросили."""
         files = []
         docs = [Path(q) for q in paths if Path(q).suffix.lower() in DOC_EXTS and Path(q).is_file()]
+        if LEGACY:
+            paths = [q for q in paths if Path(q).suffix.lower() not in DOC_EXTS]
+            docs = []
         if docs and not any(Path(q).suffix.lower() in pc.EXTS or Path(q).is_dir() for q in paths):
             self.set_app_mode("doc")                       # бросили только документ — открываем раздел «Документ»
             self.doc_load(docs[0])
@@ -10526,7 +10537,7 @@ def selftest(app):
         if win.app_mode != "doc" or win.pages.currentIndex() != 4:
             raise RuntimeError("документ не открыл раздел «Документ»")
         win.set_app_mode("photo")
-    step("документ, брошенный в окно, открывает раздел «Документ»", drop_doc)
+    LEGACY or step("документ, брошенный в окно, открывает раздел «Документ»", drop_doc)
     def multi_flow():
         """Печать на нескольких принтерах без настоящих принтеров: подменяем драйвер и проверяем, что каждый лист ушёл один раз."""
         saved = (win.settings.get("multi_enabled"), win.settings.get("multi_printers"), win.printers, win._multi_ctx, pc.run_sheets_job,
@@ -10625,7 +10636,7 @@ def selftest(app):
             if "saved_warn" in dir():
                 globals()["warn"] = saved_warn
             win.multi_refresh()
-    step("печать на нескольких принтерах (с подменой драйвера)", multi_flow)
+    LEGACY or step("печать на нескольких принтерах (с подменой драйвера)", multi_flow)
 
     def multi_dialog_flow():
         """Окно «Принтеры…»: список принтеров, выбор режима «Быстрого старта» для принтера, сохранение выбора."""
@@ -10649,7 +10660,7 @@ def selftest(app):
             dlg.close()
         finally:
             win.settings["multi_printers"], win.settings["multi_modes"], win.settings["print_quick"], win.printers = saved
-    step("окно «Принтеры…»: режим для принтера", multi_dialog_flow)
+    LEGACY or step("окно «Принтеры…»: режим для принтера", multi_dialog_flow)
 
     def quick_active_flow():
         """«Быстрый старт»: включённая ячейка зелёная, пока настройки не менялись вручную."""
@@ -10686,7 +10697,7 @@ def selftest(app):
         shot("multi_button")
         win.settings["multi_enabled"] = False
         win.multi_refresh()
-    step("кнопка «Принтеры…» рядом с «Печать»", multi_button_shot)
+    LEGACY or step("кнопка «Принтеры…» рядом с «Печать»", multi_button_shot)
     def zoom_pct_flow():
         """Увеличение как в Epson Photo+: процент для открытого фото, центровка, «Обрезать» и «Поместить»."""
         win.show_photo(0)
@@ -10776,7 +10787,7 @@ def selftest(app):
             win.settings["multi_on"] = True
             win.settings.pop("multi_blocks", None)
             win.multi_refresh()
-    step("команды агента: увеличение и несколько принтеров", agent_new_tools)
+    LEGACY or step("команды агента: увеличение и несколько принтеров", agent_new_tools)
 
     step("вкладка «Принтер»", lambda: (win.show_page(2), shot("printer"), win.show_page(0)))
     step("параметры сохранения", lambda: win.options() or (_ for _ in ()).throw(RuntimeError("options() вернул пусто")))
