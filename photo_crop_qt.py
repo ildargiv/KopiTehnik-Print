@@ -6297,6 +6297,7 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         dlg = MultiPrinterDialog(self)
         if dlg.exec():
             self.settings["multi_printers"] = dlg.chosen()
+            self.settings["multi_modes"] = dlg.modes()
             try:
                 pc.save_settings(self.settings)
             except Exception:
@@ -6310,10 +6311,24 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         keys.sort(key=lambda k: (len(k.split(" | ")) < 2 or k.split(" | ")[1] != self.s["format"]))
         return profs[keys[0]] if keys else None
 
+    def multi_slots(self, printer):
+        """Занятые ячейки «Быстрого старта» этого принтера: [(номер, ячейка)]."""
+        row = pqk.norm_store(self.settings.get("print_quick"), self.pr.get("printer", "")).get(printer) or []
+        return [(i, sl) for i, sl in enumerate(row) if not sl.get("empty")]
+
+    def multi_mode(self, printer):
+        """Выбранная для принтера ячейка «Быстрого старта» или None (тогда профиль принтера / настройки окна)."""
+        idx = (self.settings.get("multi_modes") or {}).get(printer)
+        for i, sl in self.multi_slots(printer):
+            if i == idx:
+                return sl
+        return None
+
     def _multi_ctx(self, printer, base, o, L):
         """Всё, что нужно для печати на этом принтере: блоб драйвера, цвет, поправка, ppi. Вызывается в потоке окна."""
-        live = printer == self.pr["printer"]
-        prof = None if live else self._multi_profile(printer)
+        slot = self.multi_mode(printer)
+        live = printer == self.pr["printer"] and slot is None
+        prof = slot["state"] if slot else (None if live else self._multi_profile(printer))
         src_s = self.s if (live or prof is None) else {**self.s, **{k: prof[k] for k in self.PROF_COLOR if k in prof}}
         src_p = self.pr if (live or prof is None) else {**self.pr, **{k: prof[k] for k in self.PROF_PR if k in prof}}
         if live:
@@ -6341,7 +6356,7 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         cm = pc.cm_build(src_s["icc"], src_s["intent"], src_s["bpc"], src_s["embed"]) if src_s["cm_on"] else None
         num = lambda v, d: float(str(v).replace(",", ".")) if str(v).strip() else d
         oo = dict(o, sharp=float(src_p["sharp"]), shrink_pct=num(src_p["shrink"], 0), ppi=src_p["ppi"])
-        return {"printer": printer, "blob": blob, "geom": geom, "cm": cm, "o": oo, "own": live or prof is not None,
+        return {"printer": printer, "blob": blob, "geom": geom, "cm": cm, "o": oo, "own": live or prof is not None, "mode": slot["name"] if slot else "",
                 "pcorr": pcr.norm(src_s["pcorr"]) if pcr.active(src_s["pcorr"]) else None,
                 "paper_ok": abs(min(gw, gh) - L["PW"]) <= 2 and abs(max(gw, gh) - L["PH"]) <= 2}
 
@@ -6382,7 +6397,7 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         n = len(units)
         text = trf("Печать на нескольких принтерах. Листов: {n}, копий каждого: {k}.", n=len(plan["sheets"]), k=copies) + "\n"
         for name, c in ctxs.items():
-            text += "\n• %s%s" % (name, "" if c["own"] else " — " + tr("нет своего профиля, настройки как в окне"))
+            text += "\n• %s%s" % (name, (" — " + c["mode"]) if c.get("mode") else ("" if c["own"] else " — " + tr("нет своего профиля, настройки как в окне")))
         if skipped:
             text += "\n\n⚠ " + tr("Не участвуют") + ":\n" + "\n".join(skipped)
         if not ask(self, text + "\n\n" + tr("Начать печать?")):
@@ -8433,7 +8448,7 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         s = self.s
         self._bleed_flush()
         fresh = pc.load_settings()                    # окно печати пишет свои разделы в тот же файл — не затираем их
-        for k in ("last_dir", "start_dir_mode", "snap_px", "anim", "icc_dir", "check_updates", "skip_update", "doc_paper", "doc_fit", "doc_margin", "doc_cm_on", "doc_icc", "converter_path", "adj_presets", "adj_preset_names", "confirm_actions", "agent_enabled", "agent_badge", "agent_lock", "agent_token", "agent_port", "agent_allow_print", "agent_max_sheets", "agent_confirm_print", "multi_enabled", "multi_printers"):
+        for k in ("last_dir", "start_dir_mode", "snap_px", "anim", "icc_dir", "check_updates", "skip_update", "doc_paper", "doc_fit", "doc_margin", "doc_cm_on", "doc_icc", "converter_path", "adj_presets", "adj_preset_names", "confirm_actions", "agent_enabled", "agent_badge", "agent_lock", "agent_token", "agent_port", "agent_allow_print", "agent_max_sheets", "agent_confirm_print", "multi_enabled", "multi_printers", "multi_modes"):
             if k in self.settings:
                 fresh[k] = self.settings[k]
         fresh.update(format=s["format"], orient=s["orient"], mode=s["mode"], recursive=s["recursive"], subfolder=s["subfolder"],
@@ -9221,7 +9236,16 @@ class MultiPrinterDialog(QDialog):
             cb.setChecked(name in want)
             cb.name = name
             self.boxes.append(cb)
-            lay.addWidget(cb)
+            mode = QComboBox()                                           # режим печати: ячейка «Быстрого старта» этого принтера
+            mode.addItem(tr("Как сохранено для принтера"), None)
+            for i, sl in app.multi_slots(name):
+                mode.addItem(sl["name"], i)
+            k = mode.findData((app.settings.get("multi_modes") or {}).get(name))
+            mode.setCurrentIndex(max(0, k))
+            mode.setEnabled(mode.count() > 1)
+            mode.setToolTip(tr("Режим печати из «Быстрого старта» этого принтера: бумага, качество, цвет"))
+            cb.mode = mode
+            lay.addLayout(hbox(cb, None, mode, spacing=8))
         if not app.printers:
             lay.addWidget(lbl(tr("Принтеры не найдены.")))
         lay.addLayout(hbox(None, btn(tr("Отмена"), self.reject, "link"), btn(tr("Готово"), self.accept, "primary"), spacing=8))
@@ -9230,6 +9254,9 @@ class MultiPrinterDialog(QDialog):
 
     def chosen(self):
         return [b.name for b in self.boxes if b.isChecked()]
+
+    def modes(self):
+        return {b.name: b.mode.currentData() for b in self.boxes if b.mode.currentData() is not None}
 
 
 class SettingsDialog(QDialog):
@@ -10199,6 +10226,12 @@ def selftest(app):
             win.multi_refresh()
             if not win.b_multi.isVisibleTo(win):
                 raise RuntimeError("кнопка «Принтеры…» не показана при включённом режиме")
+            win.settings["print_quick"] = {"Принтер A": [{"name": "Глянец", "bound": True, "printer": "Принтер A", "model": "", "state": {"format": "10x15", "icc": "", "cm_on": False}},
+                                                       pqk.empty_slot(1), pqk.empty_slot(2)]}
+            win.settings["multi_modes"] = {"Принтер A": 0}
+            if win.multi_mode("Принтер A") is None or win.multi_mode("Принтер B") is not None:
+                raise RuntimeError("режим «Быстрого старта» для принтера выбран неверно")
+            win.settings["multi_modes"] = {}
             n_sheets = len(win.sheet_plan()[0]["sheets"])
             win.print_now()
             t_end = time.time() + 20
