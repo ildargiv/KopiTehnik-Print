@@ -5530,6 +5530,7 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         if name:
             self.cb_printer.setCurrentText(name)
         self._load_printer()
+        self.multi_refresh()
         self._qs_refresh()
 
     def _printer_changed(self):
@@ -6366,7 +6367,14 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         """Режим печати на нескольких принтерах сейчас включён: он разрешён в настройках, не отключён кнопкой и отмечено больше одного принтера."""
         return len(self.multi_selected()) > 1 and bool(self.settings.get("multi_on", True))
 
+    def _print_label(self):
+        """Подпись кнопки «Печать»: в режиме нескольких принтеров показывает, сколько их."""
+        n = len(self.multi_selected())
+        return tr("Печать") + (" · " + trf("принтеров: {n}", n=n) if self.multi_active() else "")
+
     def multi_refresh(self):
+        if hasattr(self, "b_print") and not self.printing:
+            self.b_print.setText(self._print_label())
         self.b_multi.setVisible(self.multi_enabled())
         n = len(self.multi_selected())
         on = self.multi_active()
@@ -6491,6 +6499,9 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         text = trf("Печать на нескольких принтерах. Листов: {n}, копий каждого: {k}.", n=len(plan["sheets"]), k=copies) + "\n"
         for name, c in ctxs.items():
             text += "\n• %s%s" % (name, (" — " + c["mode"]) if c.get("mode") else ("" if c["own"] else " — " + tr("нет своего профиля, настройки как в окне")))
+        models = {ep.model_of(n_) or n_ for n_ in ctxs}
+        if len(models) > 1:
+            text += "\n\n⚠ " + tr("Разные модели принтеров: цвет отпечатков может немного отличаться.")
         if skipped:
             text += "\n\n⚠ " + tr("Не участвуют") + ":\n" + "\n".join(skipped)
         if not ask(self, text + "\n\n" + tr("Начать печать?")):
@@ -6604,7 +6615,7 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
 
     def _print_done(self, kind, n, err):
         self.last_print = {"result": kind, "sheets_sent": n, "error": err or None}
-        self.b_print.setText(tr("Печать"))
+        self.b_print.setText(self._print_label())
         self.b_print.set_progress(None)
         if kind == "done":
             self.b_print.flash()
