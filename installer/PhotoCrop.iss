@@ -1,7 +1,7 @@
 ﻿; Установщик KopiTehnik Print: одна программа, установка для текущего пользователя, без прав администратора.
-; Сборка: ISCC.exe /DAppVersion=1.4.1 installer\PhotoCrop.iss  (PhotoCropQt.exe должен лежать в dist\)
+; Сборка: ISCC.exe /DAppVersion=1.5.0 installer\PhotoCrop.iss  (PhotoCropQt.exe должен лежать в dist\)
 #ifndef AppVersion
-  #define AppVersion "1.4.1"
+  #define AppVersion "1.5.0"
 #endif
 
 [Setup]
