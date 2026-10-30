@@ -6771,8 +6771,22 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         self.l_copies.setFont(f)
         cop = hbox(ibtn("minus", "Меньше копий", lambda: self.copies_step(-1), 30, True, isize=15), self.l_copies,
                    ibtn("plus", "Больше копий", lambda: self.copies_step(1), 30, True, isize=15), spacing=4)
+        # увеличение как в Epson Photo+: процент для открытого фото, фото центруется; «Обрезать» заполняет рамку, «Поместить» вписывает целиком
+        self.e_zoom = QLineEdit("100")
+        self.e_zoom.setFixedWidth(58)
+        self.e_zoom.setValidator(QIntValidator(1, 2000, self))
+        self.e_zoom.editingFinished.connect(lambda: self.zoom_pct_set(self.e_zoom.text()))
+        self.sl_zoom = QSlider(Qt.Horizontal)
+        self.sl_zoom.setRange(34, 300)
+        self.sl_zoom.setValue(100)
+        self.sl_zoom.valueChanged.connect(lambda v: self.zoom_pct_set(v) if not self._zoom_lock else None)
+        self._zoom_lock = False
+        zoom_row = hbox(self.e_zoom, lbl("%", "muted"), self.sl_zoom, spacing=6)
+        zoom_btns = hbox(btn("Обрезать", self.zoom_fill, tip="Фото заполняет рамку целиком, лишнее обрезается (100%)"),
+                         btn("Поместить", self.zoom_fit, tip="Фото целиком внутри рамки, по краям остаются поля"), spacing=6)
         photo = card("Кадр", lbl("Ориентация рамки", "muted"), hbox(self.seg_orient, None),
                      lbl("Как фото ложится в рамку", "muted"), hbox(self.seg_mode, None),
+                     lbl("Увеличение этого фото", "muted"), zoom_row, zoom_btns,
                      row("Копий этого фото", cop),
                      hbox(btn("Сбросить рамку", self.reset_frame, "link"), None, btn("Сбросить все", self.reset_all, "link")))
         # --- лист
@@ -7745,6 +7759,7 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
 
     def update_info(self):
         self.smart_sync()
+        self.zoom_sync()
         cur = self.cur()
         chk = self.checked_files()
         L = self.layout_spec()
@@ -7865,6 +7880,61 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         pc.normalize(st)
         self.mark(f)
         self.redraw()
+
+    def _zoom_fit_scale(self, W, H, paper):
+        rr = paper[0] / paper[1]
+        return max(W, H * rr) / min(W, H * rr)                     # рамка накрывает фото целиком
+
+    def zoom_pct_set(self, pct):
+        """Увеличение открытого фото в процентах (100% = фото заполняет рамку); фото центруется. Только для этого фото."""
+        cur = self.cur()
+        try:
+            pct = float(str(pct).replace(",", "."))
+        except ValueError:
+            return
+        if not cur or self.mode() != "crop" or pct <= 0:
+            self.zoom_sync()
+            return
+        f, st, W, H, paper = cur
+        new = max(pc.MIN_SCALE, min(pc.MAX_SCALE, 100.0 / pct))
+        if abs(new - st.scale) < 1e-6 and abs(st.cx - 0.5) < 1e-6 and abs(st.cy - 0.5) < 1e-6:
+            return
+        self.push_undo([f], ("zoompct", f), 0.8)
+        st.scale, st.cx, st.cy = new, 0.5, 0.5
+        pc.normalize(st)
+        self.mark(f)
+        self.redraw()
+
+    def zoom_fill(self):
+        """«Обрезать»: фото заполняет рамку (100%), по центру."""
+        self.zoom_pct_set(100)
+
+    def zoom_fit(self):
+        """«Поместить»: фото целиком внутри рамки, по центру, с полями."""
+        cur = self.cur()
+        if not cur or self.mode() != "crop":
+            return
+        f, st, W, H, paper = cur
+        self.zoom_pct_set(100.0 / self._zoom_fit_scale(W, H, paper))
+
+    def zoom_sync(self):
+        """Поле и ползунок показывают увеличение открытого фото."""
+        if not hasattr(self, "e_zoom"):
+            return
+        cur = self.cur()
+        on = bool(cur) and self.mode() == "crop"
+        for w_ in (self.e_zoom, self.sl_zoom):
+            w_.setEnabled(on)
+        if not cur:
+            return
+        pct = int(round(100.0 / max(pc.MIN_SCALE, cur[1].scale)))
+        self._zoom_lock = True
+        try:
+            if not self.e_zoom.hasFocus():
+                self.e_zoom.setText(str(pct))
+            self.sl_zoom.setValue(max(self.sl_zoom.minimum(), min(self.sl_zoom.maximum(), pct)))
+        finally:
+            self._zoom_lock = False
 
     def tilt(self, delta):
         cur = self.cur()
@@ -10564,6 +10634,34 @@ def selftest(app):
         win.settings["multi_enabled"] = False
         win.multi_refresh()
     step("кнопка «Принтеры…» рядом с «Печать»", multi_button_shot)
+    def zoom_pct_flow():
+        """Увеличение как в Epson Photo+: процент для открытого фото, центровка, «Обрезать» и «Поместить»."""
+        win.show_photo(0)
+        app.processEvents()
+        cur = win.cur()
+        if not cur:
+            raise RuntimeError("нет открытого фото")
+        f, st, W, H, paper = cur
+        if win.mode() != "crop":
+            win.seg_mode.set("Кадрировать") if hasattr(win.seg_mode, "set") else None
+        other = win.files[1] if len(win.files) > 1 else None
+        before_other = win.states[other].scale if other else None
+        st.cx, st.cy = 0.3, 0.7
+        win.zoom_pct_set(50)
+        if abs(st.scale - 2.0) > 1e-6 or abs(st.cx - 0.5) > 1e-6 or abs(st.cy - 0.5) > 1e-6:
+            raise RuntimeError("50%% не дало scale 2 по центру: %s %s %s" % (st.scale, st.cx, st.cy))
+        win.zoom_fit()
+        fit = max(W, H * paper[0] / paper[1]) / min(W, H * paper[0] / paper[1])
+        if abs(st.scale - max(pc.MIN_SCALE, min(pc.MAX_SCALE, fit))) > 1e-3:
+            raise RuntimeError("«Поместить» дало scale %s, нужно %s" % (st.scale, fit))
+        win.zoom_fill()
+        if abs(st.scale - 1.0) > 1e-6:
+            raise RuntimeError("«Обрезать» не вернуло 100%%: %s" % st.scale)
+        if other and win.states[other].scale != before_other:
+            raise RuntimeError("увеличение затронуло другое фото")
+        if win.e_zoom.text() != "100":
+            raise RuntimeError("поле не показывает 100%%: %r" % win.e_zoom.text())
+    step("увеличение в процентах для открытого фото", zoom_pct_flow)
     step("вкладка «Принтер»", lambda: (win.show_page(2), shot("printer"), win.show_page(0)))
     step("параметры сохранения", lambda: win.options() or (_ for _ in ()).throw(RuntimeError("options() вернул пусто")))
     text = "PhotoCrop Qt selftest  %s\nPySide6 %s, Python %s\n\n%s\n" % (
