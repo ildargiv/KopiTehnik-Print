@@ -324,6 +324,7 @@ class Node:
         self._connecting = set()
         self._job_waiters = {}
         self._my_state = {}
+        self._base_state = {}
 
     # --- служебное ---
     def _emit(self, kind, **info):
@@ -584,6 +585,17 @@ class Node:
         return {"state": "queued"}
 
     def _run_sheet(self, key, peer_id, meta, data):
+        printer = meta.get("printer", "")
+        self.publish_state(printer, "printing", "печатает для " + str(meta.get("from", "")), _busy=True)
+        try:
+            self._run_sheet_inner(key, peer_id, meta, data)
+        finally:
+            q = self._queues.get(printer)
+            if not q or q.depth() == 0:          # очередь опустела: вернуть последнее настоящее состояние принтера
+                base = self._base_state.get(printer) or {"level": "ok", "text": ""}
+                self.publish_state(printer, base["level"], base.get("text", ""))
+
+    def _run_sheet_inner(self, key, peer_id, meta, data):
         self._set_state(key, peer_id, "printing")
         try:
             self.print_sheet(meta, data)
@@ -605,6 +617,8 @@ class Node:
     def publish_state(self, printer, level, text="", **extra):
         """level: ok|warning|attention|error|offline. Рассылается всем подключённым ПК."""
         meta = {"printer": printer, "level": level, "text": text, "ts": time.time(), **extra}
+        if not extra.get("_busy") and level != "printing":
+            self._base_state[printer] = meta
         self._my_state[printer] = meta
         for s in list(self.sessions.values()):
             try:

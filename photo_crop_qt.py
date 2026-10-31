@@ -5308,10 +5308,24 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
                     ibtn("check_all", "Отметить все фото", lambda: self.check_all(True), 30, isize=17),
                     ibtn("check_none", "Снять все отметки", lambda: self.check_all(False), 30, isize=17),
                     ibtn("trash", "Убрать неотмеченные из списка", self.remove_unchecked, 30, isize=17), spacing=2)
-        lay = vbox(head, self.thumbs_view, spacing=8, margins=(14, 12, 2, 12))
+        lay = vbox(head, self.thumbs_view, self._net_chat(), spacing=8, margins=(14, 12, 2, 12))
         lay.setStretch(1, 1)
         w.setLayout(lay)
         return w
+
+    def _net_chat(self):
+        """Сворачиваемый чат между подключёнными ПК (слева под списком фото). Сетевая служба создаётся один раз и живёт до закрытия."""
+        import net_service, net_ui, net_print
+        if getattr(self, "net", None) is None:
+            self.net = net_service.NetService(lambda: self.settings, lambda: pc.save_settings(self.settings))
+            self.net.attach_printing(net_print.NetPrinting(pc, pcr, lambda: self.settings, print_stats=ps))
+            if self.settings.get("net", {}).get("enabled"):
+                try:
+                    self.net.start()
+                except OSError:
+                    pass
+        self.chat_panel = net_ui.ChatPanel(self.net, T, tr)
+        return self.chat_panel
 
     def _center(self):
         w = QWidget()
@@ -8793,6 +8807,11 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         if self.saving and not self.printing and not ask(self, "Идёт сохранение. Всё равно выйти?"):
             e.ignore()
             return
+        try:
+            if getattr(self, "net", None) is not None:
+                self.net.stop()                                    # сетевая служба останавливается только когда выход подтверждён
+        except Exception:
+            pass
         enabled = self.settings.get("agent_enabled", False)
         self.agent_stop()                                          # файл с адресом агента удаляется; включённость запоминаем
         self.settings["agent_enabled"] = enabled
