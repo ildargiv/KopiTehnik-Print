@@ -5080,8 +5080,22 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         if "--selftest" not in sys.argv and not getattr(self, "_upd_wired", False):
             self._upd_wired = True
             self.update_checked.connect(self._update_result)
+            QTimer.singleShot(1500, self._update_report)
             if self.settings.get("check_updates", True):
                 QTimer.singleShot(4000, lambda: self.check_updates(False))
+
+    def _update_report(self):
+        """После перезапуска из-за обновления: если установщик не отработал, говорим об этом и показываем причину."""
+        try:
+            res = updater.consume_result()
+        except Exception:
+            return
+        if res is None or res[0] == 0:
+            return
+        code, log = res
+        why = {1223: tr("Вы отказались от запроса прав администратора."), 5: tr("Нет доступа к папке программы.")}.get(code, "")
+        warn(self, "%s\n%s\n\n%s: %d\n%s: %s\n\n%s" % (tr("Обновление не установилось, запущена прежняя версия."), why, tr("Код установщика"), code,
+                                                       tr("Журнал"), log, tr("Скачать новую версию вручную:") + " " + RELEASES_PAGE))
 
     def check_updates(self, manual=True):
         """Проверка последнего релиза на GitHub в фоне; manual — ответить и когда обновлений нет."""
@@ -5315,6 +5329,14 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
 
     def _net_chat(self):
         """Сворачиваемый чат между подключёнными ПК (слева под списком фото). Сетевая служба создаётся один раз и живёт до закрытия."""
+        try:
+            return self._net_chat_build()
+        except Exception:                                   # сеть — дополнение: её сбой не должен ломать окно программы
+            traceback.print_exc()
+            self.chat_panel = None
+            return QWidget()
+
+    def _net_chat_build(self):
         import net_service, net_ui, net_print
         if getattr(self, "net", None) is None:
             self.net = net_service.NetService(lambda: self.settings, lambda: pc.save_settings(self.settings))

@@ -3,7 +3,7 @@ from PyInstaller.utils.hooks import collect_all
 
 datas = []
 binaries = []
-hiddenimports = ['photo_crop', 'smart_crop', 'i18n', 'i18n_more', 'color_tools', 'print_stats', 'doc_tools', 'office_convert', 'agent_bridge', 'agent_guide', 'agent_clients', 'gui_agent']
+hiddenimports = ['photo_crop', 'smart_crop', 'i18n', 'i18n_more', 'color_tools', 'print_stats', 'doc_tools', 'office_convert', 'agent_bridge', 'agent_guide', 'agent_clients', 'gui_agent', 'net_link', 'net_service', 'net_ui', 'net_print', 'net_sound']
 tmp_ret = collect_all('onnxruntime')
 datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
 

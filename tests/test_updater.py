@@ -75,7 +75,7 @@ class UpdaterTest(unittest.TestCase):
 
     def test_script(self):
         s = updater.build_script(r"C:\Temp\Setup.exe", r"C:\Users\Я\KopiTehnik Print\PhotoCropQt.exe", 4321)
-        self.assertIn('"PID eq 4321"'.replace('"PID', 'PID').replace('4321"', '4321'), s)
+        self.assertIn('IMAGENAME eq PhotoCropQt.exe', s)           # ждём по имени процесса: фоновые копии программы тоже закрываются
         self.assertIn('"C:\\Temp\\Setup.exe" /SILENT', s)
         self.assertLess(s.index("/SILENT"), s.rindex('start ""'))      # сначала установка, потом запуск
         self.assertTrue(s.endswith("\r\n"))
@@ -87,3 +87,52 @@ class UpdaterTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ScriptTest(unittest.TestCase):
+    SETUP = r"C:\Users\U\AppData\Local\Temp\k\KopiTehnikPrint-Setup-1.7.0.exe"
+
+    def test_admin_script_asks_uac_logs_and_writes_result(self):
+        s = updater.build_script(self.SETUP, r"C:\Program Files\KopiTehnik Print\PhotoCropQt.exe", 1, admin=True,
+                                 result=r"C:\D\KopiTehnik Print\update_result.txt", log=r"C:\D\KopiTehnik Print\update_install.log")
+        self.assertIn("-Verb RunAs", s)
+        self.assertIn("/ALLUSERS", s)
+        self.assertIn('IMAGENAME eq PhotoCropQt.exe', s)                        # ждём по имени процесса, а не по пути
+        self.assertIn("taskkill.exe /F /IM", s)                                    # зависший фоновый процесс не мешает установке
+        self.assertIn(r'update_result.txt"', s)
+        self.assertIn("update_install.log", s)
+        self.assertLess(s.index("-Verb RunAs"), s.index("echo %RC%"))
+        self.assertLess(s.index("echo %RC%"), s.index('start "" "C:\\Program Files'))   # программа запускается после записи итога
+
+    def test_user_script_has_no_uac(self):
+        s = updater.build_script(self.SETUP, r"C:\Users\U\AppData\Local\Programs\KopiTehnik Print\PhotoCropQt.exe", 1, admin=False)
+        self.assertNotIn("RunAs", s)
+        self.assertIn("/CURRENTUSER", s)
+        self.assertIn('start "" /wait "%s"' % self.SETUP, s)
+
+    def test_needs_admin_detects_program_files(self):
+        import os
+        old = dict(os.environ)
+        try:
+            os.environ["ProgramFiles"] = "C:\\Program Files" if os.sep == "\\" else "/pf"
+            exe = os.path.join(os.environ["ProgramFiles"], "KopiTehnik Print", "PhotoCropQt.exe")
+            self.assertTrue(updater.needs_admin(exe))
+            self.assertFalse(updater.needs_admin(os.path.join("somewhere", "else", "PhotoCropQt.exe")))
+        finally:
+            os.environ.clear()
+            os.environ.update(old)
+
+    def test_consume_result(self):
+        import app_dirs
+        with tempfile.TemporaryDirectory() as d:
+            old = app_dirs.data_dir
+            app_dirs.data_dir = lambda: Path(d)
+            try:
+                self.assertIsNone(updater.consume_result())
+                (Path(d) / "update_result.txt").write_text("1223 \r\n", encoding="utf-8")
+                code, log = updater.consume_result()
+                self.assertEqual(code, 1223)
+                self.assertTrue(log.endswith("update_install.log"))
+                self.assertIsNone(updater.consume_result())                      # прочитанный итог удалён
+            finally:
+                app_dirs.data_dir = old
