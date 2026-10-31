@@ -4,12 +4,16 @@
 Окно подписывается через on_ui(kind, info): kind in presence | chat | paired | peer_found | job_received | sheet | printer_state.
 Вызывается из потоков сети, поэтому окно обязано перенаправить событие в свой поток (сигналом Qt).
 """
+import os
 import time
 
 import net_link as nl
 
 CHAT_KEEP = 300
-QUICK_PHRASES = ("Отпечатано", "Нужна бумага", "Жду фото", "Принято", "Минуту")
+IMAGE_EXT = (".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp")
+MAX_SEND = 200 << 20            # один файл в чате не больше 200 МБ (передаётся одним кадром)
+EMOJI_COMMON = "😀 😃 😄 😁 😅 😂 🙂 😉 😊 😍 😘 😎 🤔 😐 😴 😢 😡 🙏 👍 👎 👌 ✌️ 👏 🤝 💪 🔥 ⭐ ❤️ 🎉 ✅ ❌ ⚠️ ❓ ❗".split()
+EMOJI_PRINT = "🖨️ 📄 📃 📑 🗂️ 📁 📎 ✂️ 📏 📐 🖼️ 📸 🎞️ 🎨 🖌️ 🌈 💧 🖍️ 🧾 📦 📥 📤 ⏳ ⌛ 🔔 🧰 🔧 🪫 🔋 🧹".split()
 
 
 class NetService:
@@ -34,6 +38,21 @@ class NetService:
         self.cfg["user"] = name.strip()[:64]
         self.save()
 
+    def files_dir(self):
+        """Папка присланных файлов («Получено»). Можно сменить в settings['net']['files_dir']."""
+        d = self.cfg.get("files_dir")
+        if not d:
+            import app_dirs
+            d = str(app_dirs.data_dir() / "Получено")
+        return d
+
+    def sound_on(self):
+        return bool(self.cfg.get("sound", True))
+
+    def set_sound(self, on):
+        self.cfg["sound"] = bool(on)
+        self.save()
+
     # ---- запуск ----
     def start(self):
         if self.node:
@@ -46,6 +65,7 @@ class NetService:
         c["id"], c["name"] = self.node.id, self.node.name
         if self.printing:
             self.attach_printing(self.printing)
+        self.node.file_dir = self.files_dir()
         self.node.start()
         try:
             self.node.listen_discovery()
@@ -73,8 +93,8 @@ class NetService:
     # ---- события ----
     def _ev(self, kind, info):
         if kind == "chat":
-            self._store(info["from"], False, info.get("user") or info.get("name", ""), info["text"], info.get("ts"),
-                        chan="all" if info.get("channel") == "all" else info["from"])
+            self._store(info["from"], False, info.get("user") or info.get("name", ""), info.get("text", ""), info.get("ts"),
+                        chan="all" if info.get("channel") == "all" else info["from"], att=info.get("att"))
         if kind == "paired":
             self.save()
         if self.on_ui:
@@ -145,9 +165,13 @@ class NetService:
                 m["read"] = True
         self.save()
 
-    def _store(self, peer, me, user, text, ts=None, chan=None):
+    def _store(self, peer, me, user, text, ts=None, chan=None, att=None):
         chat = self.cfg.setdefault("chat", [])
-        chat.append({"chan": chan or peer, "peer": peer, "me": me, "user": user, "text": text, "ts": ts or time.time(), "read": me})
+        m = {"chan": chan or peer, "peer": peer, "me": me, "user": user, "text": text, "ts": ts or time.time(), "read": me}
+        if att:
+            att = dict(att, kind="image" if att["name"].lower().endswith(IMAGE_EXT) else "file")
+            m["att"] = att
+        chat.append(m)
         del chat[:-CHAT_KEEP]
         self.save()
 
@@ -161,3 +185,23 @@ class NetService:
         for pid in targets:
             self.node.chat_send(pid, text, user=self.user(), channel="all" if not peer_id else "dm")
         self._store(peer_id or "all", True, self.user(), text, chan=peer_id or "all")
+
+    def send_file(self, path, peer_id=None, text=""):
+        """Отправить файл (любой) выбранному ПК или всем. Фото в чате показываются картинкой, остальное значком."""
+        if not os.path.isfile(path):
+            raise FileNotFoundError(path)
+        size = os.path.getsize(path)
+        if size > MAX_SEND:
+            raise ValueError("Файл больше %d МБ." % (MAX_SEND >> 20))
+        self.start()
+        targets = [peer_id] if peer_id else list(self.cfg.get("paired", {}))
+        for pid in targets:
+            self.node.chat_send(pid, text, user=self.user(), channel="all" if not peer_id else "dm", file=path)
+        self._store(peer_id or "all", True, self.user(), text, chan=peer_id or "all",
+                    att={"name": os.path.basename(path), "size": size, "path": path})
+
+    @staticmethod
+    def download(att, dest):
+        """Кнопка «Скачать»: копия присланного файла туда, куда выбрал человек."""
+        import shutil
+        shutil.copyfile(att["path"], dest)

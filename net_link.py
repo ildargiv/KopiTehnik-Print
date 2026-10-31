@@ -49,6 +49,24 @@ class OutcomeUnknown(NetError):
     """Связь оборвалась после приёма листа: неизвестно, напечатан ли он. Перекидывать на другой принтер нельзя."""
 
 
+def safe_filename(name):
+    """Имя файла без путей и запрещённых символов (присланное имя никогда не используется как путь)."""
+    name = os.path.basename(str(name).replace("\\", "/")).strip().strip(".")
+    name = "".join("_" if c in '<>:"/\\|?*\x00' or ord(c) < 32 else c for c in name)
+    return (name or "файл")[:120]
+
+
+def unique_path(path):
+    if not os.path.exists(path):
+        return path
+    base, ext = os.path.splitext(path)
+    for i in range(1, 1000):
+        p = "%s (%d)%s" % (base, i, ext)
+        if not os.path.exists(p):
+            return p
+    return "%s (%s)%s" % (base, uuid.uuid4().hex[:6], ext)
+
+
 def new_code():
     return os.urandom(16).hex()
 
@@ -325,6 +343,7 @@ class Node:
         self._job_waiters = {}
         self._my_state = {}
         self._base_state = {}
+        self.file_dir = None              # куда складывать присланные файлы (задаёт программа)
 
     # --- служебное ---
     def _emit(self, kind, **info):
@@ -537,6 +556,8 @@ class Node:
                 self.inbox.append(msg)
                 self._emit("chat", **msg)
             return {"delivered": True}, b""
+        if cmd == "file":
+            return self._receive_file(sess, meta, data), b""
         fn = self.handlers.get(cmd)
         if not fn:
             raise KeyError(f"неизвестная команда: {cmd}")
@@ -694,10 +715,33 @@ class Node:
             self.send_sheet(peer_id, printer, job, uuid.uuid4().hex[:10], sheet)
         return send
 
+    # --- файлы ---
+    def _receive_file(self, sess, meta, data):
+        """Сохраняет присланный файл в file_dir/<ПК>/<дата>/ (никогда не открывает и не запускает) и сообщает окну."""
+        if not self.file_dir:
+            raise PermissionError("приём файлов не настроен")
+        fid = str(meta.get("id", ""))
+        if any(m.get("id") == fid and m["from"] == sess.peer_id for m in self.inbox):
+            return {"delivered": True, "duplicate": True}
+        name = safe_filename(meta.get("name", "файл"))
+        folder = os.path.join(self.file_dir, safe_filename(sess.peer_name or sess.peer_id), time.strftime("%Y-%m-%d"))
+        os.makedirs(folder, exist_ok=True)
+        path = unique_path(os.path.join(folder, name))
+        with open(path, "wb") as f:
+            f.write(data)
+        msg = {"from": sess.peer_id, "name": sess.peer_name, "user": str(meta.get("user", ""))[:64], "text": str(meta.get("text", ""))[:4000],
+               "id": fid, "ts": time.time(), "channel": str(meta.get("channel", "all"))[:32],
+               "att": {"name": os.path.basename(path), "size": len(data), "path": path}}
+        self.inbox.append(msg)
+        self._emit("chat", **msg)
+        return {"delivered": True}
+
     # --- чат ---
-    def chat_send(self, peer_id, text, user="", channel="all"):
-        """Отправить сообщение; если ПК офлайн, оно уйдёт при подключении."""
-        m = {"id": uuid.uuid4().hex[:12], "text": text, "user": user or self.name, "channel": channel, "ts": time.time()}
+    def chat_send(self, peer_id, text, user="", channel="all", file=None, msg_id=None):
+        """Отправить сообщение (file — путь к файлу-вложению); если ПК офлайн, оно уйдёт при подключении."""
+        m = {"id": msg_id or uuid.uuid4().hex[:12], "text": text, "user": user or self.name, "channel": channel, "ts": time.time()}
+        if file:
+            m["file"] = file
         self.outbox.setdefault(peer_id, deque(maxlen=500)).append(m)
         self._pool(self._flush_outbox, peer_id)
         return m["id"]
@@ -711,8 +755,16 @@ class Node:
                 q.popleft()
                 continue
             try:
-                s.call("chat", m, timeout=10)
+                if m.get("file"):
+                    with open(m["file"], "rb") as f:
+                        blob = f.read()
+                    s.call("file", {k: v for k, v in m.items() if k != "file"} | {"name": os.path.basename(m["file"])}, blob, timeout=300)
+                else:
+                    s.call("chat", m, timeout=10)
             except NetError:
                 return
+            except OSError:                    # файл пропал: не блокировать очередь
+                q.popleft()
+                continue
             if q and q[0] is m:
                 q.popleft()
