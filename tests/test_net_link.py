@@ -52,7 +52,7 @@ def test_pairing_and_presence(nodes):
     assert ("presence", True) in events
     b.sessions[a.id].close()
     assert wait(lambda: not a.online(b.id))
-    assert ("presence", False) in events
+    assert wait(lambda: ("presence", False) in events)      # событие уходит чуть позже, чем сессия снята
 
 
 def test_pairing_wrong_code_and_closed(nodes):
