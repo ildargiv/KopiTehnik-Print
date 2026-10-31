@@ -580,7 +580,7 @@ class Node:
             job["got"] += 1
             self.sheets[key] = {"state": "queued", "from": sess.peer_id}
             q = self._queues.get(printer) or self._queues.setdefault(printer, _PrinterQueue(self, printer))
-        q.put((key, sess.peer_id, dict(meta), data))
+        q.put((key, sess.peer_id, dict(meta, **{"from": sess.peer_name}), data))
         return {"state": "queued"}
 
     def _run_sheet(self, key, peer_id, meta, data):
