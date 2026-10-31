@@ -4482,7 +4482,7 @@ class SmartMixin:
 
 
 # ---------------------------------------------------------------- обновление с GitHub
-APP_VERSION = "1.6.1"
+APP_VERSION = "1.7.0"
 RELEASES_API = "https://api.github.com/repos/ildargiv/KopiTehnik-Print/releases/latest"
 RELEASES_PAGE = "https://github.com/ildargiv/KopiTehnik-Print/releases/latest"
 GITHUB_URL = "https://github.com/ildargiv/KopiTehnik-Print"
@@ -5080,8 +5080,22 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         if "--selftest" not in sys.argv and not getattr(self, "_upd_wired", False):
             self._upd_wired = True
             self.update_checked.connect(self._update_result)
+            QTimer.singleShot(1500, self._update_report)
             if self.settings.get("check_updates", True):
                 QTimer.singleShot(4000, lambda: self.check_updates(False))
+
+    def _update_report(self):
+        """После перезапуска из-за обновления: если установщик не отработал, говорим об этом и показываем причину."""
+        try:
+            res = updater.consume_result()
+        except Exception:
+            return
+        if res is None or res[0] == 0:
+            return
+        code, log = res
+        why = {1223: tr("Вы отказались от запроса прав администратора."), 5: tr("Нет доступа к папке программы.")}.get(code, "")
+        warn(self, "%s\n%s\n\n%s: %d\n%s: %s\n\n%s" % (tr("Обновление не установилось, запущена прежняя версия."), why, tr("Код установщика"), code,
+                                                       tr("Журнал"), log, tr("Скачать новую версию вручную:") + " " + RELEASES_PAGE))
 
     def check_updates(self, manual=True):
         """Проверка последнего релиза на GitHub в фоне; manual — ответить и когда обновлений нет."""
@@ -5308,10 +5322,32 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
                     ibtn("check_all", "Отметить все фото", lambda: self.check_all(True), 30, isize=17),
                     ibtn("check_none", "Снять все отметки", lambda: self.check_all(False), 30, isize=17),
                     ibtn("trash", "Убрать неотмеченные из списка", self.remove_unchecked, 30, isize=17), spacing=2)
-        lay = vbox(head, self.thumbs_view, spacing=8, margins=(14, 12, 2, 12))
+        lay = vbox(head, self.thumbs_view, self._net_chat(), spacing=8, margins=(14, 12, 2, 12))
         lay.setStretch(1, 1)
         w.setLayout(lay)
         return w
+
+    def _net_chat(self):
+        """Сворачиваемый чат между подключёнными ПК (слева под списком фото). Сетевая служба создаётся один раз и живёт до закрытия."""
+        try:
+            return self._net_chat_build()
+        except Exception:                                   # сеть — дополнение: её сбой не должен ломать окно программы
+            traceback.print_exc()
+            self.chat_panel = None
+            return QWidget()
+
+    def _net_chat_build(self):
+        import net_service, net_ui, net_print
+        if getattr(self, "net", None) is None:
+            self.net = net_service.NetService(lambda: self.settings, lambda: pc.save_settings(self.settings))
+            self.net.attach_printing(net_print.NetPrinting(pc, pcr, lambda: self.settings, print_stats=ps))
+            if self.settings.get("net", {}).get("enabled"):
+                try:
+                    self.net.start()
+                except OSError:
+                    pass
+        self.chat_panel = net_ui.ChatPanel(self.net, T, tr)
+        return self.chat_panel
 
     def _center(self):
         w = QWidget()
@@ -8793,6 +8829,11 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         if self.saving and not self.printing and not ask(self, "Идёт сохранение. Всё равно выйти?"):
             e.ignore()
             return
+        try:
+            if getattr(self, "net", None) is not None:
+                self.net.stop()                                    # сетевая служба останавливается только когда выход подтверждён
+        except Exception:
+            pass
         enabled = self.settings.get("agent_enabled", False)
         self.agent_stop()                                          # файл с адресом агента удаляется; включённость запоминаем
         self.settings["agent_enabled"] = enabled
