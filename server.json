@@ -1,0 +1,41 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.ildargiv/kopitehnik-print",
+  "title": "KopiTehnik Print",
+  "description": "Print photos on a real inkjet printer: ICC colour, borderless, smart crop, sheet layout.",
+  "repository": {
+    "url": "https://github.com/ildargiv/KopiTehnik-Print",
+    "source": "github",
+    "id": "1424858955"
+  },
+  "version": "1.8.0",
+  "websiteUrl": "https://ildargiv.github.io/KopiTehnik-Print/",
+  "icons": [
+    {
+      "src": "https://raw.githubusercontent.com/ildargiv/KopiTehnik-Print/main/brand/mark_512_dark.png",
+      "mimeType": "image/png",
+      "sizes": ["512x512"]
+    }
+  ],
+  "packages": [
+    {
+      "registryType": "pypi",
+      "identifier": "kopitehnik-print-mcp",
+      "version": "1.8.0",
+      "runtimeHint": "uvx",
+      "transport": {
+        "type": "stdio"
+      },
+      "environmentVariables": [
+        {
+          "name": "KOPITEHNIK_AGENT_EXE",
+          "description": "Optional full path to PhotoCropAgent.exe if KopiTehnik Print is installed in a non-standard folder.",
+          "format": "filepath",
+          "isRequired": false,
+          "isSecret": false
+        }
+      ]
+    }
+  ]
+}
+
