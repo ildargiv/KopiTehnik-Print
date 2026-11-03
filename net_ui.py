@@ -679,6 +679,12 @@ class ChatPanel(QFrame):
         self.b_file.setText("📎")
         self.b_file.setToolTip(tr("Отправить файл или фото"))
         self.b_file.clicked.connect(self.pick_files)
+        self.photos_provider = None                     # задаёт программа: отмеченные фото -> список путей
+        self.b_photos = QToolButton()
+        self.b_photos.setObjectName("flat")
+        self.b_photos.setText("🖼")
+        self.b_photos.setToolTip(tr("Отправить отмеченные фото из программы"))
+        self.b_photos.clicked.connect(self.send_marked)
         self.edit = QLineEdit()
         self.edit.setObjectName("input")
         self.edit.setPlaceholderText(tr("Сообщение…"))
@@ -688,9 +694,9 @@ class ChatPanel(QFrame):
         self.b_send.setText("➤")
         self.b_send.setToolTip(tr("Отправить"))
         self.b_send.clicked.connect(lambda: self.send(self.edit.text()))
-        for w in (self.b_emoji, self.b_file, self.b_send):
+        for w in (self.b_emoji, self.b_file, self.b_photos, self.b_send):
             w.setCursor(Qt.PointingHandCursor)
-        for w, st in ((self.b_emoji, 0), (self.b_file, 0), (self.edit, 1), (self.b_send, 0)):
+        for w, st in ((self.b_emoji, 0), (self.b_file, 0), (self.b_photos, 0), (self.edit, 1), (self.b_send, 0)):
             row.addWidget(w, st)
         b.addWidget(composer)
         root.addWidget(self.body, 1)
@@ -915,6 +921,15 @@ class ChatPanel(QFrame):
         paths, _ = QFileDialog.getOpenFileNames(self, self.tr("Отправить файл или фото"))
         if paths:
             self.send_paths(paths)
+
+    def send_marked(self):
+        """Отметить фото в программе и отправить выбранному ПК одним кликом (оригинальные файлы)."""
+        paths = [p for p in (self.photos_provider() if self.photos_provider else []) if os.path.isfile(p)]
+        if not paths:
+            self.edit.setPlaceholderText(self.tr("Сначала отметьте фото в списке слева"))
+            QTimer.singleShot(4000, lambda: self.edit.setPlaceholderText(self.tr("Сообщение…")))
+            return
+        self.send_paths(paths)
 
     def show_emoji(self):
         pop = EmojiPopup(self.T, self.tr)

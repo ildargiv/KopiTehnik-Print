@@ -207,3 +207,19 @@ def test_service_trust_notes_versions(app, tmp_path):
     finally:
         a.stop()
         b.stop()
+
+
+def test_send_marked_photos(app, tmp_path):
+    from PIL import Image
+    a, b, sa, sb, pa, pb, ma, mb = connect(app, tmp_path)
+    try:
+        f = tmp_path / "x.jpg"
+        Image.new("RGB", (40, 30), "red").save(f)
+        pa.send_marked()                                              # ничего не отмечено: подсказка, без отправки
+        assert "отметьте" in pa.edit.placeholderText() and count(pa) == 0
+        pa.photos_provider = lambda: [str(f)]
+        pa.send_marked()
+        assert count(pa) == 1
+        assert pump(app, lambda: any(m.get("att") and m["att"]["kind"] == "image" for m in sb["net"]["chat"]))
+    finally:
+        a.stop(); b.stop()

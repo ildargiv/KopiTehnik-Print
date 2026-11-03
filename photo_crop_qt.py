@@ -5347,6 +5347,7 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
                 except OSError:
                     pass
         self.chat_panel = net_ui.ChatPanel(self.net, T, tr)
+        self.chat_panel.photos_provider = lambda: list(self.checked_files())
         return self.chat_panel
 
     def _center(self):
@@ -10145,6 +10146,8 @@ pc.EN.update({
     "Принтеры не найдены.": "No printers found.",
     "Скрытые ПК не показываются в чате, но остаются подключёнными. «Запретить печать» оставляет чат, но этот ПК не сможет печатать на ваших принтерах.": "Hidden PCs are not shown in the chat but stay connected. “Forbid printing” keeps the chat but the PC cannot print on your printers.",
     "Отмеченные принтеры другие ПК видят и могут печатать на них. Цвет и настройки драйвера берутся из профилей этого ПК.": "Other PCs can see and print on the checked printers. Colour and driver settings come from this PC's profiles.",
+    "Отправить отмеченные фото из программы": "Send the checked photos from the program",
+    "Сначала отметьте фото в списке слева": "Check photos in the list on the left first",
     "Настройки хранятся в файле": "Settings are stored in", "Оформление": "Appearance",
     "Сохранить проект (рамки и настройки)": "Save project (frames and settings)",
 })
