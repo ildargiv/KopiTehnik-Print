@@ -223,3 +223,21 @@ def test_send_marked_photos(app, tmp_path):
         assert pump(app, lambda: any(m.get("att") and m["att"]["kind"] == "image" for m in sb["net"]["chat"]))
     finally:
         a.stop(); b.stop()
+
+
+def test_delivery_status_and_persistent_queue(app, tmp_path):
+    a, b, sa, sb, pa, pb, ma, mb = connect(app, tmp_path)
+    try:
+        a.node.sessions[b.node.id].close()
+        a.send_chat("пока нет связи", b.node.id)
+        mine = [m for m in sa["net"]["chat"] if m["me"]][-1]
+        assert mine["delivered"] is False and sa["net"]["outbox"][b.node.id]
+        assert pump(app, lambda: mine["delivered"] and not sa["net"].get("outbox"), 12)
+        # очередь переживает перезапуск программы: запись на диске -> после старта уходит сама
+        sa["net"]["outbox"] = {b.node.id: [{"id": "m1", "text": "с прошлого раза", "user": "Аня", "channel": "dm", "ts": time.time(), "file": None}]}
+        a.stop()
+        a.start()
+        assert pump(app, lambda: any(m["text"] == "с прошлого раза" for m in sb["net"]["chat"]), 12)
+        assert pump(app, lambda: not sa["net"].get("outbox"))
+    finally:
+        a.stop(); b.stop()

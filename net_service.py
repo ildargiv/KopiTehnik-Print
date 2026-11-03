@@ -7,6 +7,7 @@
 import os
 import threading
 import time
+import uuid
 
 import net_link as nl
 
@@ -121,6 +122,10 @@ class NetService:
             self.attach_printing(self.printing)
         self.node.file_dir = self.files_dir()
         self.node.start()
+        for pid, items in list((c.get("outbox") or {}).items()):         # неотправленное с прошлого запуска уйдёт при подключении
+            for m in items:
+                if pid in paired and (not m.get("file") or os.path.isfile(m["file"])):
+                    self.node.chat_send(pid, m["text"], user=m.get("user", ""), channel=m.get("channel", "all"), file=m.get("file"), msg_id=m["id"])
         self.node.start_discovery(tailscale=self.cfg.get("tailscale", True))      # нет рассылки: остаётся ручной адрес
         self.save()
         return self.node
@@ -145,6 +150,8 @@ class NetService:
         if kind == "chat":
             self._store(info["from"], False, info.get("user") or info.get("name", ""), info.get("text", ""), info.get("ts"),
                         chan="all" if info.get("channel") == "all" else info["from"], att=info.get("att"))
+        if kind == "delivered":
+            self._delivered(info["peer"], info["id"])
         if kind == "paired":
             self.save()
         if kind in ("sheet", "sent_sheet"):
@@ -286,6 +293,20 @@ class NetService:
     def pair_requests(self):
         return self.node.pending_pair_requests() if self.node else []
 
+    def _delivered(self, peer, mid):
+        box = self.cfg.get("outbox", {})
+        box[peer] = [m for m in box.get(peer, []) if m["id"] != mid]
+        if not box[peer]:
+            box.pop(peer, None)
+        for m in self.cfg.get("chat", []):
+            if m.get("mid") == mid:
+                m["delivered"] = True
+        self.save()
+
+    def _queue(self, peer, mid, text, channel, file=None):
+        self.cfg.setdefault("outbox", {}).setdefault(peer, []).append(
+            {"id": mid, "text": text, "user": self.user(), "channel": channel, "ts": time.time(), "file": file})
+
     # ---- чат ----
     def history(self, peer_id=None):
         """peer_id=None: общий канал (все сообщения «всем»)."""
@@ -304,9 +325,11 @@ class NetService:
                 m["read"] = True
         self.save()
 
-    def _store(self, peer, me, user, text, ts=None, chan=None, att=None):
+    def _store(self, peer, me, user, text, ts=None, chan=None, att=None, mid=None, delivered=True):
         chat = self.cfg.setdefault("chat", [])
         m = {"chan": chan or peer, "peer": peer, "me": me, "user": user, "text": text, "ts": ts or time.time(), "read": me}
+        if mid:
+            m["mid"], m["delivered"] = mid, delivered
         if att:
             att = dict(att, kind="image" if att["name"].lower().endswith(IMAGE_EXT) else "file")
             m["att"] = att
@@ -315,15 +338,19 @@ class NetService:
         self.save()
 
     def send_chat(self, text, peer_id=None):
-        """peer_id=None: всем спаренным ПК. Офлайн-получатели получат сообщение при подключении."""
+        """peer_id=None: всем спаренным ПК. Офлайн-получатели получат сообщение при подключении (очередь хранится на диске)."""
         text = text.strip()
         if not text:
             return
         self._need()
         targets = [peer_id] if peer_id else list(self.cfg.get("paired", {}))
+        mids = {pid: uuid.uuid4().hex[:12] for pid in targets}
+        self._store(peer_id or "all", True, self.user(), text, chan=peer_id or "all", mid=mids[targets[0]] if targets else None, delivered=False)
         for pid in targets:
-            self.node.chat_send(pid, text, user=self.user(), channel="all" if not peer_id else "dm")
-        self._store(peer_id or "all", True, self.user(), text, chan=peer_id or "all")
+            self._queue(pid, mids[pid], text, "all" if not peer_id else "dm")
+        self.save()
+        for pid in targets:
+            self.node.chat_send(pid, text, user=self.user(), channel="all" if not peer_id else "dm", msg_id=mids[pid])
 
     def send_file(self, path, peer_id=None, text=""):
         """Отправить файл (любой) выбранному ПК или всем. Фото в чате показываются картинкой, остальное значком."""
@@ -334,10 +361,14 @@ class NetService:
             raise ValueError("Файл больше %d МБ." % (MAX_SEND >> 20))
         self._need()
         targets = [peer_id] if peer_id else list(self.cfg.get("paired", {}))
-        for pid in targets:
-            self.node.chat_send(pid, text, user=self.user(), channel="all" if not peer_id else "dm", file=path)
+        mids = {pid: uuid.uuid4().hex[:12] for pid in targets}
         self._store(peer_id or "all", True, self.user(), text, chan=peer_id or "all",
-                    att={"name": os.path.basename(path), "size": size, "path": path})
+                    att={"name": os.path.basename(path), "size": size, "path": path}, mid=mids[targets[0]] if targets else None, delivered=False)
+        for pid in targets:
+            self._queue(pid, mids[pid], text, "all" if not peer_id else "dm", path)
+        self.save()
+        for pid in targets:
+            self.node.chat_send(pid, text, user=self.user(), channel="all" if not peer_id else "dm", file=path, msg_id=mids[pid])
 
     @staticmethod
     def download(att, dest):

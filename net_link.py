@@ -1216,3 +1216,4 @@ class Node:
                 continue
             if q and q[0] is m:
                 q.popleft()
+            self._emit("delivered", peer=peer_id, id=m["id"])

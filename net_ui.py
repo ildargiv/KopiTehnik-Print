@@ -13,7 +13,7 @@ import socket
 import time
 
 from PySide6.QtCore import QEasingCurve, QObject, QPointF, QRectF, QSize, Qt, QTimer, QVariantAnimation, Signal
-from PySide6.QtGui import QColor, QFont, QFontMetrics, QIcon, QPainter, QPainterPath, QPen, QPixmap
+from PySide6.QtGui import QColor, QFont, QFontMetrics, QIcon, QImageReader, QPainter, QPainterPath, QPen, QPixmap
 from PySide6.QtWidgets import (QComboBox, QDialog, QFileDialog, QFrame, QGraphicsOpacityEffect, QGridLayout, QHBoxLayout, QLabel,
                                QLineEdit, QPushButton, QScrollArea, QSizePolicy, QTabWidget, QToolButton, QVBoxLayout, QWidget)
 
@@ -169,6 +169,31 @@ class _Bridge(QObject):
     event = Signal(str, object)
 
 
+_THUMBS = {}
+
+
+def _thumb(path):
+    """Миниатюра для ленты: JPEG и другие форматы декодируются сразу уменьшенными (быстро даже для фото на десятки мегапикселей)."""
+    try:
+        key = (path, os.path.getmtime(path))
+    except OSError:
+        return None
+    if key in _THUMBS:
+        return _THUMBS[key]
+    rd = QImageReader(path)
+    rd.setAutoTransform(True)
+    sz = rd.size()
+    if sz.isValid() and sz.width() > 0 and sz.height() > 0:
+        k = min(1.0, BUBBLE_W / sz.width(), 240.0 / sz.height())
+        rd.setScaledSize(QSize(max(1, int(sz.width() * k)), max(1, int(sz.height() * k))))
+    img = rd.read()
+    pm = QPixmap.fromImage(img) if not img.isNull() else None
+    if len(_THUMBS) > 200:
+        _THUMBS.clear()
+    _THUMBS[key] = pm
+    return pm
+
+
 class Bubble(QWidget):
     """Одно сообщение. Появляется с анимацией: строка плавно раздвигает историю, пузырь выезжает со своего края,
     проявляется и чуть «пружинит» на месте."""
@@ -208,7 +233,7 @@ class Bubble(QWidget):
             txt.setMinimumWidth(min(BUBBLE_W, longest + 8))         # короткие фразы не переносятся по слову
             col.addWidget(txt)
         when = time.strftime("%H:%M", time.localtime(m["ts"]))
-        foot = QLabel(when + ("  ✓" if me else ""))
+        foot = QLabel(when + (("  ✓" if m.get("delivered", True) else "  🕓") if me else ""))
         foot.setObjectName("when")
         foot.setAlignment(Qt.AlignRight)
         col.addWidget(foot)
@@ -230,14 +255,10 @@ class Bubble(QWidget):
         v.setSpacing(6)
         pm = None
         if att.get("kind") == "image" and os.path.isfile(att.get("path", "")):
-            pm = QPixmap(att["path"])
+            pm = _thumb(att["path"])
         size = human_size(att.get("size", 0))
         if pm is not None and not pm.isNull():
             pic = QLabel()
-            if pm.width() > BUBBLE_W:
-                pm = pm.scaledToWidth(BUBBLE_W, Qt.SmoothTransformation)
-            if pm.height() > 240:                                   # высокие фото не растягивают ленту
-                pm = pm.scaledToHeight(240, Qt.SmoothTransformation)
             pic.setPixmap(rounded_pixmap(pm))
             pic.setAlignment(Qt.AlignCenter)
             pic.setObjectName("pic")
@@ -852,7 +873,7 @@ class ChatPanel(QFrame):
             self.svc.mark_read(peer)
         self._clear()
         h = self.svc.history(peer)
-        for m in h:
+        for m in h[-80:]:                                       # давнее остаётся в истории, лента не пересобирает сотни сообщений
             self.col.insertWidget(self.col.count() - 1, Bubble(self, m))
         self._shown, self._shown_key = len(h), peer or "all"
         if not h:
@@ -968,6 +989,9 @@ class ChatPanel(QFrame):
             else:
                 self.refresh()
                 self._pulse()
+        elif kind == "delivered":
+            if self.open:
+                self._render()
         elif kind in ("presence", "paired", "peer_found"):
             self.refresh()
         elif kind == "pair_request":
