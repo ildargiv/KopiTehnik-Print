@@ -7,6 +7,7 @@
 - **Network section in Settings**: switch, accept printing, name, files folder, list of PCs (rename, hide, forbid printing, forget, app version), which printers to share.
 - Status buttons for connected PCs at the bottom right (online, printing, needs attention, offline); a click opens the chat. A 🖼 chat button sends the checked photos. Chat shows "printed" or "print failed" lines, delivery status, and the unsent queue survives restarts.
 - Security: password-authenticated code exchange (6 digits cannot be guessed from captured traffic, three mistakes cancel the request), ids and roles in signatures, connection and request limits, UDP address spoofing no longer redirects a paired PC, a second app copy cannot take the port, firewall rule in the installer (admin install).
+- **Printers**: each printer can get its own display name and unneeded ones can be hidden (✎ button next to the printer list, in the “Printers for printing” window and in Settings, Print → Printers). Hidden printers are not shown in print lists.
 - The network is now on by default (Windows may ask for a firewall permission on first start: allow it for private networks). The link is still not encrypted; the 6-digit code protects against accidental connections in a trusted network, use Tailscale for open networks.
 
 Release files: `KopiTehnikPrint-Setup-1.8.0.exe`, `KopiTehnikPrint-Portable-1.8.0.exe`.

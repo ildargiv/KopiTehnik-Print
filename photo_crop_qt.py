@@ -5519,7 +5519,7 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         self.sw_cm2.toggled.connect(lambda on: (self._cm_set("cm_on", on), self.sw_cm.set(on)))
         self.l_icc2 = lbl("", "muted", wrap=True)
         printer = card("Принтер и бумага",
-                       row("Принтер", hbox(self.cb_printer, ibtn("reset", "Обновить список принтеров", self.reload_printers, 34, True), spacing=4)),
+                       row("Принтер", hbox(self.cb_printer, ibtn("edit", "Имя принтера и скрытие ненужных", self.edit_current_printer, 34, True), ibtn("reset", "Обновить список принтеров", self.reload_printers, 34, True), spacing=4)),
                        row("Тип бумаги", self.cb_media), self.l_paper_drv, row("Подача", self.cb_source),
                        tile("Свойства драйвера…", self.driver_props, "Все настройки печати", "driver", "select"),
                        row(self.l_quality, self.cb_quality), row(self.l_border, self.sw_border), row(self.l_ccor, self.sw_ccor),
@@ -5575,19 +5575,69 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
 
     def reload_printers(self):
         self.printers = pc.list_printers()
+        shown = self.shown_printers()
+        self.cb_printer.blockSignals(True)
         self.cb_printer.clear()
-        self.cb_printer.addItems(self.printers)
+        for n_ in shown:
+            self.cb_printer.addItem(self.printer_title(n_), n_)          # видимое имя можно изменить, настоящее остаётся для драйвера
+        self.cb_printer.blockSignals(False)
         want = self.pr["printer"] or self.settings.get("print_printer") or ""
-        name = want if want in self.printers else (self.printers[0] if self.printers else "")
+        name = want if want in shown else (shown[0] if shown else "")
         self.pr["printer"] = name
         if name:
-            self.cb_printer.setCurrentText(name)
+            self.cb_printer.setCurrentIndex(max(0, self.cb_printer.findData(name)))
         self._load_printer()
         self.multi_refresh()
         self._qs_refresh()
 
+    # ---------- видимые имена и скрытие принтеров
+    def printer_title(self, name):
+        return (self.settings.get("printer_alias") or {}).get(name) or name
+
+    def printer_hidden(self, name):
+        return name in (self.settings.get("printer_hidden") or [])
+
+    def shown_printers(self):
+        """Принтеры, не скрытые человеком (если скрыты все, показываются все: список не должен остаться пустым)."""
+        vis = [n_ for n_ in self.printers if not self.printer_hidden(n_)]
+        return vis or list(self.printers)
+
+    def printer_edit(self, name, parent=None):
+        """Окно «Имя и видимость принтера»: другое имя в списках и кнопка «Скрыть»."""
+        dlg = QDialog(parent or self)
+        dlg.setWindowTitle(tr("Принтер"))
+        e = QLineEdit((self.settings.get("printer_alias") or {}).get(name, ""))
+        e.setPlaceholderText(name)
+        cb = QCheckBox(tr("Скрыть этот принтер в списках"))
+        cb.setChecked(self.printer_hidden(name))
+        dlg.setLayout(vbox(lbl(name, "muted", wrap=True), lbl(tr("Имя в программе")), e, cb,
+                           hbox(None, btn(tr("Отмена"), dlg.reject, "link"), btn(tr("Готово"), dlg.accept, "primary")),
+                           spacing=8, margins=(14, 14, 14, 14)))
+        dlg.setMinimumWidth(360)
+        if not dlg.exec():
+            return False
+        alias = dict(self.settings.get("printer_alias") or {})
+        if e.text().strip() and e.text().strip() != name:
+            alias[name] = e.text().strip()[:60]
+        else:
+            alias.pop(name, None)
+        hidden = [n_ for n_ in (self.settings.get("printer_hidden") or []) if n_ != name]
+        if cb.isChecked():
+            hidden.append(name)
+        self.settings["printer_alias"], self.settings["printer_hidden"] = alias, hidden
+        try:
+            pc.save_settings(self.settings)
+        except Exception:
+            pass
+        self.reload_printers()
+        return True
+
+    def edit_current_printer(self):
+        if self.pr.get("printer"):
+            self.printer_edit(self.pr["printer"])
+
     def _printer_changed(self):
-        self.pr["printer"] = self.cb_printer.currentText()
+        self.pr["printer"] = self.cb_printer.currentData() or ""
         self._load_printer()
         self._qs_refresh()
 
@@ -6210,7 +6260,7 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
             if sl.get("bound"):
                 if sl["printer"] in self.printers:
                     if self.pr["printer"] != sl["printer"]:
-                        self.cb_printer.setCurrentText(sl["printer"])
+                        self.cb_printer.setCurrentIndex(max(0, self.cb_printer.findData(sl["printer"])))
                         self._printer_changed()
                 else:
                     notes.append(trf("Принтер «{p}» не найден, оставлен текущий.", p=sl["printer"]))
@@ -6420,7 +6470,7 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         if not self.multi_enabled():
             return []
         want = self.settings.get("multi_printers") or []
-        return [p_ for p_ in self.printers if p_ in want]
+        return [p_ for p_ in self.printers if p_ in want and not self.printer_hidden(p_)]
 
     def multi_active(self):
         """Режим печати на нескольких принтерах сейчас включён: он разрешён в настройках, не отключён кнопкой и отмечено больше одного принтера."""
@@ -6453,7 +6503,11 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
 
     def multi_dialog(self):
         dlg = MultiPrinterDialog(self)
-        if dlg.exec():
+        r = dlg.exec()
+        if r == 2:                                                  # имя или видимость принтера изменены: открыть окно заново
+            QTimer.singleShot(0, self.multi_dialog)
+            return
+        if r:
             self.settings["multi_printers"] = dlg.chosen()
             self.settings["multi_modes"] = dlg.modes()
             self.settings["multi_on"] = dlg.mode_on
@@ -9578,15 +9632,16 @@ class MultiPrinterDialog(QDialog):
 
     def __init__(self, app):
         super().__init__(app)
+        self.app = app
         self.setWindowTitle(tr("Принтеры для печати"))
         want = app.settings.get("multi_printers") or []
         self.boxes = []
         lay = vbox(lbl(tr("Отметьте принтеры. Если отмечено больше одного, кнопка «Печать» распределит листы между ними: освободившийся принтер берёт следующий лист."), "muted", wrap=True), spacing=8, margins=(14, 14, 14, 14))
         virtual = ("pdf", "xps", "onenote", "fax", "anydesk", "cutepdf", "send to")        # виртуальные принтеры спрашивают «куда сохранить» на каждый лист
         for name in app.printers:
-            if any(v in name.lower() for v in virtual):
+            if any(v in name.lower() for v in virtual) or app.printer_hidden(name):
                 continue
-            cb = QCheckBox(name + ("" if app._multi_profile(name) or name == app.pr["printer"] else "  (" + tr("нет своего профиля") + ")"))
+            cb = QCheckBox(app.printer_title(name) + ("" if app._multi_profile(name) or name == app.pr["printer"] else "  (" + tr("нет своего профиля") + ")"))
             cb.setChecked(name in want)
             cb.name = name
             self.boxes.append(cb)
@@ -9602,7 +9657,8 @@ class MultiPrinterDialog(QDialog):
             mode.setToolTip(tr("Режим печати из «Быстрого старта» этого принтера: бумага, качество, цвет.") if mode.count() > 1 else
                             tr("У этого принтера нет сохранённых ячеек «Быстрого старта»: выберите принтер на вкладке «Принтер», настройте бумагу и качество и нажмите дискету в ячейке."))
             cb.mode = mode
-            lay.addLayout(hbox(cb, None, mode, spacing=8))
+            ed = ibtn("edit", "Имя принтера и скрытие ненужных", lambda _=False, n_=name: self._edit(n_), 28, True, isize=14)
+            lay.addLayout(hbox(cb, None, mode, ed, spacing=8))
         if not app.printers:
             lay.addWidget(lbl(tr("Принтеры не найдены.")))
         self.cb_serial = QCheckBox(tr("Отправлять на принтеры по очереди (если драйвер зависает при параллельной печати)"))
@@ -9617,6 +9673,10 @@ class MultiPrinterDialog(QDialog):
         lay.addLayout(hbox(self.b_off, None, btn(tr("Отмена"), self.reject, "link"), btn(tr("Готово"), self.accept, "primary"), spacing=8))
         self.setLayout(lay)
         self.setMinimumWidth(420)
+
+    def _edit(self, name):
+        if self.app.printer_edit(name, self):          # список в окне собирается заново: закрываем, чтобы открыть уже с новыми именами
+            self.done(2)
 
     def _sync_off(self):
         self.b_off.setText(tr("Отключить печать на нескольких принтерах") if self.mode_on else tr("Включить печать на нескольких принтерах"))
@@ -9737,7 +9797,7 @@ class SettingsDialog(QDialog):
                           lbl("Листы расходятся между отмеченными принтерами. Отметить принтеры можно кнопкой «Принтеры…» рядом с «Печать».", "muted", wrap=True),
                           row("Быстрый старт (ячейки настроек на вкладке «Принтер»)", sw_qs),
                           row("Подсвечивать включённую ячейку «Быстрого старта» зелёным", sw_hl))
-        section("Печать", "print", [("Режимы печати", [multi_card]), ("Профили печати", [self._profiles_card()]),
+        section("Печать", "print", [("Принтеры", [self._printers_card()]), ("Режимы печати", [multi_card]), ("Профили печати", [self._profiles_card()]),
                                     ("Счётчик печати", [self._counter_card()])])
         net_pages = self._net_pages()
         if net_pages:
@@ -9872,6 +9932,33 @@ class SettingsDialog(QDialog):
         except Exception:
             traceback.print_exc()
             return []
+
+    def _printers_card(self):
+        """Все принтеры системы: переименовать и скрыть ненужные (скрытые не показываются в списках печати)."""
+        app = self.app
+        self.lw_prn = QListWidget()
+        self.lw_prn.setMinimumHeight(220)
+
+        def fill():
+            cur = self.lw_prn.currentItem().data(Qt.UserRole) if self.lw_prn.currentItem() else None
+            self.lw_prn.clear()
+            for n_ in app.printers:
+                t_ = app.printer_title(n_) + ("   (" + n_ + ")" if app.printer_title(n_) != n_ else "") + ("   — " + tr("скрыт") if app.printer_hidden(n_) else "")
+                it = QListWidgetItem(t_)
+                it.setData(Qt.UserRole, n_)
+                self.lw_prn.addItem(it)
+                if n_ == cur:
+                    self.lw_prn.setCurrentItem(it)
+
+        def edit():
+            it = self.lw_prn.currentItem()
+            if it and app.printer_edit(it.data(Qt.UserRole), self):
+                fill()
+        self.lw_prn.itemDoubleClicked.connect(lambda _it: edit())
+        fill()
+        return card("Принтеры", lbl("Дайте принтерам понятные имена и скройте ненужные (например, виртуальные). Скрытые не показываются в списках печати. "
+                                    "Двойной щелчок или кнопка ниже.", "muted", wrap=True),
+                    self.lw_prn, hbox(btn("Имя и видимость…", edit, ico="edit"), btn("Обновить список", lambda: (app.reload_printers(), fill())), None))
 
     def _profiles_card(self):
         """Сохранённые профили печати (принтер + формат + тип бумаги): просмотр и удаление."""
@@ -10219,6 +10306,12 @@ pc.EN.update({
     "Не напечатано": "Not printed",
     "Печать на принтере другого подключённого ПК": "Print on a printer of another connected PC",
     "Сеть выключена. Включите её в настройках, раздел «Сеть».": "Network is off. Turn it on in Settings, Network section.",
+    "Скрыть этот принтер в списках": "Hide this printer in lists",
+    "Имя в программе": "Name in the program",
+    "Имя принтера и скрытие ненужных": "Printer name and hiding unneeded ones",
+    "Дайте принтерам понятные имена и скройте ненужные (например, виртуальные). Скрытые не показываются в списках печати. Двойной щелчок или кнопка ниже.": "Give printers clear names and hide unneeded ones (for example virtual ones). Hidden printers are not shown in print lists. Double-click or use the button below.",
+    "Имя и видимость…": "Name and visibility…",
+    "Обновить список": "Refresh list",
     "Настройки хранятся в файле": "Settings are stored in", "Оформление": "Appearance",
     "Сохранить проект (рамки и настройки)": "Save project (frames and settings)",
 })
