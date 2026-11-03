@@ -145,3 +145,31 @@ def test_emoji_popup_and_sounds_generated(app, tmp_path):
     assert set(paths) == {"send", "recv", "file", "error"} and all(os.path.getsize(v) > 1000 for v in paths.values())
     off = net_sound.Sounds(str(tmp_path / "snd"), enabled=lambda: False)
     assert off.play("recv") is False
+
+
+def test_pair_by_click_with_pin(app, tmp_path):
+    a, sa = svc("Аня", tmp_path)
+    b, sb = svc("Борис", tmp_path)
+    pa, pb = net_ui.ChatPanel(a, THEME, sounds=Mute()), net_ui.ChatPanel(b, THEME, sounds=Mute())
+    a.start()
+    b.start()
+    try:
+        a.node._note_found(b.node.id, "Борис", "127.0.0.1", b.node.port)
+        dlg = net_ui.PairDialog(a, THEME, lambda s: s, pa)
+        dlg.refresh_found()
+        assert list(dlg.rows) == [b.node.id]
+        dlg.rows[b.node.id].click()
+        assert pump(app, lambda: pb._pins and dlg.pin.text().replace(" ", "").isdigit())
+        pin = dlg.pin.text().replace(" ", "")
+        d = next(iter(pb._pins.values()))
+        d.edit.setText("000000" if pin != "000000" else "111111")
+        d.ok()
+        assert pump(app, lambda: "Неверный" in d.msg.text())          # неверный код: можно повторить
+        d.edit.setText(pin[:3] + " " + pin[3:])
+        d.ok()
+        assert pump(app, lambda: a.node.online(b.node.id) and b.node.online(a.node.id))
+        assert pump(app, lambda: not dlg.isVisible() and not dlg.busy)
+        assert [p["name"] for p in a.peers()] == ["Борис"] and not a.found()
+    finally:
+        a.stop()
+        b.stop()

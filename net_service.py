@@ -1,7 +1,7 @@
 """Сетевая служба программы: владеет узлом net_link.Node, настройками сети и историей чата. Без Qt.
 
 Настройки лежат в settings["net"]: {"enabled", "id", "name", "user", "paired": {...}, "chat": [...]}.
-Окно подписывается через on_ui(kind, info): kind in presence | chat | paired | peer_found | job_received | sheet | printer_state.
+Окно подписывается через on_ui(kind, info): kind in presence | chat | paired | peer_found | pair_request | pair_result | job_received | sheet | printer_state.
 Вызывается из потоков сети, поэтому окно обязано перенаправить событие в свой поток (сигналом Qt).
 """
 import os
@@ -29,7 +29,7 @@ class NetService:
         return self.get_settings().setdefault("net", {})
 
     def enabled(self):
-        return bool(self.cfg.get("enabled"))
+        return bool(self.cfg.get("enabled", True))      # автопоиск работает сразу; выключается в настройках
 
     def user(self):
         return self.cfg.get("user") or (self.node.name if self.node else "")
@@ -67,11 +67,7 @@ class NetService:
             self.attach_printing(self.printing)
         self.node.file_dir = self.files_dir()
         self.node.start()
-        try:
-            self.node.listen_discovery()
-            self.node.announce()
-        except OSError:
-            pass                                   # нет рассылки (VPN, изолированная сеть): остаётся ручной адрес
+        self.node.start_discovery(tailscale=self.cfg.get("tailscale", True))      # нет рассылки: остаётся ручной адрес
         self.save()
         return self.node
 
@@ -96,6 +92,8 @@ class NetService:
             self._store(info["from"], False, info.get("user") or info.get("name", ""), info.get("text", ""), info.get("ts"),
                         chan="all" if info.get("channel") == "all" else info["from"], att=info.get("att"))
         if kind == "paired":
+            self.save()
+        if kind == "pair_result" and info.get("ok"):
             self.save()
         if self.on_ui:
             self.on_ui(kind, info)
@@ -141,11 +139,34 @@ class NetService:
         return pid
 
     def found(self):
-        """Найденные в сети, но ещё не спаренные ПК: [{id, name, addr, port}]."""
+        """Найденные в сети, но ещё не спаренные ПК: [{id, name, addr, port, via}], свежие первыми по имени."""
         if not self.node:
             return []
-        paired = self.cfg.get("paired", {})
-        return [dict(v, id=k) for k, v in self.node.found.items() if k not in paired]
+        out = [f for f in self.node.found_list() if not f["paired"]]
+        out.sort(key=lambda f: f["name"].lower())
+        return out
+
+    def probe(self, addr, port=nl.PORT_TCP):
+        """Проверка адреса, введённого вручную: {id, name, port} или None."""
+        self.start()
+        return self.node.probe(addr.strip(), port, timeout=3.0)
+
+    def request_pair(self, addr, port=nl.PORT_TCP, on_code=None, cancel=None):
+        """Запрос на подключение: у нас показывается 6 цифр, их вводят на другом ПК. Блокирует; вызывать в потоке."""
+        self.start()
+        pid = self.node.request_pair(addr.strip(), port, on_code=on_code, cancel=cancel)
+        self.save()
+        return pid
+
+    def answer_pair(self, req_id, code):
+        return bool(self.node and self.node.answer_pair(req_id, code))
+
+    def deny_pair(self, req_id):
+        if self.node:
+            self.node.deny_pair(req_id)
+
+    def pair_requests(self):
+        return self.node.pending_pair_requests() if self.node else []
 
     # ---- чат ----
     def history(self, peer_id=None):

@@ -4482,7 +4482,7 @@ class SmartMixin:
 
 
 # ---------------------------------------------------------------- обновление с GitHub
-APP_VERSION = "1.7.0"
+APP_VERSION = "1.8.0"
 RELEASES_API = "https://api.github.com/repos/ildargiv/KopiTehnik-Print/releases/latest"
 RELEASES_PAGE = "https://github.com/ildargiv/KopiTehnik-Print/releases/latest"
 GITHUB_URL = "https://github.com/ildargiv/KopiTehnik-Print"
@@ -5341,7 +5341,7 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         if getattr(self, "net", None) is None:
             self.net = net_service.NetService(lambda: self.settings, lambda: pc.save_settings(self.settings))
             self.net.attach_printing(net_print.NetPrinting(pc, pcr, lambda: self.settings, print_stats=ps))
-            if self.settings.get("net", {}).get("enabled"):
+            if self.settings.get("net", {}).get("enabled", True):
                 try:
                     self.net.start()
                 except OSError:
