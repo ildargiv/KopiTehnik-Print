@@ -13,7 +13,7 @@ import socket
 import time
 
 from PySide6.QtCore import QEasingCurve, QObject, QPointF, QRectF, QSize, Qt, QTimer, QVariantAnimation, Signal
-from PySide6.QtGui import QColor, QFont, QFontMetrics, QIcon, QPainter, QPainterPath, QPen, QPixmap
+from PySide6.QtGui import QColor, QFont, QFontMetrics, QIcon, QImageReader, QPainter, QPainterPath, QPen, QPixmap
 from PySide6.QtWidgets import (QComboBox, QDialog, QFileDialog, QFrame, QGraphicsOpacityEffect, QGridLayout, QHBoxLayout, QLabel,
                                QLineEdit, QPushButton, QScrollArea, QSizePolicy, QTabWidget, QToolButton, QVBoxLayout, QWidget)
 
@@ -169,6 +169,31 @@ class _Bridge(QObject):
     event = Signal(str, object)
 
 
+_THUMBS = {}
+
+
+def _thumb(path):
+    """Миниатюра для ленты: JPEG и другие форматы декодируются сразу уменьшенными (быстро даже для фото на десятки мегапикселей)."""
+    try:
+        key = (path, os.path.getmtime(path))
+    except OSError:
+        return None
+    if key in _THUMBS:
+        return _THUMBS[key]
+    rd = QImageReader(path)
+    rd.setAutoTransform(True)
+    sz = rd.size()
+    if sz.isValid() and sz.width() > 0 and sz.height() > 0:
+        k = min(1.0, BUBBLE_W / sz.width(), 240.0 / sz.height())
+        rd.setScaledSize(QSize(max(1, int(sz.width() * k)), max(1, int(sz.height() * k))))
+    img = rd.read()
+    pm = QPixmap.fromImage(img) if not img.isNull() else None
+    if len(_THUMBS) > 200:
+        _THUMBS.clear()
+    _THUMBS[key] = pm
+    return pm
+
+
 class Bubble(QWidget):
     """Одно сообщение. Появляется с анимацией: строка плавно раздвигает историю, пузырь выезжает со своего края,
     проявляется и чуть «пружинит» на месте."""
@@ -208,7 +233,7 @@ class Bubble(QWidget):
             txt.setMinimumWidth(min(BUBBLE_W, longest + 8))         # короткие фразы не переносятся по слову
             col.addWidget(txt)
         when = time.strftime("%H:%M", time.localtime(m["ts"]))
-        foot = QLabel(when + ("  ✓" if me else ""))
+        foot = QLabel(when + (("  ✓" if m.get("delivered", True) else "  🕓") if me else ""))
         foot.setObjectName("when")
         foot.setAlignment(Qt.AlignRight)
         col.addWidget(foot)
@@ -230,14 +255,10 @@ class Bubble(QWidget):
         v.setSpacing(6)
         pm = None
         if att.get("kind") == "image" and os.path.isfile(att.get("path", "")):
-            pm = QPixmap(att["path"])
+            pm = _thumb(att["path"])
         size = human_size(att.get("size", 0))
         if pm is not None and not pm.isNull():
             pic = QLabel()
-            if pm.width() > BUBBLE_W:
-                pm = pm.scaledToWidth(BUBBLE_W, Qt.SmoothTransformation)
-            if pm.height() > 240:                                   # высокие фото не растягивают ленту
-                pm = pm.scaledToHeight(240, Qt.SmoothTransformation)
             pic.setPixmap(rounded_pixmap(pm))
             pic.setAlignment(Qt.AlignCenter)
             pic.setObjectName("pic")
@@ -596,10 +617,58 @@ class ChatHead(QPushButton):
         p.end()
 
 
+class NetStatus(QWidget):
+    """Строка внизу окна справа: по кнопке на каждый подключённый ПК (цвет = состояние). Клик открывает чат с ним."""
+
+    def __init__(self, panel):
+        super().__init__()
+        self.panel = panel
+        self.lay = QHBoxLayout(self)
+        self.lay.setContentsMargins(6, 0, 8, 0)
+        self.lay.setSpacing(4)
+        self.buttons = {}
+        self.setVisible(False)
+
+    def rebuild(self, peers):
+        while self.lay.count():
+            w = self.lay.takeAt(0).widget()
+            if w:
+                w.hide()
+                w.setParent(None)
+                w.deleteLater()
+        self.buttons = {}
+        t, tr = self.panel.T, self.panel.tr
+        shown = peers[:6]
+        for p in shown:
+            b = QToolButton()
+            b.setAutoRaise(True)
+            b.setCursor(Qt.PointingHandCursor)
+            b.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
+            b.setIcon(dot_icon(state_color(t, p["state"]), 12, ring=p["online"]))
+            b.setText(p["name"] if len(p["name"]) <= 14 else p["name"][:13] + "…")
+            lines = [p["name"] + ": " + state_text(tr, p["state"])]
+            node = self.panel.svc.node
+            for name, st in ((node.peer_state.get(p["id"]) if node else None) or {}).items():
+                lines.append("🖨 %s: %s" % (name, st.get("text") or state_text(tr, st.get("level", "ok"))))
+            b.setToolTip("\n".join(lines))
+            b.setStyleSheet("QToolButton { color: %s; font-size: 11px; padding: 1px 5px; border-radius: 6px; }"
+                            "QToolButton:hover { background: %s; }" % (t["muted"], t["hover"]))
+            b.clicked.connect(lambda _=False, pid=p["id"]: self.panel.focus_peer(pid))
+            self.lay.addWidget(b)
+            self.buttons[p["id"]] = b
+        if len(peers) > len(shown):
+            more = QLabel("+%d" % (len(peers) - len(shown)))
+            more.setStyleSheet("color: %s; font-size: 11px;" % t["muted"])
+            self.lay.addWidget(more)
+        self.setVisible(bool(peers))
+
+
 class ChatPanel(QFrame):
     def __init__(self, service, theme, tr=lambda s: s, parent=None, sounds=None):
         super().__init__(parent)
         self.svc, self.T, self.tr = service, _theme(theme), tr
+        self.T_raw = theme
+        self._pins = {}
         self.sounds = sounds if sounds is not None else net_sound.Sounds(enabled=service.sound_on)
         self._bridge = _Bridge()
         self._bridge.event.connect(self._on_event)
@@ -643,6 +712,8 @@ class ChatPanel(QFrame):
         hl.addWidget(self.b_snd)
         hl.addWidget(self.b_add)
         self.head.reserve = 58
+        self.status = NetStatus(self)
+        self.on_peers = None                            # задаёт программа: вызывается при изменении списка ПК
         self.peers = PeerBar(self)
         self.peers.chosen.connect(lambda pid: self._render(True))
         b.addWidget(self.peers)
@@ -677,6 +748,12 @@ class ChatPanel(QFrame):
         self.b_file.setText("📎")
         self.b_file.setToolTip(tr("Отправить файл или фото"))
         self.b_file.clicked.connect(self.pick_files)
+        self.photos_provider = None                     # задаёт программа: отмеченные фото -> список путей
+        self.b_photos = QToolButton()
+        self.b_photos.setObjectName("flat")
+        self.b_photos.setText("🖼")
+        self.b_photos.setToolTip(tr("Отправить отмеченные фото из программы"))
+        self.b_photos.clicked.connect(self.send_marked)
         self.edit = QLineEdit()
         self.edit.setObjectName("input")
         self.edit.setPlaceholderText(tr("Сообщение…"))
@@ -686,9 +763,9 @@ class ChatPanel(QFrame):
         self.b_send.setText("➤")
         self.b_send.setToolTip(tr("Отправить"))
         self.b_send.clicked.connect(lambda: self.send(self.edit.text()))
-        for w in (self.b_emoji, self.b_file, self.b_send):
+        for w in (self.b_emoji, self.b_file, self.b_photos, self.b_send):
             w.setCursor(Qt.PointingHandCursor)
-        for w, st in ((self.b_emoji, 0), (self.b_file, 0), (self.edit, 1), (self.b_send, 0)):
+        for w, st in ((self.b_emoji, 0), (self.b_file, 0), (self.b_photos, 0), (self.edit, 1), (self.b_send, 0)):
             row.addWidget(w, st)
         b.addWidget(composer)
         root.addWidget(self.body, 1)
@@ -787,6 +864,12 @@ class ChatPanel(QFrame):
         self.refresh()
         self.updateGeometry()
 
+    def focus_peer(self, pid):
+        """Клик по кнопке ПК внизу окна: открыть чат и выбрать этого ПК."""
+        if not self.open:
+            self.toggle(True)
+        self.peers.select(pid)
+
     def _peer(self):
         return self.peers.cur
 
@@ -795,10 +878,16 @@ class ChatPanel(QFrame):
         self.peers.rebuild(peers)
         self.b_snd.setText("🔔" if self.svc.sound_on() else "🔕")
         self.b_snd.setToolTip(self.tr("Звук сообщений: включён") if self.svc.sound_on() else self.tr("Звук сообщений: выключен"))
+        n_found = len(self.svc.found())
+        self.b_add.setToolTip(self.tr("Подключить ПК") + ((" (%s: %d)" % (self.tr("найдено"), n_found)) if n_found else ""))
+        self.b_add.setText("＋" if not n_found else "＋%d" % n_found)
         online = sum(1 for p in peers if p["online"])
         unread = self.svc.unread()
         sub = ("%d/%d %s" % (online, len(peers), self.tr("в сети"))) if peers else self.tr("нет ПК")
         self.head.set_state(self.open, unread, online, len(peers), self.tr("Чат"), sub)
+        self.status.rebuild(peers)
+        if self.on_peers:
+            self.on_peers(peers)
 
     def _toggle_sound(self):
         self.svc.set_sound(not self.svc.sound_on())
@@ -841,7 +930,7 @@ class ChatPanel(QFrame):
             self.svc.mark_read(peer)
         self._clear()
         h = self.svc.history(peer)
-        for m in h:
+        for m in h[-80:]:                                       # давнее остаётся в истории, лента не пересобирает сотни сообщений
             self.col.insertWidget(self.col.count() - 1, Bubble(self, m))
         self._shown, self._shown_key = len(h), peer or "all"
         if not h:
@@ -888,7 +977,12 @@ class ChatPanel(QFrame):
         if not self.svc.cfg.get("paired"):
             self.pair_dialog()
             return
-        self.svc.send_chat(text, self._peer())
+        try:
+            self.svc.send_chat(text, self._peer())
+        except Exception as e:
+            self.sounds.play("error")
+            self.edit.setPlaceholderText(str(e))
+            return
         self.edit.clear()
         self.sounds.play("send")
         self._append_new()
@@ -901,7 +995,7 @@ class ChatPanel(QFrame):
             try:
                 self.svc.send_file(p, self._peer())
                 self.sounds.play("send")
-            except (OSError, ValueError) as e:
+            except Exception as e:
                 self.sounds.play("error")
                 self.edit.setPlaceholderText(str(e))
         self._append_new()
@@ -910,6 +1004,15 @@ class ChatPanel(QFrame):
         paths, _ = QFileDialog.getOpenFileNames(self, self.tr("Отправить файл или фото"))
         if paths:
             self.send_paths(paths)
+
+    def send_marked(self):
+        """Отметить фото в программе и отправить выбранному ПК одним кликом (оригинальные файлы)."""
+        paths = [p for p in (self.photos_provider() if self.photos_provider else []) if os.path.isfile(p)]
+        if not paths:
+            self.edit.setPlaceholderText(self.tr("Сначала отметьте фото в списке слева"))
+            QTimer.singleShot(4000, lambda: self.edit.setPlaceholderText(self.tr("Сообщение…")))
+            return
+        self.send_paths(paths)
 
     def show_emoji(self):
         pop = EmojiPopup(self.T, self.tr)
@@ -943,8 +1046,21 @@ class ChatPanel(QFrame):
             else:
                 self.refresh()
                 self._pulse()
-        elif kind in ("presence", "paired"):
+        elif kind == "delivered":
+            if self.open:
+                self._render()
+        elif kind in ("presence", "paired", "peer_found"):
             self.refresh()
+        elif kind == "pair_request":
+            self._pair_request(info)
+        elif kind == "pair_result":
+            d = self._pins.get(info.get("req_id"))
+            if d:
+                d.result(info)
+                if not info.get("retry"):
+                    self._pins.pop(info.get("req_id"), None)
+            if not info.get("retry"):
+                self.refresh()
 
     def _is_current(self, info):
         return (info.get("channel") == "all" and self._peer() is None) or info.get("from") == self._peer()
@@ -968,122 +1084,303 @@ class ChatPanel(QFrame):
         self._pulse_anim = a
         a.start()
 
+    def _pair_request(self, info):
+        self.sounds.play("recv")
+        d = PinDialog(self.svc, self.T_raw, self.tr, info, self)
+        self._pins[info["req_id"]] = d
+        d.show()
+        d.raise_()
+        d.activateWindow()
+
     def pair_dialog(self):
         PairDialog(self.svc, self.T, self.tr, self).exec()
         self.refresh()
 
 
+def _pin_fmt(code):
+    code = "".join(c for c in str(code) if c.isdigit())
+    return code[:3] + " " + code[3:]
+
+
+def _dlg_style(name, t):
+    return (
+        ("#NAME { background: %(surface)s; }"
+         "#NAME QLabel { color: %(text)s; background: transparent; }"
+         "#NAME QLabel#title { font-size: 16px; font-weight: 700; }"
+         "#NAME QLabel#hint, #NAME QLabel#addr { color: %(muted)s; font-size: 12px; }"
+         "#NAME QLabel#caption { color: %(muted)s; font-size: 10px; font-weight: 700; letter-spacing: 1px; }"
+         "#NAME QLabel#pin { font-family: Consolas, 'DejaVu Sans Mono', monospace; font-size: 34px; font-weight: 700;"
+         " letter-spacing: 4px; color: %(accent)s; padding: 8px; }"
+         "#NAME QFrame#row { background: %(raised)s; border: 1px solid %(border)s; border-radius: 10px; }"
+         "#NAME QLineEdit { background: %(surface)s; color: %(text)s; border: 1px solid %(border)s;"
+         " border-radius: 8px; padding: 6px 8px; selection-background-color: %(select)s; }"
+         "#NAME QLineEdit:focus { border-color: %(accent)s; }"
+         "#NAME QLineEdit#pinEdit { font-family: Consolas, 'DejaVu Sans Mono', monospace; font-size: 26px; font-weight: 700;"
+         " letter-spacing: 3px; padding: 8px; }"
+         "#NAME QPushButton { background: %(raised)s; color: %(text)s; border: 1px solid %(border)s; border-radius: 8px;"
+         " padding: 7px 14px; }"
+         "#NAME QPushButton:hover { background: %(hover)s; }"
+         "#NAME QPushButton#primary { background: %(accent)s; color: %(accent_text)s; border-color: %(accent)s; font-weight: 700; }"
+         "#NAME QPushButton#primary:hover { background: %(select)s; border-color: %(select)s; }") % t).replace("NAME", name)
+
+
 class PairDialog(QDialog):
+    """Подключить ПК: программы, найденные в сети, показаны кнопками. Клик: здесь появляются 6 цифр, на том ПК их вводят."""
+    result_sig = Signal(bool, str)
+    _code = Signal(str)
+
     def __init__(self, service, theme, tr, parent=None):
         super().__init__(parent)
         self.svc, self.tr = service, tr
-        t = _theme(theme)
         self.setWindowTitle(tr("Подключить ПК"))
-        self.setMinimumWidth(400)
+        self.setMinimumWidth(420)
         self.setObjectName("pairDlg")
-        self.setStyleSheet(
-            ("#pairDlg { background: %(surface)s; }"
-             "#pairDlg QLabel { color: %(text)s; background: transparent; }"
-             "#pairDlg QLabel#title { font-size: 16px; font-weight: 700; }"
-             "#pairDlg QLabel#hint, #pairDlg QLabel#addr { color: %(muted)s; font-size: 12px; }"
-             "#pairDlg QLabel#caption { color: %(muted)s; font-size: 10px; font-weight: 700; letter-spacing: 1px; }"
-             "#pairDlg QTabWidget::pane { border: 1px solid %(border)s; border-radius: 10px; background: %(raised)s; top: -1px; }"
-             "#pairDlg QTabBar::tab { background: transparent; color: %(muted)s; padding: 7px 14px; border: none;"
-             " border-bottom: 2px solid transparent; margin-right: 4px; }"
-             "#pairDlg QTabBar::tab:selected { color: %(text)s; border-bottom-color: %(accent)s; }"
-             "#pairDlg QTabBar::tab:hover { color: %(text)s; }"
-             "#pairDlg QTabWidget > QWidget > QWidget { background: %(raised)s; }"
-             "#pairDlg QLineEdit, #pairDlg QComboBox { background: %(surface)s; color: %(text)s; border: 1px solid %(border)s;"
-             " border-radius: 8px; padding: 6px 8px; selection-background-color: %(select)s; }"
-             "#pairDlg QLineEdit:focus, #pairDlg QComboBox:focus { border-color: %(accent)s; }"
-             "#pairDlg QLineEdit#code { font-family: Consolas, 'DejaVu Sans Mono', monospace; font-size: 17px; font-weight: 700;"
-             " letter-spacing: 1px; color: %(accent)s; padding: 10px; }"
-             "#pairDlg QComboBox QAbstractItemView { background: %(surface)s; color: %(text)s; selection-background-color: %(hover)s; }"
-             "#pairDlg QPushButton { background: %(raised)s; color: %(text)s; border: 1px solid %(border)s; border-radius: 8px;"
-             " padding: 7px 14px; }"
-             "#pairDlg QPushButton:hover { background: %(hover)s; }"
-             "#pairDlg QPushButton#primary { background: %(accent)s; color: %(accent_text)s; border-color: %(accent)s; font-weight: 700; }"
-             "#pairDlg QPushButton#primary:hover { background: %(select)s; border-color: %(select)s; }") % t)
+        self.setStyleSheet(_dlg_style("pairDlg", _theme(theme)))
+        self.cancelled = False
+        self.busy = False
+        self.rows = {}                                  # id найденного ПК -> кнопка «Подключить»
+        self.result_sig.connect(self._finished)
+        self._code.connect(self._on_code)
         lay = QVBoxLayout(self)
         lay.setContentsMargins(18, 16, 18, 16)
         lay.setSpacing(10)
         ttl = QLabel("🔗  " + tr("Подключить ПК"))
         ttl.setObjectName("title")
         lay.addWidget(ttl)
-        tabs = QTabWidget()
-        lay.addWidget(tabs)
-        # вкладка 1: на этом ПК показать код
-        w1 = QWidget()
-        l1 = QVBoxLayout(w1)
-        l1.setContentsMargins(14, 14, 14, 14)
-        l1.setSpacing(8)
-        hint1 = QLabel(tr("На другом ПК выберите «Ввести код» и введите адрес и код ниже. Код действует 5 минут."))
-        hint1.setObjectName("hint")
-        hint1.setWordWrap(True)
-        l1.addWidget(hint1)
-        self.code = QLineEdit()
-        self.code.setObjectName("code")
-        self.code.setReadOnly(True)
-        self.code.setAlignment(Qt.AlignCenter)
-        self.code.setPlaceholderText("— — — — — —")
-        self.addr = QLabel(tr("Адрес этого ПК") + ": " + ", ".join(_local_addrs()))
+
+        self.page_list = QWidget()
+        pl = QVBoxLayout(self.page_list)
+        pl.setContentsMargins(0, 0, 0, 0)
+        pl.setSpacing(8)
+        self.hint = QLabel(tr("Запустите программу на другом ПК. Когда она найдётся, нажмите «Подключить»: код появится здесь, "
+                              "его нужно ввести на том ПК."))
+        self.hint.setObjectName("hint")
+        self.hint.setWordWrap(True)
+        pl.addWidget(self.hint)
+        self.list_box = QVBoxLayout()
+        self.list_box.setSpacing(6)
+        pl.addLayout(self.list_box)
+        self.empty = QLabel(tr("Идёт поиск…"))
+        self.empty.setObjectName("hint")
+        pl.addWidget(self.empty)
+        cap = QLabel(tr("Не нашлось? Введите адрес").upper())
+        cap.setObjectName("caption")
+        pl.addWidget(cap)
+        ar = QHBoxLayout()
+        self.e_addr = QLineEdit()
+        self.e_addr.setPlaceholderText(tr("192.168.1.20 или имя Tailscale"))
+        self.e_addr.returnPressed.connect(self.start_manual)
+        b_man = QPushButton(tr("Подключить"))
+        b_man.setCursor(Qt.PointingHandCursor)
+        b_man.clicked.connect(self.start_manual)
+        ar.addWidget(self.e_addr, 1)
+        ar.addWidget(b_man)
+        pl.addLayout(ar)
+        self.addr = QLabel(tr("Адрес этого ПК") + ": " + (", ".join(_local_addrs()) or "—"))
         self.addr.setObjectName("addr")
         self.addr.setWordWrap(True)
         self.addr.setTextInteractionFlags(Qt.TextSelectableByMouse)
-        b_show = QPushButton(tr("Показать код"))
-        b_show.setObjectName("primary")
-        b_show.setCursor(Qt.PointingHandCursor)
-        b_show.clicked.connect(self._show_code)
-        l1.addWidget(b_show)
-        l1.addWidget(self.code)
-        l1.addWidget(self.addr)
-        l1.addStretch(1)
-        tabs.addTab(w1, tr("Показать код"))
-        # вкладка 2: ввести код другого ПК
-        w2 = QWidget()
-        l2 = QVBoxLayout(w2)
-        l2.setContentsMargins(14, 14, 14, 14)
-        l2.setSpacing(8)
-        self.found = QComboBox()
-        self.found.addItem(tr("— найденные в сети —"), None)
-        for f in service.found():
-            self.found.addItem("%s  %s" % (f["name"], f["addr"]), f)
-        self.found.currentIndexChanged.connect(self._pick)
-        self.e_addr = QLineEdit()
-        self.e_addr.setPlaceholderText(tr("Адрес ПК (например 192.168.1.20 или имя Tailscale)"))
-        self.e_code = QLineEdit()
-        self.e_code.setPlaceholderText(tr("Код с другого ПК"))
-        self.msg = QLabel("")
-        self.msg.setObjectName("hint")
-        self.msg.setWordWrap(True)
-        b_pair = QPushButton(tr("Подключить"))
-        b_pair.setObjectName("primary")
-        b_pair.setCursor(Qt.PointingHandCursor)
-        b_pair.clicked.connect(self._pair)
-        for x in (self.found, self.e_addr, self.e_code, b_pair, self.msg):
-            l2.addWidget(x)
-        l2.addStretch(1)
-        tabs.addTab(w2, tr("Ввести код"))
+        pl.addWidget(self.addr)
+        lay.addWidget(self.page_list)
+
+        self.page_code = QWidget()                      # ожидание: код на экране
+        cl = QVBoxLayout(self.page_code)
+        cl.setContentsMargins(0, 0, 0, 0)
+        cl.setSpacing(6)
+        self.code_for = QLabel("")
+        self.code_for.setObjectName("hint")
+        self.code_for.setWordWrap(True)
+        self.code_for.setAlignment(Qt.AlignCenter)
+        self.pin = QLabel("— — —   — — —")
+        self.pin.setObjectName("pin")
+        self.pin.setAlignment(Qt.AlignCenter)
+        self.pin.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        self.status = QLabel("")
+        self.status.setObjectName("hint")
+        self.status.setWordWrap(True)
+        self.status.setAlignment(Qt.AlignCenter)
+        self.b_cancel = QPushButton(tr("Отмена"))
+        self.b_cancel.setCursor(Qt.PointingHandCursor)
+        self.b_cancel.clicked.connect(self.cancel)
+        for w in (self.code_for, self.pin, self.status, self.b_cancel):
+            cl.addWidget(w)
+        self.page_code.setVisible(False)
+        lay.addWidget(self.page_code)
+
+        cap2 = QLabel(tr("Моё имя в чате").upper())
+        cap2.setObjectName("caption")
         self.name = QLineEdit(service.user())
         self.name.setPlaceholderText(tr("Моё имя в чате"))
         self.name.editingFinished.connect(lambda: service.set_user(self.name.text()))
-        cap = QLabel(tr("Моё имя в чате").upper())
-        cap.setObjectName("caption")
-        lay.addWidget(cap)
+        lay.addWidget(cap2)
         lay.addWidget(self.name)
+        self.timer = QTimer(self)
+        self.timer.timeout.connect(self.refresh_found)
+        self.timer.start(1500)
+        self.refresh_found()
 
-    def _show_code(self):
-        self.code.setText(self.svc.open_pairing())
+    # ---- список найденных ----
+    def refresh_found(self):
+        if self.busy:
+            return
+        items = self.svc.found()
+        ids = [f["id"] for f in items]
+        if ids == list(self.rows) and all(f["addr"] == self._row_addr.get(f["id"]) for f in items):
+            return
+        self._row_addr = {f["id"]: f["addr"] for f in items}
+        while self.list_box.count():
+            w = self.list_box.takeAt(0).widget()
+            if w:
+                w.hide()
+                w.setParent(None)
+                w.deleteLater()
+        self.rows = {}
+        for f in items:
+            row = QFrame()
+            row.setObjectName("row")
+            h = QHBoxLayout(row)
+            h.setContentsMargins(12, 8, 8, 8)
+            col = QVBoxLayout()
+            col.setSpacing(0)
+            n = QLabel("🖥  " + f["name"])
+            n.setTextFormat(Qt.PlainText)
+            n.setStyleSheet("font-weight: 700;")
+            a = QLabel(f["addr"] + ("  ·  Tailscale" if f.get("via") == "tailscale" else ""))
+            a.setObjectName("hint")
+            col.addWidget(n)
+            col.addWidget(a)
+            b = QPushButton(self.tr("Подключить"))
+            b.setObjectName("primary")
+            b.setCursor(Qt.PointingHandCursor)
+            b.clicked.connect(lambda _=False, f=f: self.start(f["addr"], f["port"], f["name"]))
+            h.addLayout(col, 1)
+            h.addWidget(b)
+            self.list_box.addWidget(row)
+            self.rows[f["id"]] = b
+        self.empty.setVisible(not items)
+        self.empty.setText(self.tr("Идёт поиск…") if self.svc.node else self.tr("Сеть выключена."))
 
-    def _pick(self):
-        f = self.found.currentData()
-        if f:
-            self.e_addr.setText(f["addr"])
+    _row_addr = {}
 
-    def _pair(self):
-        try:
-            self.svc.pair(self.e_addr.text(), self.e_code.text())
-            self.msg.setText(self.tr("Подключено."))
+    # ---- запрос ----
+    def start_manual(self):
+        addr = self.e_addr.text().strip()
+        if not addr:
+            return
+        self.start(addr, ns.nl.PORT_TCP, addr, check=True)
+
+    def start(self, addr, port, name, check=False):
+        if self.busy:
+            return
+        self.busy, self.cancelled = True, False
+        self.page_list.setVisible(False)
+        self.page_code.setVisible(True)
+        self.code_for.setText(self.tr("Запрос отправлен на ПК «%s». Введите на нём этот код:") % name)
+        self.pin.setText("· · ·   · · ·")
+        self.status.setText(self.tr("Соединяюсь…"))
+        self.b_cancel.setEnabled(True)
+        import threading
+
+        def work():
+            try:
+                if check and not self.svc.probe(addr, port):
+                    raise ns.nl.NetError(self.tr("Программа на этом адресе не найдена."))
+                self.svc.request_pair(addr, port, on_code=lambda c: self._code.emit(c), cancel=lambda: self.cancelled)
+                self.result_sig.emit(True, "")
+            except Exception as e:
+                self.result_sig.emit(False, str(e))
+        self._thread = threading.Thread(target=work, daemon=True)
+        self._thread.start()
+
+    def _on_code(self, c):
+        self.pin.setText(_pin_fmt(c))
+        self.status.setText(self.tr("Жду, пока код введут на другом ПК…"))
+
+    def cancel(self):
+        self.cancelled = True
+        self.b_cancel.setEnabled(False)
+
+    def _finished(self, ok, err):
+        self.busy = False
+        if ok:
             self.accept()
-        except Exception as e:
-            self.msg.setText("%s: %s" % (self.tr("Не удалось подключить"), e))
+            return
+        self.page_code.setVisible(False)
+        self.page_list.setVisible(True)
+        self.hint.setText(("%s: %s" % (self.tr("Не удалось подключить"), err)) if not self.cancelled else
+                          self.tr("Запрос отменён."))
+        self.refresh_found()
+
+    def done(self, r):                                   # закрытие окна отменяет запрос
+        self.cancelled = True
+        self.timer.stop()
+        super().done(r)
+
+
+class PinDialog(QDialog):
+    """На принимающем ПК: «ПК X хочет подключиться». Человек вводит 6 цифр с экрана того ПК."""
+
+    def __init__(self, service, theme, tr, req, parent=None):
+        super().__init__(parent)
+        self.svc, self.tr, self.req = service, tr, req
+        self.finished_ok = False
+        self.setWindowTitle(tr("Запрос на подключение"))
+        self.setMinimumWidth(380)
+        self.setObjectName("pinDlg")
+        self.setAttribute(Qt.WA_DeleteOnClose)
+        self.setStyleSheet(_dlg_style("pinDlg", _theme(theme)))
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(18, 16, 18, 16)
+        lay.setSpacing(10)
+        ttl = QLabel("🔗  " + tr("ПК «%s» хочет подключиться") % req["name"])
+        ttl.setObjectName("title")
+        ttl.setTextFormat(Qt.PlainText)
+        ttl.setWordWrap(True)
+        hint = QLabel(tr("Введите 6 цифр, которые показаны на его экране. Адрес: %s. Если вы не ждали запрос, нажмите «Отклонить».") % req["addr"])
+        hint.setObjectName("hint")
+        hint.setWordWrap(True)
+        self.edit = QLineEdit()
+        self.edit.setObjectName("pinEdit")
+        self.edit.setMaxLength(7)
+        self.edit.setAlignment(Qt.AlignCenter)
+        self.edit.setPlaceholderText("000 000")
+        self.edit.returnPressed.connect(self.ok)
+        self.msg = QLabel("")
+        self.msg.setObjectName("hint")
+        self.msg.setWordWrap(True)
+        row = QHBoxLayout()
+        self.b_ok = QPushButton(tr("Подключить"))
+        self.b_ok.setObjectName("primary")
+        self.b_deny = QPushButton(tr("Отклонить"))
+        self.b_ok.clicked.connect(self.ok)
+        self.b_deny.clicked.connect(self.reject)
+        row.addStretch(1)
+        row.addWidget(self.b_deny)
+        row.addWidget(self.b_ok)
+        for w in (ttl, hint, self.edit, self.msg):
+            lay.addWidget(w)
+        lay.addLayout(row)
+
+    def ok(self):
+        digits = "".join(c for c in self.edit.text() if c.isdigit())
+        if len(digits) != 6:
+            self.msg.setText(self.tr("Нужно 6 цифр."))
+            return
+        self.b_ok.setEnabled(False)
+        self.msg.setText(self.tr("Проверяю…"))
+        self.svc.answer_pair(self.req["req_id"], digits)
+
+    def result(self, info):
+        if info.get("retry"):
+            self.edit.clear()
+            self.b_ok.setEnabled(True)
+            self.msg.setText(self.tr("Неверный код. Осталось попыток: %d.") % info.get("left", 0))
+            self.edit.setFocus()
+        else:
+            self.finished_ok = bool(info.get("ok"))
+            self.close()
+
+    def reject(self):
+        if not self.finished_ok:
+            self.svc.deny_pair(self.req["req_id"])
+        super().reject()

@@ -4482,7 +4482,7 @@ class SmartMixin:
 
 
 # ---------------------------------------------------------------- обновление с GitHub
-APP_VERSION = "1.7.0"
+APP_VERSION = "1.8.0"
 RELEASES_API = "https://api.github.com/repos/ildargiv/KopiTehnik-Print/releases/latest"
 RELEASES_PAGE = "https://github.com/ildargiv/KopiTehnik-Print/releases/latest"
 GITHUB_URL = "https://github.com/ildargiv/KopiTehnik-Print"
@@ -5339,14 +5339,20 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
     def _net_chat_build(self):
         import net_service, net_ui, net_print
         if getattr(self, "net", None) is None:
-            self.net = net_service.NetService(lambda: self.settings, lambda: pc.save_settings(self.settings))
+            self.net = net_service.NetService(lambda: self.settings, lambda: pc.save_settings(self.settings), version=APP_VERSION)
             self.net.attach_printing(net_print.NetPrinting(pc, pcr, lambda: self.settings, print_stats=ps))
-            if self.settings.get("net", {}).get("enabled"):
+            if self.settings.get("net", {}).get("enabled", True):
                 try:
                     self.net.start()
                 except OSError:
                     pass
         self.chat_panel = net_ui.ChatPanel(self.net, T, tr)
+        self.chat_panel.on_peers = lambda peers: hasattr(self, "b_remote") and self.b_remote.setVisible(any(p_["online"] for p_ in peers))
+        sb = self.statusBar()                                            # состояние подключённых ПК: внизу справа
+        sb.setSizeGripEnabled(False)
+        sb.setStyleSheet("QStatusBar { background: transparent; border: none; } QStatusBar::item { border: none; }")
+        sb.addPermanentWidget(self.chat_panel.status)
+        self.chat_panel.photos_provider = lambda: list(self.checked_files())
         return self.chat_panel
 
     def _center(self):
@@ -5456,10 +5462,15 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         self.b_print.setToolTip("Ctrl+P")
         self.b_print.setCursor(Qt.PointingHandCursor)
         self.b_print.clicked.connect(lambda _=False: self.print_now())
+        self.b_remote = btn("🖧", self.remote_print_dialog)                # печать на принтере другого ПК
+        self.b_remote.setToolTip(tr("Печать на принтере другого подключённого ПК"))
+        self.b_remote.setProperty("big", "true")
+        self.b_remote.setVisible(False)
         self.b_multi.setProperty("big", "true")
         side = max(44, self.b_print.sizeHint().height())
         self.b_multi.setFixedSize(side, side)
-        lay = vbox(hbox(self.seg_page, margins=(0, 0, 16, 0)), self.pages, self.progress, self.l_prog, self.l_multi, self.b_cancel, self.b_resume, self.b_save, hbox(self.b_print, self.b_multi, spacing=8),
+        self.b_remote.setFixedSize(side, side)
+        lay = vbox(hbox(self.seg_page, margins=(0, 0, 16, 0)), self.pages, self.progress, self.l_prog, self.l_multi, self.b_cancel, self.b_resume, self.b_save, hbox(self.b_print, self.b_remote, self.b_multi, spacing=8),
                    spacing=10, margins=(4, 12, 14, 12))
         lay.setStretch(1, 1)
         w.setLayout(lay)
@@ -5508,7 +5519,7 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         self.sw_cm2.toggled.connect(lambda on: (self._cm_set("cm_on", on), self.sw_cm.set(on)))
         self.l_icc2 = lbl("", "muted", wrap=True)
         printer = card("Принтер и бумага",
-                       row("Принтер", hbox(self.cb_printer, ibtn("reset", "Обновить список принтеров", self.reload_printers, 34, True), spacing=4)),
+                       row("Принтер", hbox(self.cb_printer, ibtn("edit", "Имя принтера и скрытие ненужных", self.edit_current_printer, 34, True), ibtn("reset", "Обновить список принтеров", self.reload_printers, 34, True), spacing=4)),
                        row("Тип бумаги", self.cb_media), self.l_paper_drv, row("Подача", self.cb_source),
                        tile("Свойства драйвера…", self.driver_props, "Все настройки печати", "driver", "select"),
                        row(self.l_quality, self.cb_quality), row(self.l_border, self.sw_border), row(self.l_ccor, self.sw_ccor),
@@ -5564,19 +5575,69 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
 
     def reload_printers(self):
         self.printers = pc.list_printers()
+        shown = self.shown_printers()
+        self.cb_printer.blockSignals(True)
         self.cb_printer.clear()
-        self.cb_printer.addItems(self.printers)
+        for n_ in shown:
+            self.cb_printer.addItem(self.printer_title(n_), n_)          # видимое имя можно изменить, настоящее остаётся для драйвера
+        self.cb_printer.blockSignals(False)
         want = self.pr["printer"] or self.settings.get("print_printer") or ""
-        name = want if want in self.printers else (self.printers[0] if self.printers else "")
+        name = want if want in shown else (shown[0] if shown else "")
         self.pr["printer"] = name
         if name:
-            self.cb_printer.setCurrentText(name)
+            self.cb_printer.setCurrentIndex(max(0, self.cb_printer.findData(name)))
         self._load_printer()
         self.multi_refresh()
         self._qs_refresh()
 
+    # ---------- видимые имена и скрытие принтеров
+    def printer_title(self, name):
+        return (self.settings.get("printer_alias") or {}).get(name) or name
+
+    def printer_hidden(self, name):
+        return name in (self.settings.get("printer_hidden") or [])
+
+    def shown_printers(self):
+        """Принтеры, не скрытые человеком (если скрыты все, показываются все: список не должен остаться пустым)."""
+        vis = [n_ for n_ in self.printers if not self.printer_hidden(n_)]
+        return vis or list(self.printers)
+
+    def printer_edit(self, name, parent=None):
+        """Окно «Имя и видимость принтера»: другое имя в списках и кнопка «Скрыть»."""
+        dlg = QDialog(parent or self)
+        dlg.setWindowTitle(tr("Принтер"))
+        e = QLineEdit((self.settings.get("printer_alias") or {}).get(name, ""))
+        e.setPlaceholderText(name)
+        cb = QCheckBox(tr("Скрыть этот принтер в списках"))
+        cb.setChecked(self.printer_hidden(name))
+        dlg.setLayout(vbox(lbl(name, "muted", wrap=True), lbl(tr("Имя в программе")), e, cb,
+                           hbox(None, btn(tr("Отмена"), dlg.reject, "link"), btn(tr("Готово"), dlg.accept, "primary")),
+                           spacing=8, margins=(14, 14, 14, 14)))
+        dlg.setMinimumWidth(360)
+        if not dlg.exec():
+            return False
+        alias = dict(self.settings.get("printer_alias") or {})
+        if e.text().strip() and e.text().strip() != name:
+            alias[name] = e.text().strip()[:60]
+        else:
+            alias.pop(name, None)
+        hidden = [n_ for n_ in (self.settings.get("printer_hidden") or []) if n_ != name]
+        if cb.isChecked():
+            hidden.append(name)
+        self.settings["printer_alias"], self.settings["printer_hidden"] = alias, hidden
+        try:
+            pc.save_settings(self.settings)
+        except Exception:
+            pass
+        self.reload_printers()
+        return True
+
+    def edit_current_printer(self):
+        if self.pr.get("printer"):
+            self.printer_edit(self.pr["printer"])
+
     def _printer_changed(self):
-        self.pr["printer"] = self.cb_printer.currentText()
+        self.pr["printer"] = self.cb_printer.currentData() or ""
         self._load_printer()
         self._qs_refresh()
 
@@ -6199,7 +6260,7 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
             if sl.get("bound"):
                 if sl["printer"] in self.printers:
                     if self.pr["printer"] != sl["printer"]:
-                        self.cb_printer.setCurrentText(sl["printer"])
+                        self.cb_printer.setCurrentIndex(max(0, self.cb_printer.findData(sl["printer"])))
                         self._printer_changed()
                 else:
                     notes.append(trf("Принтер «{p}» не найден, оставлен текущий.", p=sl["printer"]))
@@ -6409,7 +6470,7 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         if not self.multi_enabled():
             return []
         want = self.settings.get("multi_printers") or []
-        return [p_ for p_ in self.printers if p_ in want]
+        return [p_ for p_ in self.printers if p_ in want and not self.printer_hidden(p_)]
 
     def multi_active(self):
         """Режим печати на нескольких принтерах сейчас включён: он разрешён в настройках, не отключён кнопкой и отмечено больше одного принтера."""
@@ -6432,9 +6493,21 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         self.b_multi.setStyleSheet("QPushButton { background: %s; border: 2px solid %s; border-radius: 8px; color: #ffffff; font-weight: 600; }" % (green, green) if on else "")
         self.b_multi.setIcon(icon("printer_cfg", "#ffffff" if on else T["text"]))
 
+    def remote_print_dialog(self):
+        import net_remote
+        svc = getattr(self, "net", None)
+        if svc is None or not svc.node:
+            info(self, tr("Сеть выключена. Включите её в настройках, раздел «Сеть»."))
+            return
+        net_remote.RemotePrintDialog(self, svc, T, tr, pc.compose_sheet).exec()
+
     def multi_dialog(self):
         dlg = MultiPrinterDialog(self)
-        if dlg.exec():
+        r = dlg.exec()
+        if r == 2:                                                  # имя или видимость принтера изменены: открыть окно заново
+            QTimer.singleShot(0, self.multi_dialog)
+            return
+        if r:
             self.settings["multi_printers"] = dlg.chosen()
             self.settings["multi_modes"] = dlg.modes()
             self.settings["multi_on"] = dlg.mode_on
@@ -9559,15 +9632,16 @@ class MultiPrinterDialog(QDialog):
 
     def __init__(self, app):
         super().__init__(app)
+        self.app = app
         self.setWindowTitle(tr("Принтеры для печати"))
         want = app.settings.get("multi_printers") or []
         self.boxes = []
         lay = vbox(lbl(tr("Отметьте принтеры. Если отмечено больше одного, кнопка «Печать» распределит листы между ними: освободившийся принтер берёт следующий лист."), "muted", wrap=True), spacing=8, margins=(14, 14, 14, 14))
         virtual = ("pdf", "xps", "onenote", "fax", "anydesk", "cutepdf", "send to")        # виртуальные принтеры спрашивают «куда сохранить» на каждый лист
         for name in app.printers:
-            if any(v in name.lower() for v in virtual):
+            if any(v in name.lower() for v in virtual) or app.printer_hidden(name):
                 continue
-            cb = QCheckBox(name + ("" if app._multi_profile(name) or name == app.pr["printer"] else "  (" + tr("нет своего профиля") + ")"))
+            cb = QCheckBox(app.printer_title(name) + ("" if app._multi_profile(name) or name == app.pr["printer"] else "  (" + tr("нет своего профиля") + ")"))
             cb.setChecked(name in want)
             cb.name = name
             self.boxes.append(cb)
@@ -9583,7 +9657,8 @@ class MultiPrinterDialog(QDialog):
             mode.setToolTip(tr("Режим печати из «Быстрого старта» этого принтера: бумага, качество, цвет.") if mode.count() > 1 else
                             tr("У этого принтера нет сохранённых ячеек «Быстрого старта»: выберите принтер на вкладке «Принтер», настройте бумагу и качество и нажмите дискету в ячейке."))
             cb.mode = mode
-            lay.addLayout(hbox(cb, None, mode, spacing=8))
+            ed = ibtn("edit", "Имя принтера и скрытие ненужных", lambda _=False, n_=name: self._edit(n_), 28, True, isize=14)
+            lay.addLayout(hbox(cb, None, mode, ed, spacing=8))
         if not app.printers:
             lay.addWidget(lbl(tr("Принтеры не найдены.")))
         self.cb_serial = QCheckBox(tr("Отправлять на принтеры по очереди (если драйвер зависает при параллельной печати)"))
@@ -9598,6 +9673,10 @@ class MultiPrinterDialog(QDialog):
         lay.addLayout(hbox(self.b_off, None, btn(tr("Отмена"), self.reject, "link"), btn(tr("Готово"), self.accept, "primary"), spacing=8))
         self.setLayout(lay)
         self.setMinimumWidth(420)
+
+    def _edit(self, name):
+        if self.app.printer_edit(name, self):          # список в окне собирается заново: закрываем, чтобы открыть уже с новыми именами
+            self.done(2)
 
     def _sync_off(self):
         self.b_off.setText(tr("Отключить печать на нескольких принтерах") if self.mode_on else tr("Включить печать на нескольких принтерах"))
@@ -9718,8 +9797,11 @@ class SettingsDialog(QDialog):
                           lbl("Листы расходятся между отмеченными принтерами. Отметить принтеры можно кнопкой «Принтеры…» рядом с «Печать».", "muted", wrap=True),
                           row("Быстрый старт (ячейки настроек на вкладке «Принтер»)", sw_qs),
                           row("Подсвечивать включённую ячейку «Быстрого старта» зелёным", sw_hl))
-        section("Печать", "print", [("Режимы печати", [multi_card]), ("Профили печати", [self._profiles_card()]),
+        section("Печать", "print", [("Принтеры", [self._printers_card()]), ("Режимы печати", [multi_card]), ("Профили печати", [self._profiles_card()]),
                                     ("Счётчик печати", [self._counter_card()])])
+        net_pages = self._net_pages()
+        if net_pages:
+            section("Сеть", "desktop", net_pages)
         section("ИИ-агент (MCP)", "sparkle", [("Подключение и права", [self._agent_card()])])
         section("О программе", "doc", [("Версия и обновления", [upd_card])])
         self.tree.currentItemChanged.connect(lambda cur, _prev: self.stack.setCurrentIndex(int(cur.data(0, Qt.UserRole) or 0)) if cur is not None else None)
@@ -9728,6 +9810,155 @@ class SettingsDialog(QDialog):
         self.resize(960, 660)
         self.setLayout(vbox(hbox(self.tree, self.stack, spacing=12), about, hbox(None, btn("Готово", self.accept, "primary")),
                             spacing=12, margins=(14, 14, 14, 14)))
+
+    def _net_pages(self):
+        """Раздел «Сеть»: подключение, список ПК, какие принтеры отдавать по сети. Сбой сети не ломает окно настроек."""
+        try:
+            import net_ui
+            app = self.app
+            svc = getattr(app, "net", None)
+            if svc is None:
+                return []
+            T_ = T
+            sw_on = Switch(svc.enabled())
+            sw_on.toggled.connect(lambda on: svc.set_enabled(bool(on)))
+            sw_acc = Switch(svc.accept_print())
+            sw_acc.toggled.connect(lambda on: svc.set_accept_print(bool(on)))
+            sw_ts = Switch(svc.tailscale_on())
+            sw_ts.toggled.connect(lambda on: svc.set_tailscale(bool(on)))
+            sw_snd = Switch(svc.sound_on())
+            sw_snd.toggled.connect(lambda on: svc.set_sound(bool(on)))
+            e_name = QLineEdit(svc.user())
+            e_name.setPlaceholderText(tr("Моё имя в чате"))
+            e_name.editingFinished.connect(lambda: svc.set_user(e_name.text()))
+            e_dir = QLineEdit(svc.files_dir())
+            e_dir.editingFinished.connect(lambda: svc.set_files_dir(e_dir.text().strip()))
+
+            def choose():
+                d = QFileDialog.getExistingDirectory(self, tr("Папка для присланных файлов"), e_dir.text())
+                if d:
+                    e_dir.setText(d)
+                    svc.set_files_dir(d)
+
+            def pair():
+                net_ui.PairDialog(svc, T_, tr, self).exec()
+                fill()
+                if getattr(app, "chat_panel", None):
+                    app.chat_panel.refresh()
+            conn = card("Подключение",
+                        row("Сеть включена (автопоиск ПК и чат)", sw_on),
+                        row("Принимать печать от подключённых ПК", sw_acc),
+                        row("Искать ПК через Tailscale", sw_ts),
+                        row("Звук сообщений", sw_snd),
+                        row("Моё имя в чате", e_name),
+                        lbl("Папка для присланных файлов", "muted"),
+                        hbox(e_dir, btn("Выбрать…", choose), spacing=6),
+                        hbox(btn("Подключить ПК…", pair, "primary", ico="plus"), None),
+                        lbl("Связь между ПК не шифруется: пользуйтесь доверенной сетью или Tailscale.", "muted", wrap=True))
+            self.lw_net = QListWidget()
+            self.lw_net.setMinimumHeight(220)
+
+            def fill():
+                cur = self.lw_net.currentItem().data(Qt.UserRole) if self.lw_net.currentItem() else None
+                self.lw_net.clear()
+                for p in svc.peers(include_hidden=True):
+                    bits = [tr("в сети") if p["online"] else tr("не в сети")]
+                    if p["version"]:
+                        bits.append("v" + p["version"])
+                    if p["addr"]:
+                        bits.append(p["addr"])
+                    if p["hidden"]:
+                        bits.append(tr("скрыт"))
+                    if not p["trusted"]:
+                        bits.append(tr("печать запрещена"))
+                    it = QListWidgetItem("%s  —  %s" % (p["name"], ", ".join(bits)))
+                    it.setData(Qt.UserRole, p["id"])
+                    self.lw_net.addItem(it)
+                    if p["id"] == cur:
+                        self.lw_net.setCurrentItem(it)
+
+            def cur():
+                it = self.lw_net.currentItem()
+                return (it.data(Qt.UserRole), next((p for p in svc.peers(True) if p["id"] == it.data(Qt.UserRole)), None)) if it else (None, None)
+
+            def rename():
+                pid, p = cur()
+                if p:
+                    text, ok_ = QInputDialog.getText(self, tr("Имя ПК"), tr("Как называть этот ПК"), text=p["name"])
+                    if ok_ and text.strip():
+                        svc.rename(pid, text)
+                        fill()
+
+            def hide():
+                pid, p = cur()
+                if p:
+                    svc.set_hidden(pid, not p["hidden"])
+                    fill()
+
+            def trust():
+                pid, p = cur()
+                if p:
+                    svc.set_trusted(pid, not p["trusted"])
+                    fill()
+
+            def forget():
+                pid, p = cur()
+                if p and ask(self, tr("Забыть этот ПК? Чтобы подключить снова, понадобится новый код. На том ПК его тоже нужно забыть.")):
+                    svc.forget(pid)
+                    fill()
+            fill()
+            pcs = card("Подключённые ПК",
+                       lbl("Скрытые ПК не показываются в чате, но остаются подключёнными. «Запретить печать» оставляет чат, но этот ПК "
+                           "не сможет печатать на ваших принтерах.", "muted", wrap=True),
+                       self.lw_net,
+                       hbox(btn("Переименовать", rename), btn("Скрыть / показать", hide), btn("Разрешить / запретить печать", trust),
+                            btn("Забыть", forget, ico="trash"), None, spacing=6))
+            names = list(pc.list_printers())
+            checks = []
+            for n in names:
+                cb = QCheckBox(n)
+                cb.setChecked(n in svc.shared_names(names))
+                checks.append(cb)
+
+            def save_shared():
+                svc.set_shared([c.text() for c in checks if c.isChecked()], names)
+            for cb in checks:
+                cb.toggled.connect(lambda _=False: save_shared())
+            prn = card("Принтеры, доступные по сети",
+                       lbl("Отмеченные принтеры другие ПК видят и могут печатать на них. Цвет и настройки драйвера берутся из профилей этого ПК.",
+                           "muted", wrap=True),
+                       *(checks or [lbl("Принтеры не найдены.", "muted")]))
+            return [("Подключение", [conn]), ("ПК", [pcs]), ("Принтеры", [prn])]
+        except Exception:
+            traceback.print_exc()
+            return []
+
+    def _printers_card(self):
+        """Все принтеры системы: переименовать и скрыть ненужные (скрытые не показываются в списках печати)."""
+        app = self.app
+        self.lw_prn = QListWidget()
+        self.lw_prn.setMinimumHeight(220)
+
+        def fill():
+            cur = self.lw_prn.currentItem().data(Qt.UserRole) if self.lw_prn.currentItem() else None
+            self.lw_prn.clear()
+            for n_ in app.printers:
+                t_ = app.printer_title(n_) + ("   (" + n_ + ")" if app.printer_title(n_) != n_ else "") + ("   — " + tr("скрыт") if app.printer_hidden(n_) else "")
+                it = QListWidgetItem(t_)
+                it.setData(Qt.UserRole, n_)
+                self.lw_prn.addItem(it)
+                if n_ == cur:
+                    self.lw_prn.setCurrentItem(it)
+
+        def edit():
+            it = self.lw_prn.currentItem()
+            if it and app.printer_edit(it.data(Qt.UserRole), self):
+                fill()
+        self.lw_prn.itemDoubleClicked.connect(lambda _it: edit())
+        fill()
+        return card("Принтеры", lbl("Дайте принтерам понятные имена и скройте ненужные (например, виртуальные). Скрытые не показываются в списках печати. "
+                                    "Двойной щелчок или кнопка ниже.", "muted", wrap=True),
+                    self.lw_prn, hbox(btn("Имя и видимость…", edit, ico="edit"), btn("Обновить список", lambda: (app.reload_printers(), fill())), None))
 
     def _profiles_card(self):
         """Сохранённые профили печати (принтер + формат + тип бумаги): просмотр и удаление."""
@@ -9992,6 +10223,95 @@ pc.EN.update({
     "Спрашивать подтверждение обычных действий (сброс, применение ко всем, печать)": "Ask for confirmation of everyday actions (reset, apply to all, print)",
     "Папка, с которой начинается «Открыть»": "Folder that “Open” starts in", "Последняя использованная": "Last used",
     "Кадрирование": "Cropping", "Сила прилипания, пикселей экрана": "Snap strength, screen pixels", "Общие": "General",
+    "Сеть": "Network",
+    "Подключение": "Connection",
+    "ПК": "PCs",
+    "Принтеры": "Printers",
+    "Подключённые ПК": "Connected PCs",
+    "Сеть включена (автопоиск ПК и чат)": "Network on (PC discovery and chat)",
+    "Принимать печать от подключённых ПК": "Accept print jobs from connected PCs",
+    "Искать ПК через Tailscale": "Look for PCs via Tailscale",
+    "Звук сообщений": "Message sound",
+    "Моё имя в чате": "My name in chat",
+    "Папка для присланных файлов": "Folder for received files",
+    "Выбрать…": "Choose…",
+    "Подключить ПК…": "Connect a PC…",
+    "Связь между ПК не шифруется: пользуйтесь доверенной сетью или Tailscale.": "The link between PCs is not encrypted: use a trusted network or Tailscale.",
+    "Переименовать": "Rename",
+    "Скрыть / показать": "Hide / show",
+    "Разрешить / запретить печать": "Allow / forbid printing",
+    "Забыть": "Forget",
+    "в сети": "online",
+    "не в сети": "offline",
+    "скрыт": "hidden",
+    "печать запрещена": "printing forbidden",
+    "Имя ПК": "PC name",
+    "Как называть этот ПК": "What to call this PC",
+    "Принтеры, доступные по сети": "Printers shared over the network",
+    "Принтеры не найдены.": "No printers found.",
+    "Скрытые ПК не показываются в чате, но остаются подключёнными. «Запретить печать» оставляет чат, но этот ПК не сможет печатать на ваших принтерах.": "Hidden PCs are not shown in the chat but stay connected. “Forbid printing” keeps the chat but the PC cannot print on your printers.",
+    "Отмеченные принтеры другие ПК видят и могут печатать на них. Цвет и настройки драйвера берутся из профилей этого ПК.": "Other PCs can see and print on the checked printers. Colour and driver settings come from this PC's profiles.",
+    "Отправить отмеченные фото из программы": "Send the checked photos from the program",
+    "Сначала отметьте фото в списке слева": "Check photos in the list on the left first",
+    "192.168.1.20 или имя Tailscale": "192.168.1.20 or Tailscale name",
+    "Адрес этого ПК": "Address of this PC",
+    "Введите 6 цифр, которые показаны на его экране. Адрес: %s. Если вы не ждали запрос, нажмите «Отклонить».": "Enter the 6 digits shown on its screen. Address: %s. If you were not expecting a request, press “Decline”.",
+    "Ещё": "More",
+    "Ещё ПК": "More PCs",
+    "Жду, пока код введут на другом ПК…": "Waiting for the code to be entered on the other PC…",
+    "Запрос на подключение": "Connection request",
+    "Запрос отменён.": "Request cancelled.",
+    "Запрос отправлен на ПК «%s». Введите на нём этот код:": "Request sent to PC “%s”. Enter this code on it:",
+    "Звук сообщений: включён": "Message sound: on",
+    "Звук сообщений: выключен": "Message sound: off",
+    "Идёт поиск…": "Searching…",
+    "Нажмите ＋ вверху, чтобы подключить другой ПК.": "Press ＋ above to connect another PC.",
+    "Напишите первым или перетащите сюда фото и файлы.": "Write first or drop photos and files here.",
+    "Не нашлось? Введите адрес": "Not found? Enter the address",
+    "Не удалось подключить": "Could not connect",
+    "Неверный код. Осталось попыток: %d.": "Wrong code. Attempts left: %d.",
+    "Нет подключённых ПК": "No connected PCs",
+    "Нужно 6 цифр.": "6 digits needed.",
+    "Отклонить": "Decline",
+    "Отправить": "Send",
+    "Отправить файл или фото": "Send a file or photo",
+    "ПК «%s» хочет подключиться": "PC “%s” wants to connect",
+    "Печать и работа": "Printing and work",
+    "Подключить ПК": "Connect a PC",
+    "Проверяю…": "Checking…",
+    "Программа на этом адресе не найдена.": "No program found at this address.",
+    "Сеть выключена.": "Network is off.",
+    "Скачать": "Download",
+    "Смайлики": "Emoji",
+    "Соединяюсь…": "Connecting…",
+    "Сообщение всем подключённым ПК": "Message to all connected PCs",
+    "Сообщение…": "Message…",
+    "Сообщений пока нет.": "No messages yet.",
+    "Чат": "Chat",
+    "найдено": "found",
+    "нет ПК": "no PCs",
+    "нет в сети": "offline",
+    "печатает": "printing",
+    "требует внимания": "needs attention",
+    "Печать на другом ПК": "Print on another PC",
+    "Печатать": "Print",
+    "Закрыть": "Close",
+    "Нет подключённых ПК в сети.": "No connected PCs online.",
+    "Запрашиваю принтеры…": "Requesting printers…",
+    "На этом ПК нет доступных по сети принтеров.": "This PC has no printers shared over the network.",
+    "Цвет и настройки драйвера берутся из профиля принтера на том ПК.": "Colour and driver settings come from the printer profile on that PC.",
+    "Нет фото для печати: отметьте фото в списке слева.": "No photos to print: check photos in the list on the left.",
+    "Проверяю принтер…": "Checking the printer…",
+    "Отправлено листов: %s. Они в очереди принтера на том ПК.": "Sheets sent: %s. They are in the printer queue on that PC.",
+    "Не напечатано": "Not printed",
+    "Печать на принтере другого подключённого ПК": "Print on a printer of another connected PC",
+    "Сеть выключена. Включите её в настройках, раздел «Сеть».": "Network is off. Turn it on in Settings, Network section.",
+    "Скрыть этот принтер в списках": "Hide this printer in lists",
+    "Имя в программе": "Name in the program",
+    "Имя принтера и скрытие ненужных": "Printer name and hiding unneeded ones",
+    "Дайте принтерам понятные имена и скройте ненужные (например, виртуальные). Скрытые не показываются в списках печати. Двойной щелчок или кнопка ниже.": "Give printers clear names and hide unneeded ones (for example virtual ones). Hidden printers are not shown in print lists. Double-click or use the button below.",
+    "Имя и видимость…": "Name and visibility…",
+    "Обновить список": "Refresh list",
     "Настройки хранятся в файле": "Settings are stored in", "Оформление": "Appearance",
     "Сохранить проект (рамки и настройки)": "Save project (frames and settings)",
 })
