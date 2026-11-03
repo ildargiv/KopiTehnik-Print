@@ -5347,6 +5347,11 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
                 except OSError:
                     pass
         self.chat_panel = net_ui.ChatPanel(self.net, T, tr)
+        self.chat_panel.on_peers = lambda peers: hasattr(self, "b_remote") and self.b_remote.setVisible(any(p_["online"] for p_ in peers))
+        sb = self.statusBar()                                            # состояние подключённых ПК: внизу справа
+        sb.setSizeGripEnabled(False)
+        sb.setStyleSheet("QStatusBar { background: transparent; border: none; } QStatusBar::item { border: none; }")
+        sb.addPermanentWidget(self.chat_panel.status)
         self.chat_panel.photos_provider = lambda: list(self.checked_files())
         return self.chat_panel
 
@@ -5457,10 +5462,15 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         self.b_print.setToolTip("Ctrl+P")
         self.b_print.setCursor(Qt.PointingHandCursor)
         self.b_print.clicked.connect(lambda _=False: self.print_now())
+        self.b_remote = btn("🖧", self.remote_print_dialog)                # печать на принтере другого ПК
+        self.b_remote.setToolTip(tr("Печать на принтере другого подключённого ПК"))
+        self.b_remote.setProperty("big", "true")
+        self.b_remote.setVisible(False)
         self.b_multi.setProperty("big", "true")
         side = max(44, self.b_print.sizeHint().height())
         self.b_multi.setFixedSize(side, side)
-        lay = vbox(hbox(self.seg_page, margins=(0, 0, 16, 0)), self.pages, self.progress, self.l_prog, self.l_multi, self.b_cancel, self.b_resume, self.b_save, hbox(self.b_print, self.b_multi, spacing=8),
+        self.b_remote.setFixedSize(side, side)
+        lay = vbox(hbox(self.seg_page, margins=(0, 0, 16, 0)), self.pages, self.progress, self.l_prog, self.l_multi, self.b_cancel, self.b_resume, self.b_save, hbox(self.b_print, self.b_remote, self.b_multi, spacing=8),
                    spacing=10, margins=(4, 12, 14, 12))
         lay.setStretch(1, 1)
         w.setLayout(lay)
@@ -6432,6 +6442,14 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         green = self.QS_COLORS[pqk.GREEN]
         self.b_multi.setStyleSheet("QPushButton { background: %s; border: 2px solid %s; border-radius: 8px; color: #ffffff; font-weight: 600; }" % (green, green) if on else "")
         self.b_multi.setIcon(icon("printer_cfg", "#ffffff" if on else T["text"]))
+
+    def remote_print_dialog(self):
+        import net_remote
+        svc = getattr(self, "net", None)
+        if svc is None or not svc.node:
+            info(self, tr("Сеть выключена. Включите её в настройках, раздел «Сеть»."))
+            return
+        net_remote.RemotePrintDialog(self, svc, T, tr, pc.compose_sheet).exec()
 
     def multi_dialog(self):
         dlg = MultiPrinterDialog(self)
@@ -10188,6 +10206,19 @@ pc.EN.update({
     "нет в сети": "offline",
     "печатает": "printing",
     "требует внимания": "needs attention",
+    "Печать на другом ПК": "Print on another PC",
+    "Печатать": "Print",
+    "Закрыть": "Close",
+    "Нет подключённых ПК в сети.": "No connected PCs online.",
+    "Запрашиваю принтеры…": "Requesting printers…",
+    "На этом ПК нет доступных по сети принтеров.": "This PC has no printers shared over the network.",
+    "Цвет и настройки драйвера берутся из профиля принтера на том ПК.": "Colour and driver settings come from the printer profile on that PC.",
+    "Нет фото для печати: отметьте фото в списке слева.": "No photos to print: check photos in the list on the left.",
+    "Проверяю принтер…": "Checking the printer…",
+    "Отправлено листов: %s. Они в очереди принтера на том ПК.": "Sheets sent: %s. They are in the printer queue on that PC.",
+    "Не напечатано": "Not printed",
+    "Печать на принтере другого подключённого ПК": "Print on a printer of another connected PC",
+    "Сеть выключена. Включите её в настройках, раздел «Сеть».": "Network is off. Turn it on in Settings, Network section.",
     "Настройки хранятся в файле": "Settings are stored in", "Оформление": "Appearance",
     "Сохранить проект (рамки и настройки)": "Save project (frames and settings)",
 })

@@ -617,6 +617,52 @@ class ChatHead(QPushButton):
         p.end()
 
 
+class NetStatus(QWidget):
+    """Строка внизу окна справа: по кнопке на каждый подключённый ПК (цвет = состояние). Клик открывает чат с ним."""
+
+    def __init__(self, panel):
+        super().__init__()
+        self.panel = panel
+        self.lay = QHBoxLayout(self)
+        self.lay.setContentsMargins(6, 0, 8, 0)
+        self.lay.setSpacing(4)
+        self.buttons = {}
+        self.setVisible(False)
+
+    def rebuild(self, peers):
+        while self.lay.count():
+            w = self.lay.takeAt(0).widget()
+            if w:
+                w.hide()
+                w.setParent(None)
+                w.deleteLater()
+        self.buttons = {}
+        t, tr = self.panel.T, self.panel.tr
+        shown = peers[:6]
+        for p in shown:
+            b = QToolButton()
+            b.setAutoRaise(True)
+            b.setCursor(Qt.PointingHandCursor)
+            b.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
+            b.setIcon(dot_icon(state_color(t, p["state"]), 12, ring=p["online"]))
+            b.setText(p["name"] if len(p["name"]) <= 14 else p["name"][:13] + "…")
+            lines = [p["name"] + ": " + state_text(tr, p["state"])]
+            node = self.panel.svc.node
+            for name, st in ((node.peer_state.get(p["id"]) if node else None) or {}).items():
+                lines.append("🖨 %s: %s" % (name, st.get("text") or state_text(tr, st.get("level", "ok"))))
+            b.setToolTip("\n".join(lines))
+            b.setStyleSheet("QToolButton { color: %s; font-size: 11px; padding: 1px 5px; border-radius: 6px; }"
+                            "QToolButton:hover { background: %s; }" % (t["muted"], t["hover"]))
+            b.clicked.connect(lambda _=False, pid=p["id"]: self.panel.focus_peer(pid))
+            self.lay.addWidget(b)
+            self.buttons[p["id"]] = b
+        if len(peers) > len(shown):
+            more = QLabel("+%d" % (len(peers) - len(shown)))
+            more.setStyleSheet("color: %s; font-size: 11px;" % t["muted"])
+            self.lay.addWidget(more)
+        self.setVisible(bool(peers))
+
+
 class ChatPanel(QFrame):
     def __init__(self, service, theme, tr=lambda s: s, parent=None, sounds=None):
         super().__init__(parent)
@@ -666,6 +712,8 @@ class ChatPanel(QFrame):
         hl.addWidget(self.b_snd)
         hl.addWidget(self.b_add)
         self.head.reserve = 58
+        self.status = NetStatus(self)
+        self.on_peers = None                            # задаёт программа: вызывается при изменении списка ПК
         self.peers = PeerBar(self)
         self.peers.chosen.connect(lambda pid: self._render(True))
         b.addWidget(self.peers)
@@ -816,6 +864,12 @@ class ChatPanel(QFrame):
         self.refresh()
         self.updateGeometry()
 
+    def focus_peer(self, pid):
+        """Клик по кнопке ПК внизу окна: открыть чат и выбрать этого ПК."""
+        if not self.open:
+            self.toggle(True)
+        self.peers.select(pid)
+
     def _peer(self):
         return self.peers.cur
 
@@ -831,6 +885,9 @@ class ChatPanel(QFrame):
         unread = self.svc.unread()
         sub = ("%d/%d %s" % (online, len(peers), self.tr("в сети"))) if peers else self.tr("нет ПК")
         self.head.set_state(self.open, unread, online, len(peers), self.tr("Чат"), sub)
+        self.status.rebuild(peers)
+        if self.on_peers:
+            self.on_peers(peers)
 
     def _toggle_sound(self):
         self.svc.set_sound(not self.svc.sound_on())

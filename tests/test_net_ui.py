@@ -241,3 +241,40 @@ def test_delivery_status_and_persistent_queue(app, tmp_path):
         assert pump(app, lambda: not sa["net"].get("outbox"))
     finally:
         a.stop(); b.stop()
+
+
+def test_remote_print_dialog_and_status_buttons(app, tmp_path):
+    from PIL import Image
+    import net_remote
+    a, b, sa, sb, pa, pb, ma, mb = connect(app, tmp_path)
+    try:
+        got = []
+        b.node.print_sheet = lambda m, d: got.append((m, d))
+        b.node.handlers["printers"] = lambda m, d, p: {"printers": [{"name": "Epson", "profiles": []}]}
+        b.node.handlers["printer_snapshot"] = lambda m, d, p: {"printer": m["printer"], "profile": "Epson | 10x15", "rev": "r1",
+                                                               "paper_mm": [102.0, 152.0], "ppi": 300}
+        assert pump(app, lambda: a.peers() and a.peers()[0]["online"])
+        assert pa.status.isHidden() is False and list(pa.status.buttons) == [b.node.id]       # кнопка ПК внизу окна
+        pa.status.buttons[b.node.id].click()
+        assert pa.open and pa.peers.cur == b.node.id                                           # клик открывает чат с ним
+
+        class FakeApp:
+            s = {"format": "10x15"}
+            pr = {"copies": 2, "marks": False}
+
+            def sheet_plan(self):
+                return {"sheets": [[{"photo": 0}], [{"photo": 0}]]}, [{}], {}, {"PW": 102.0, "PH": 152.0}
+
+            def mode(self):
+                return "m"
+        compose = lambda plan, k, photos, ppi, o, mode, cache=None: Image.new("RGB", (30, 45), (k * 40, 0, 0))
+        dlg = net_remote.RemotePrintDialog(FakeApp(), a, THEME, lambda s: s, compose)
+        assert pump(app, lambda: dlg.c_pr.count() == 1 and dlg.b_go.isEnabled())
+        dlg.start()
+        assert pump(app, lambda: not dlg.busy and "Отправлено" in dlg.hint.text(), 15)
+        assert len(got) == 4 and got[0][0]["profile"] == "Epson | 10x15" and got[0][0]["rev"] == "r1"
+        assert got[0][1][:4] == b"\x89PNG"
+        # бумага не совпадает: честный отказ, ничего не отправлено
+        assert net_remote.paper_problem({"paper_mm": [89.0, 127.0]}, {"PW": 102.0, "PH": 152.0})
+    finally:
+        a.stop(); b.stop()

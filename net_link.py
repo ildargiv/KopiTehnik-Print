@@ -848,6 +848,7 @@ class Node:
                         raise _PairEnd("проверка кода не прошла")
                     self._store_pair(peer_id, name, _mac(key_material, "pairkey", transcript).hex(), addr[0], int(h.get("port", PORT_TCP)))
                     result = {"ok": True}
+                    ch.send({"t": "done"})                                 # ключ уже сохранён: теперь запрашивающий может подключаться
                     self._emit("paired", id=peer_id, name=name, addr=addr[0])
                     return
                 if r.get("t") == "retry":
@@ -921,6 +922,9 @@ class Node:
                 transcript = "%x|%x|%s|%s" % (pub, b_pub, cn, sn)
                 if hmac.compare_digest(bytes.fromhex(r["proof"]), _mac(key_material, "B", transcript)):
                     ch.send({"t": "ok", "proof": _mac(key_material, "A", transcript).hex()})
+                    d, _ = ch.recv()
+                    if d.get("t") != "done":
+                        raise NetError(d.get("error", "ПК не подтвердил подключение"))
                     break
                 tries += 1
                 if tries >= PAIR_TRIES:
