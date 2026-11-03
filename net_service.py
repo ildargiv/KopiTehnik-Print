@@ -5,6 +5,7 @@
 Вызывается из потоков сети, поэтому окно обязано перенаправить событие в свой поток (сигналом Qt).
 """
 import os
+import threading
 import time
 
 import net_link as nl
@@ -20,10 +21,15 @@ class NetService:
     def __init__(self, get_settings, save, on_ui=None, port=nl.PORT_TCP, udp_port=nl.PORT_UDP, host="0.0.0.0", version=""):
         self.version = version
         self._sent = {}
-        self.get_settings, self.save, self.on_ui = get_settings, save, on_ui
+        self.get_settings, self._save_raw, self.on_ui = get_settings, save, on_ui
+        self._save_lock = threading.Lock()
         self.port, self.udp_port, self.host = port, udp_port, host
         self.node = None
         self.printing = None
+
+    def save(self):
+        with self._save_lock:                      # сеть пишет настройки из нескольких потоков
+            self._save_raw()
 
     # ---- настройки ----
     @property
@@ -71,6 +77,12 @@ class NetService:
         names = [n for n in names if n in installed]
         self.get_settings()["net_shared"] = None if len(names) == len(list(installed)) else names
         self.save()
+
+    def _need(self):
+        """Выключенная сеть не включается сама от отправки сообщения или запроса: только выключателем в настройках."""
+        if not self.node:
+            raise nl.NetError("Сеть выключена. Включите её в настройках, раздел «Сеть».")
+        return self.node
 
     def user(self):
         return self.cfg.get("user") or (self.node.name if self.node else "")
@@ -235,11 +247,11 @@ class NetService:
         self.save()
 
     def open_pairing(self, ttl=300):
-        self.start()
+        self._need()
         return self.node.open_pairing(ttl=ttl)
 
     def pair(self, addr, code, port=nl.PORT_TCP):
-        self.start()
+        self._need()
         pid = self.node.pair(addr.strip(), code.strip(), port)
         self.save()
         return pid
@@ -254,12 +266,12 @@ class NetService:
 
     def probe(self, addr, port=nl.PORT_TCP):
         """Проверка адреса, введённого вручную: {id, name, port} или None."""
-        self.start()
+        self._need()
         return self.node.probe(addr.strip(), port, timeout=3.0)
 
     def request_pair(self, addr, port=nl.PORT_TCP, on_code=None, cancel=None):
         """Запрос на подключение: у нас показывается 6 цифр, их вводят на другом ПК. Блокирует; вызывать в потоке."""
-        self.start()
+        self._need()
         pid = self.node.request_pair(addr.strip(), port, on_code=on_code, cancel=cancel)
         self.save()
         return pid
@@ -307,7 +319,7 @@ class NetService:
         text = text.strip()
         if not text:
             return
-        self.start()
+        self._need()
         targets = [peer_id] if peer_id else list(self.cfg.get("paired", {}))
         for pid in targets:
             self.node.chat_send(pid, text, user=self.user(), channel="all" if not peer_id else "dm")
@@ -320,7 +332,7 @@ class NetService:
         size = os.path.getsize(path)
         if size > MAX_SEND:
             raise ValueError("Файл больше %d МБ." % (MAX_SEND >> 20))
-        self.start()
+        self._need()
         targets = [peer_id] if peer_id else list(self.cfg.get("paired", {}))
         for pid in targets:
             self.node.chat_send(pid, text, user=self.user(), channel="all" if not peer_id else "dm", file=path)

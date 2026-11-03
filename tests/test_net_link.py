@@ -273,3 +273,83 @@ def test_found_ttl_probe(nodes):
     assert [x["id"] for x in a.found_list()] == [b.id]
     a.found[b.id]["seen"] -= nl.FOUND_TTL + 1
     assert a.found_list() == []
+
+
+def test_pair_request_leaks_nothing_before_code(nodes):
+    """Принимающий ПК не шлёт проверочных данных, пока человек не ввёл код: офлайн-подбор невозможен."""
+    import socket
+    b = nodes("B")
+    s = socket.create_connection(("127.0.0.1", b.port), timeout=3)
+    ch = nl.Channel(s)
+    priv, pub = nl.dh_keypair(nl.pake_gen("123456"))
+    ch.send({"t": "hello", "proto": nl.PROTO, "mode": "preq", "id": "evil", "name": "Борис", "nonce": "00", "dh": "%x" % pub, "port": 1})
+    r, _ = ch.recv()
+    assert r["t"] == "preq_ok" and set(r) == {"t", "id", "name"}
+    s.settimeout(0.8)
+    with pytest.raises(OSError):
+        ch.recv()                                         # дальше тишина до ввода кода человеком
+    s.close()
+    assert wait(lambda: not b.pending_pair_requests())
+
+
+def test_pair_request_spam_limited(nodes):
+    import socket
+    b = nodes("B")
+    socks = []
+    for i in range(nl.PREQ_PER_MIN + 4):
+        s = socket.create_connection(("127.0.0.1", b.port), timeout=3)
+        ch = nl.Channel(s)
+        _, pub = nl.dh_keypair(nl.pake_gen("111111"))
+        ch.send({"t": "hello", "proto": nl.PROTO, "mode": "preq", "id": "e%d" % i, "name": "x", "nonce": "00", "dh": "%x" % pub, "port": 1})
+        r, _ = ch.recv()
+        socks.append((s, r))
+    assert len(b.pending_pair_requests()) <= 1               # с одного адреса одновременно только один запрос
+    assert sum(1 for _, r in socks if r["t"] == "preq_ok") == 1
+    [s.close() for s, _ in socks]
+
+
+def test_garbage_header_and_self_connect(nodes):
+    import socket
+    a = nodes("A")
+    s = socket.create_connection(("127.0.0.1", a.port), timeout=3)
+    nl.Channel(s).send([])                                   # не объект: узел не падает
+    s.close()
+    time.sleep(0.3)
+    assert a.probe("127.0.0.1", a.port)["id"] == a.id        # и продолжает отвечать
+    a.peers_paired[a.id] = {"name": "я", "key": "k", "addr": "127.0.0.1", "port": a.port}
+    a._connect(a.id)
+    assert not a.online(a.id)
+
+
+def test_many_files_sent_once_each(nodes, tmp_path):
+    b = nodes("B")
+    b.file_dir = str(tmp_path / "in")
+    a = nodes("A")
+    pair(a, b)
+    assert wait(lambda: a.online(b.id) and b.online(a.id))
+    files = []
+    for i in range(12):
+        f = tmp_path / ("f%d.bin" % i)
+        f.write_bytes(os.urandom(2000) + bytes([i]))
+        files.append(f)
+        a.chat_send(b.id, "", file=str(f))
+    assert wait(lambda: sum(1 for m in b.inbox if m.get("att")) == 12, 15)
+    time.sleep(1.0)
+    saved = [p for _, _, fs in os.walk(b.file_dir) for p in fs]
+    assert len(saved) == 12 and len(b.inbox) == 12
+
+
+def test_safe_filename_tricks():
+    assert nl.safe_filename("photo‮gpj.exe") == "photo_gpj.exe"
+    assert nl.safe_filename("CON.txt") == "_CON.txt"
+    assert nl.safe_filename("../../x.jpg") == "x.jpg"
+    assert nl.safe_filename("a. ") == "a"
+
+
+def test_repair_keeps_flags(nodes):
+    a, b = nodes("A"), nodes("B")
+    pair(a, b)
+    a.peers_paired[b.id].update(alias="Касса", hidden=True, trusted=False)
+    pair(a, b)
+    p = a.peers_paired[b.id]
+    assert p["alias"] == "Касса" and p["hidden"] and p["trusted"] is False

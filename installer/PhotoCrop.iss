@@ -125,7 +125,9 @@ Name: "{autodesktop}\KopiTehnik Print"; Filename: "{app}\PhotoCropQt.exe"; Tasks
 [Run]
 ; Подключение агента: записывает photocrop в claude_desktop_config.json (копия .bak остаётся) и включает приём подключений в окне
 Filename: "{app}\PhotoCropQt.exe"; Parameters: "mcp-install"; Flags: runhidden waituntilterminated; Tasks: mcp
+Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall add rule name=""KopiTehnik Print (сеть)"" dir=in action=allow program=""{app}\PhotoCropQt.exe"" protocol=any profile=private"; Flags: runhidden waituntilterminated; Check: IsAdminInstallMode
 Filename: "{app}\PhotoCropQt.exe"; Description: "{cm:LaunchProgram,KopiTehnik Print}"; Flags: nowait postinstall skipifsilent
 
 [UninstallRun]
+Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall delete rule name=""KopiTehnik Print (сеть)"""; Flags: runhidden waituntilterminated; RunOnceId: "RemoveFw"; Check: IsAdminInstallMode
 Filename: "{app}\PhotoCropQt.exe"; Parameters: "mcp-uninstall"; Flags: runhidden waituntilterminated; RunOnceId: "RemoveMcp"

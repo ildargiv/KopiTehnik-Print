@@ -899,7 +899,12 @@ class ChatPanel(QFrame):
         if not self.svc.cfg.get("paired"):
             self.pair_dialog()
             return
-        self.svc.send_chat(text, self._peer())
+        try:
+            self.svc.send_chat(text, self._peer())
+        except Exception as e:
+            self.sounds.play("error")
+            self.edit.setPlaceholderText(str(e))
+            return
         self.edit.clear()
         self.sounds.play("send")
         self._append_new()
@@ -912,7 +917,7 @@ class ChatPanel(QFrame):
             try:
                 self.svc.send_file(p, self._peer())
                 self.sounds.play("send")
-            except (OSError, ValueError) as e:
+            except Exception as e:
                 self.sounds.play("error")
                 self.edit.setPlaceholderText(str(e))
         self._append_new()
@@ -1157,6 +1162,7 @@ class PairDialog(QDialog):
             col = QVBoxLayout()
             col.setSpacing(0)
             n = QLabel("🖥  " + f["name"])
+            n.setTextFormat(Qt.PlainText)
             n.setStyleSheet("font-weight: 700;")
             a = QLabel(f["addr"] + ("  ·  Tailscale" if f.get("via") == "tailscale" else ""))
             a.setObjectName("hint")
@@ -1247,6 +1253,7 @@ class PinDialog(QDialog):
         lay.setSpacing(10)
         ttl = QLabel("🔗  " + tr("ПК «%s» хочет подключиться") % req["name"])
         ttl.setObjectName("title")
+        ttl.setTextFormat(Qt.PlainText)
         ttl.setWordWrap(True)
         hint = QLabel(tr("Введите 6 цифр, которые показаны на его экране. Адрес: %s. Если вы не ждали запрос, нажмите «Отклонить».") % req["addr"])
         hint.setObjectName("hint")
