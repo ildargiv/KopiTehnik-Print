@@ -393,13 +393,15 @@ class _PrinterQueue:
 class Node:
     def __init__(self, name="", node_id=None, handlers=None, port=PORT_TCP, udp_port=PORT_UDP, host="0.0.0.0",
                  broadcast="255.255.255.255", on_event=None, peers_paired=None, max_sheets=DEFAULT_MAX_SHEETS,
-                 print_sheet=None):
+                 print_sheet=None, app_version=""):
         """peers_paired: {id: {"name","key","addr","port"}} (хранит программа; to_state()/from_state()).
         print_sheet(meta, data) -> dict|None печатает один лист на принтере meta['printer'] (бросает исключение при сбое)."""
         self.name = name or socket.gethostname()
         self.id = node_id or uuid.uuid4().hex[:12]
         self.handlers = dict(handlers or {})
         self.print_sheet = print_sheet
+        self.app_version = app_version
+        self.peer_info = {}               # peer_id -> {"version"}
         self.port, self.udp_port, self.host, self.broadcast = port, udp_port, host, broadcast
         self.on_event = on_event
         self.peers_paired = peers_paired if peers_paired is not None else {}
@@ -524,6 +526,7 @@ class Node:
         self._emit("presence", id=sess.peer_id, name=sess.peer_name, online=True)
         self._pool(self._flush_outbox, sess.peer_id)
         self._pool(self._send_all_state, sess)
+        self._pool(self._send_about, sess)
 
     def _session_closed(self, sess):
         with self._lock:
@@ -862,7 +865,9 @@ class Node:
         return r or {}, b""
 
     def _on_evt(self, sess, name, meta, data):
-        if name == "printer_state":
+        if name == "about":
+            self.peer_info[sess.peer_id] = {"version": str(meta.get("version", ""))[:32]}
+        elif name == "printer_state":
             self.peer_state.setdefault(sess.peer_id, {})[meta.get("printer", "")] = meta
         elif name == "job":
             k = (meta.get("job_id"), meta.get("sheet_id"))
@@ -876,6 +881,8 @@ class Node:
     def _submit(self, sess, meta, data):
         if not self.net_enabled:
             raise PermissionError("приём печати по сети выключен")
+        if not self.peers_paired.get(sess.peer_id, {}).get("trusted", True):
+            raise PermissionError("этому ПК печать на вашем принтере не разрешена")
         printer, job_id, sheet_id = meta.get("printer"), meta.get("job_id"), meta.get("sheet_id")
         if not (printer and job_id and sheet_id):
             raise ValueError("нужны printer, job_id, sheet_id")
@@ -942,6 +949,12 @@ class Node:
             except (OSError, NetError):
                 pass
 
+    def _send_about(self, sess):
+        try:
+            sess.event("about", {"version": self.app_version})
+        except (OSError, NetError):
+            pass
+
     def _send_all_state(self, sess):
         for meta in list(self._my_state.values()):
             try:
@@ -956,6 +969,14 @@ class Node:
         s = self.sessions.get(peer_id)
         if not s or not s.alive:
             raise NetError("ПК не в сети")
+        try:
+            self._send_sheet(peer_id, s, printer, job_id, sheet_id, data, total, meta, timeout)
+        except NetError as e:
+            self._emit("sent_sheet", peer=peer_id, job_id=job_id, sheet_id=sheet_id, total=total, printer=printer, ok=False, error=str(e))
+            raise
+        self._emit("sent_sheet", peer=peer_id, job_id=job_id, sheet_id=sheet_id, total=total, printer=printer, ok=True, error="")
+
+    def _send_sheet(self, peer_id, s, printer, job_id, sheet_id, data, total, meta, timeout):
         key = (job_id, sheet_id)
         ev, box = threading.Event(), {}
         self._job_waiters[key] = (ev, box)

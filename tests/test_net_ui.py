@@ -173,3 +173,37 @@ def test_pair_by_click_with_pin(app, tmp_path):
     finally:
         a.stop()
         b.stop()
+
+
+def test_service_trust_notes_versions(app, tmp_path):
+    import net_link as nl
+    a, sa = svc("Аня", tmp_path)
+    b, sb = svc("Борис", tmp_path)
+    a.version, b.version = "1.9.0", "1.8.0"
+    notes = []
+    a.on_ui = lambda k, i: notes.append(i) if k == "chat" and i.get("sys") else None
+    b.on_ui = lambda k, i: notes.append(i) if k == "chat" and i.get("sys") else None
+    a.start()
+    b.start()
+    printed = []
+    b.node.print_sheet = lambda m, d: printed.append(1)
+    b.node.handlers["printers"] = lambda m, d, p: {"printers": [{"name": "Epson", "profiles": []}]}
+    try:
+        code = b.open_pairing()
+        a.pair("127.0.0.1", code, b.node.port)
+        assert pump(app, lambda: a.node.online(b.node.id) and b.node.online(a.node.id))
+        assert pump(app, lambda: a.peers()[0]["version"] == "1.8.0" and b.peers()[0]["version"] == "1.9.0")
+        assert [p["name"] for p in a.remote_printers(b.node.id)] == ["Epson"]
+        a.node.send_sheet(b.node.id, "Epson", "j1", "s1", b"x", total=1)
+        assert pump(app, lambda: len(notes) == 2)                       # у обоих ПК строка «напечатано»
+        assert all("Напечатано" in n["text"] for n in notes)
+        b.set_trusted(a.node.id, False)
+        with pytest.raises(nl.NetError, match="не разрешена"):
+            a.node.send_sheet(b.node.id, "Epson", "j2", "s1", b"x", total=1)
+        b.set_hidden(a.node.id, True)
+        assert b.peers() == [] and len(b.peers(True)) == 1
+        b.set_accept_print(False)
+        assert b.node.net_enabled is False
+    finally:
+        a.stop()
+        b.stop()

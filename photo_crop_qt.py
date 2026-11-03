@@ -5339,7 +5339,7 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
     def _net_chat_build(self):
         import net_service, net_ui, net_print
         if getattr(self, "net", None) is None:
-            self.net = net_service.NetService(lambda: self.settings, lambda: pc.save_settings(self.settings))
+            self.net = net_service.NetService(lambda: self.settings, lambda: pc.save_settings(self.settings), version=APP_VERSION)
             self.net.attach_printing(net_print.NetPrinting(pc, pcr, lambda: self.settings, print_stats=ps))
             if self.settings.get("net", {}).get("enabled", True):
                 try:
@@ -9720,6 +9720,9 @@ class SettingsDialog(QDialog):
                           row("Подсвечивать включённую ячейку «Быстрого старта» зелёным", sw_hl))
         section("Печать", "print", [("Режимы печати", [multi_card]), ("Профили печати", [self._profiles_card()]),
                                     ("Счётчик печати", [self._counter_card()])])
+        net_pages = self._net_pages()
+        if net_pages:
+            section("Сеть", "desktop", net_pages)
         section("ИИ-агент (MCP)", "sparkle", [("Подключение и права", [self._agent_card()])])
         section("О программе", "doc", [("Версия и обновления", [upd_card])])
         self.tree.currentItemChanged.connect(lambda cur, _prev: self.stack.setCurrentIndex(int(cur.data(0, Qt.UserRole) or 0)) if cur is not None else None)
@@ -9728,6 +9731,128 @@ class SettingsDialog(QDialog):
         self.resize(960, 660)
         self.setLayout(vbox(hbox(self.tree, self.stack, spacing=12), about, hbox(None, btn("Готово", self.accept, "primary")),
                             spacing=12, margins=(14, 14, 14, 14)))
+
+    def _net_pages(self):
+        """Раздел «Сеть»: подключение, список ПК, какие принтеры отдавать по сети. Сбой сети не ломает окно настроек."""
+        try:
+            import net_ui
+            app = self.app
+            svc = getattr(app, "net", None)
+            if svc is None:
+                return []
+            T_ = T
+            sw_on = Switch(svc.enabled())
+            sw_on.toggled.connect(lambda on: svc.set_enabled(bool(on)))
+            sw_acc = Switch(svc.accept_print())
+            sw_acc.toggled.connect(lambda on: svc.set_accept_print(bool(on)))
+            sw_ts = Switch(svc.tailscale_on())
+            sw_ts.toggled.connect(lambda on: svc.set_tailscale(bool(on)))
+            sw_snd = Switch(svc.sound_on())
+            sw_snd.toggled.connect(lambda on: svc.set_sound(bool(on)))
+            e_name = QLineEdit(svc.user())
+            e_name.setPlaceholderText(tr("Моё имя в чате"))
+            e_name.editingFinished.connect(lambda: svc.set_user(e_name.text()))
+            e_dir = QLineEdit(svc.files_dir())
+            e_dir.editingFinished.connect(lambda: svc.set_files_dir(e_dir.text().strip()))
+
+            def choose():
+                d = QFileDialog.getExistingDirectory(self, tr("Папка для присланных файлов"), e_dir.text())
+                if d:
+                    e_dir.setText(d)
+                    svc.set_files_dir(d)
+
+            def pair():
+                net_ui.PairDialog(svc, T_, tr, self).exec()
+                fill()
+                if getattr(app, "chat_panel", None):
+                    app.chat_panel.refresh()
+            conn = card("Подключение",
+                        row("Сеть включена (автопоиск ПК и чат)", sw_on),
+                        row("Принимать печать от подключённых ПК", sw_acc),
+                        row("Искать ПК через Tailscale", sw_ts),
+                        row("Звук сообщений", sw_snd),
+                        row("Моё имя в чате", e_name),
+                        lbl("Папка для присланных файлов", "muted"),
+                        hbox(e_dir, btn("Выбрать…", choose), spacing=6),
+                        hbox(btn("Подключить ПК…", pair, "primary", ico="plus"), None),
+                        lbl("Связь между ПК не шифруется: пользуйтесь доверенной сетью или Tailscale.", "muted", wrap=True))
+            self.lw_net = QListWidget()
+            self.lw_net.setMinimumHeight(220)
+
+            def fill():
+                cur = self.lw_net.currentItem().data(Qt.UserRole) if self.lw_net.currentItem() else None
+                self.lw_net.clear()
+                for p in svc.peers(include_hidden=True):
+                    bits = [tr("в сети") if p["online"] else tr("не в сети")]
+                    if p["version"]:
+                        bits.append("v" + p["version"])
+                    if p["addr"]:
+                        bits.append(p["addr"])
+                    if p["hidden"]:
+                        bits.append(tr("скрыт"))
+                    if not p["trusted"]:
+                        bits.append(tr("печать запрещена"))
+                    it = QListWidgetItem("%s  —  %s" % (p["name"], ", ".join(bits)))
+                    it.setData(Qt.UserRole, p["id"])
+                    self.lw_net.addItem(it)
+                    if p["id"] == cur:
+                        self.lw_net.setCurrentItem(it)
+
+            def cur():
+                it = self.lw_net.currentItem()
+                return (it.data(Qt.UserRole), next((p for p in svc.peers(True) if p["id"] == it.data(Qt.UserRole)), None)) if it else (None, None)
+
+            def rename():
+                pid, p = cur()
+                if p:
+                    text, ok_ = QInputDialog.getText(self, tr("Имя ПК"), tr("Как называть этот ПК"), text=p["name"])
+                    if ok_ and text.strip():
+                        svc.rename(pid, text)
+                        fill()
+
+            def hide():
+                pid, p = cur()
+                if p:
+                    svc.set_hidden(pid, not p["hidden"])
+                    fill()
+
+            def trust():
+                pid, p = cur()
+                if p:
+                    svc.set_trusted(pid, not p["trusted"])
+                    fill()
+
+            def forget():
+                pid, p = cur()
+                if p and ask(self, tr("Забыть этот ПК? Чтобы подключить снова, понадобится новый код. На том ПК его тоже нужно забыть.")):
+                    svc.forget(pid)
+                    fill()
+            fill()
+            pcs = card("Подключённые ПК",
+                       lbl("Скрытые ПК не показываются в чате, но остаются подключёнными. «Запретить печать» оставляет чат, но этот ПК "
+                           "не сможет печатать на ваших принтерах.", "muted", wrap=True),
+                       self.lw_net,
+                       hbox(btn("Переименовать", rename), btn("Скрыть / показать", hide), btn("Разрешить / запретить печать", trust),
+                            btn("Забыть", forget, ico="trash"), None, spacing=6))
+            names = list(pc.list_printers())
+            checks = []
+            for n in names:
+                cb = QCheckBox(n)
+                cb.setChecked(n in svc.shared_names(names))
+                checks.append(cb)
+
+            def save_shared():
+                svc.set_shared([c.text() for c in checks if c.isChecked()], names)
+            for cb in checks:
+                cb.toggled.connect(lambda _=False: save_shared())
+            prn = card("Принтеры, доступные по сети",
+                       lbl("Отмеченные принтеры другие ПК видят и могут печатать на них. Цвет и настройки драйвера берутся из профилей этого ПК.",
+                           "muted", wrap=True),
+                       *(checks or [lbl("Принтеры не найдены.", "muted")]))
+            return [("Подключение", [conn]), ("ПК", [pcs]), ("Принтеры", [prn])]
+        except Exception:
+            traceback.print_exc()
+            return []
 
     def _profiles_card(self):
         """Сохранённые профили печати (принтер + формат + тип бумаги): просмотр и удаление."""
@@ -9992,6 +10117,34 @@ pc.EN.update({
     "Спрашивать подтверждение обычных действий (сброс, применение ко всем, печать)": "Ask for confirmation of everyday actions (reset, apply to all, print)",
     "Папка, с которой начинается «Открыть»": "Folder that “Open” starts in", "Последняя использованная": "Last used",
     "Кадрирование": "Cropping", "Сила прилипания, пикселей экрана": "Snap strength, screen pixels", "Общие": "General",
+    "Сеть": "Network",
+    "Подключение": "Connection",
+    "ПК": "PCs",
+    "Принтеры": "Printers",
+    "Подключённые ПК": "Connected PCs",
+    "Сеть включена (автопоиск ПК и чат)": "Network on (PC discovery and chat)",
+    "Принимать печать от подключённых ПК": "Accept print jobs from connected PCs",
+    "Искать ПК через Tailscale": "Look for PCs via Tailscale",
+    "Звук сообщений": "Message sound",
+    "Моё имя в чате": "My name in chat",
+    "Папка для присланных файлов": "Folder for received files",
+    "Выбрать…": "Choose…",
+    "Подключить ПК…": "Connect a PC…",
+    "Связь между ПК не шифруется: пользуйтесь доверенной сетью или Tailscale.": "The link between PCs is not encrypted: use a trusted network or Tailscale.",
+    "Переименовать": "Rename",
+    "Скрыть / показать": "Hide / show",
+    "Разрешить / запретить печать": "Allow / forbid printing",
+    "Забыть": "Forget",
+    "в сети": "online",
+    "не в сети": "offline",
+    "скрыт": "hidden",
+    "печать запрещена": "printing forbidden",
+    "Имя ПК": "PC name",
+    "Как называть этот ПК": "What to call this PC",
+    "Принтеры, доступные по сети": "Printers shared over the network",
+    "Принтеры не найдены.": "No printers found.",
+    "Скрытые ПК не показываются в чате, но остаются подключёнными. «Запретить печать» оставляет чат, но этот ПК не сможет печатать на ваших принтерах.": "Hidden PCs are not shown in the chat but stay connected. “Forbid printing” keeps the chat but the PC cannot print on your printers.",
+    "Отмеченные принтеры другие ПК видят и могут печатать на них. Цвет и настройки драйвера берутся из профилей этого ПК.": "Other PCs can see and print on the checked printers. Colour and driver settings come from this PC's profiles.",
     "Настройки хранятся в файле": "Settings are stored in", "Оформление": "Appearance",
     "Сохранить проект (рамки и настройки)": "Save project (frames and settings)",
 })
