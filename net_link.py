@@ -18,6 +18,7 @@ import hashlib
 import hmac
 import json
 import os
+import select
 import socket
 import struct
 import threading
@@ -35,6 +36,21 @@ PING_EVERY = 5.0
 DEAD_AFTER = 15.0
 MAX_SESSIONS = 32
 DEFAULT_MAX_SHEETS = 500       # потолок листов за одно задание
+
+
+# 2048-битная группа Диффи-Хеллмана (RFC 3526, группа 14): p = 2^2048 - 2^1984 - 1 + 2^64 * ([2^1918 * pi] + 124476), g = 2.
+# Простота p и (p-1)/2 проверена тестом, значение вычисляется заново из числа pi.
+DH_P = int("ffffffffffffffffc90fdaa22168c234c4c6628b80dc1cd129024e088a67cc74020bbea63b139b22514a08798e3404ddef9519b3cd3a431b302b0a6df25f14374fe1356d6d51c245e485b576625e7ec6f44c42e9a637ed6b0bff5cb6f406b7edee386bfb5a899fa5ae9f24117c4b1fe649286651ece45b3dc2007cb8a163bf0598da48361c55d39a69163fa8fd24cf5f83655d23dca3ad961c62f356208552bb9ed529077096966d670c354e4abc9804f1746c08ca18217c32905e462e36ce3be39e772c180e86039b2783a2ec07a28fb5c55df06f4c52c9de2bcbf6955817183995497cea956ae515d2261898fa051015728e5a8aacaa68ffffffffffffffff", 16)
+DH_G = 2
+PAIR_WAIT = 150.0                  # сколько ждём, пока человек на другом ПК введёт код
+PAIR_TRIES = 3                     # неверных кодов за один запрос; потом запрос отклоняется
+MAX_PAIR_REQUESTS = 5              # одновременно ожидающих запросов на подключение
+FOUND_TTL = 20.0                   # найденный ПК исчезает из списка, если не объявлялся столько секунд
+ANNOUNCE_EVERY = 4.0
+
+
+class _PairEnd(Exception):
+    pass
 
 
 class NetError(Exception):
@@ -65,6 +81,68 @@ def unique_path(path):
         if not os.path.exists(p):
             return p
     return "%s (%s)%s" % (base, uuid.uuid4().hex[:6], ext)
+
+
+def dh_keypair():
+    priv = int.from_bytes(os.urandom(32), "big") | (1 << 255)
+    return priv, pow(DH_G, priv, DH_P)
+
+
+def dh_secret(priv, peer_pub):
+    if not (2 <= peer_pub <= DH_P - 2):
+        raise AuthError("неверное значение обмена ключами")
+    return pow(peer_pub, priv, DH_P).to_bytes(256, "big")
+
+
+def new_pin():
+    """Короткий код для человека: 6 цифр (на экране показывается как «123 456»)."""
+    return "%06d" % (int.from_bytes(os.urandom(4), "big") % 1000000)
+
+
+def local_addrs():
+    """IPv4-адреса этого ПК (кроме 127.x)."""
+    out = []
+    try:
+        for ip in socket.gethostbyname_ex(socket.gethostname())[2]:
+            if not ip.startswith("127.") and ip not in out:
+                out.append(ip)
+    except OSError:
+        pass
+    return out
+
+
+def broadcast_targets():
+    """Адреса рассылки: «x.y.z.255» для каждой сети этого ПК (маска /24 как самый частый случай) и общая 255.255.255.255."""
+    out = ["255.255.255.255"]
+    for ip in local_addrs():
+        b = ip.rsplit(".", 1)[0] + ".255"
+        if b not in out:
+            out.append(b)
+    return out
+
+
+def tailscale_peers():
+    """Онлайн-узлы Tailscale: [(имя, ip)]. Нет tailscale или он выключен: пустой список."""
+    import subprocess
+    for c in ("tailscale", r"C:\Program Files\Tailscale\tailscale.exe"):
+        try:
+            out = subprocess.run([c, "status", "--json"], capture_output=True, timeout=4,
+                                 creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        except (OSError, subprocess.SubprocessError):
+            continue
+        if out.returncode != 0:
+            continue
+        try:
+            d = json.loads(out.stdout.decode("utf-8", "replace"))
+        except ValueError:
+            continue
+        res = []
+        for p in (d.get("Peer") or {}).values():
+            ips = [x for x in p.get("TailscaleIPs", []) if "." in x]
+            if p.get("Online") and ips:
+                res.append((p.get("HostName") or ips[0], ips[0]))
+        return res
+    return []
 
 
 def new_code():
@@ -150,8 +228,9 @@ def _client_handshake(ch, node, peer_key=None, code=None):
     return h["id"], h.get("name", ""), pair_key
 
 
-def _server_handshake(ch, node):
-    h, _ = ch.recv()
+def _server_handshake(ch, node, h=None):
+    if h is None:
+        h, _ = ch.recv()
     if h.get("t") != "hello" or h.get("proto") != PROTO:
         ch.send({"t": "error", "error": "неподдерживаемый протокол"})
         raise AuthError("неподдерживаемый протокол")
@@ -335,6 +414,7 @@ class Node:
         self.outbox = {}                  # peer_id -> deque чата
         self.inbox = []
         self._pairing = None              # (code, expires)
+        self._pair_reqs = {}              # ожидающие запросы на подключение с коротким кодом
         self._lock = threading.RLock()
         self._stop = threading.Event()
         self._srv = None
@@ -408,7 +488,16 @@ class Node:
         s.settimeout(DEAD_AFTER * 2)       # любой таймаут = обрыв связи, продолжать чтение кадра нельзя
         ch = Channel(s)
         try:
-            pid, pname, pkey, mode = _server_handshake(ch, self)
+            h, _ = ch.recv()
+            if h.get("t") == "hello" and h.get("mode") == "probe":          # «есть ли здесь программа»: без секретов
+                ch.send({"t": "info", "id": self.id, "name": self.name, "port": self.port, "proto": PROTO})
+                s.close()
+                return
+            if h.get("t") == "hello" and h.get("mode") == "preq":           # запрос на подключение с коротким кодом
+                self._serve_pair_request(ch, h, addr)
+                s.close()
+                return
+            pid, pname, pkey, mode = _server_handshake(ch, self, h)
         except (NetError, OSError, ValueError, KeyError):
             s.close()
             return
@@ -503,11 +592,16 @@ class Node:
 
     # --- обнаружение ---
     def announce(self, addr=None):
-        body = json.dumps({"id": self.id, "name": self.name, "port": self.port, "proto": PROTO})
+        """Одно объявление «я здесь» (id, имя, порт; без секретов). Без addr: всем сетям этого ПК."""
+        body = json.dumps({"id": self.id, "name": self.name, "port": self.port, "proto": PROTO}).encode()
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         try:
             s.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
-            s.sendto(body.encode(), (addr or self.broadcast, self.udp_port))
+            for t in ([addr] if addr else (broadcast_targets() if self.broadcast == "255.255.255.255" else [self.broadcast])):
+                try:
+                    s.sendto(body, (t, self.udp_port))
+                except OSError:
+                    continue
         finally:
             s.close()
 
@@ -517,6 +611,51 @@ class Node:
         u.bind((self.host, self.udp_port))
         u.settimeout(0.3)
         threading.Thread(target=self._disc_loop, args=(u,), daemon=True).start()
+
+    def start_discovery(self, tailscale=True):
+        """Слушать объявления других ПК и сами объявляться каждые несколько секунд; через Tailscale опрашивать онлайн-узлы."""
+        try:
+            self.listen_discovery()
+        except OSError:
+            pass                                   # порт занят другой копией: слушать не получится, но объявляться можно
+        threading.Thread(target=self._announce_loop, args=(tailscale,), daemon=True).start()
+
+    def _announce_loop(self, tailscale):
+        last_ts = 0.0
+        while not self._stop.is_set():
+            try:
+                self.announce()
+            except OSError:
+                pass
+            if tailscale and time.time() - last_ts > 15:
+                last_ts = time.time()
+                try:
+                    self.scan_tailscale()
+                except Exception:
+                    pass
+            self._stop.wait(ANNOUNCE_EVERY)
+
+    def _note_found(self, pid, name, addr, port, via="lan"):
+        if pid == self.id:
+            return
+        new = pid not in self.found or time.time() - self.found[pid]["seen"] > FOUND_TTL
+        self.found[pid] = {"name": str(name)[:64], "addr": addr, "port": int(port), "seen": time.time(), "via": via}
+        if pid in self.peers_paired:
+            self.peers_paired[pid]["addr"] = addr
+            self.peers_paired[pid]["port"] = int(port)
+        if new:
+            self._emit("peer_found", id=pid, name=name, addr=addr)
+
+    def found_list(self):
+        """Найденные ПК, объявлявшиеся недавно: [{id, name, addr, port, via, paired}]."""
+        now = time.time()
+        out = []
+        for pid, v in list(self.found.items()):
+            if now - v["seen"] > FOUND_TTL:
+                self.found.pop(pid, None)
+                continue
+            out.append(dict(v, id=pid, paired=pid in self.peers_paired))
+        return out
 
     def _disc_loop(self, u):
         while not self._stop.is_set():
@@ -528,18 +667,174 @@ class Node:
                 return
             try:
                 d = json.loads(pkt.decode())
-                if d["id"] == self.id:
-                    continue
-                new = d["id"] not in self.found
-                self.found[d["id"]] = {"name": str(d["name"])[:64], "addr": addr[0], "port": int(d["port"]), "seen": time.time()}
-                if d["id"] in self.peers_paired:
-                    self.peers_paired[d["id"]]["addr"] = addr[0]
-                    self.peers_paired[d["id"]]["port"] = int(d["port"])
-                if new:
-                    self._emit("peer_found", id=d["id"], name=d["name"], addr=addr[0])
+                self._note_found(d["id"], d["name"], addr[0], d["port"])
             except (ValueError, KeyError, TypeError):
                 continue
         u.close()
+
+    def add_peer(self, addr, port=PORT_TCP, peer_id=None):
+        """Ручной адрес, если рассылка не проходит (разные подсети, VPN)."""
+        with self._lock:
+            self.found[peer_id or f"{addr}:{port}"] = {"name": addr, "addr": addr, "port": port, "seen": time.time(), "via": "manual"}
+
+    def probe(self, addr, port=PORT_TCP, timeout=1.5):
+        """Есть ли на адресе программа: {id, name, port} или None. Секреты не передаются."""
+        try:
+            s = socket.create_connection((addr, port), timeout=timeout)
+        except OSError:
+            return None
+        try:
+            s.settimeout(timeout)
+            ch = Channel(s)
+            ch.send({"t": "hello", "proto": PROTO, "mode": "probe", "id": self.id, "name": self.name, "nonce": ""})
+            h, _ = ch.recv()
+            return h if h.get("t") == "info" else None
+        except (NetError, OSError, ValueError):
+            return None
+        finally:
+            s.close()
+
+    def scan_tailscale(self):
+        """Tailscale не пропускает рассылку: берём онлайн-узлы из `tailscale status --json` и проверяем на каждом порт программы."""
+        found = []
+        for host, ip in tailscale_peers():
+            info = self.probe(ip, PORT_TCP, timeout=1.0)
+            if info and info.get("id"):
+                self._note_found(info["id"], info.get("name") or host, ip, info.get("port", PORT_TCP), via="tailscale")
+                found.append(info["id"])
+        return found
+
+    # --- подключение по запросу с коротким кодом ---
+    def _serve_pair_request(self, ch, h, addr):
+        """Принимающая сторона: показывает запрос человеку; тот вводит 6 цифр с экрана запрашивающего ПК."""
+        peer_id, name, cn = str(h["id"]), str(h.get("name", ""))[:64], str(h["nonce"])
+        a_pub = int(h["dh"], 16)
+        if len(self._pair_reqs) >= MAX_PAIR_REQUESTS or any(r["addr"] == addr[0] for r in self._pair_reqs.values()):
+            ch.send({"t": "error", "error": "слишком много запросов"})
+            return
+        priv, pub = dh_keypair()
+        secret = dh_secret(priv, a_pub)
+        sn = os.urandom(16).hex()
+        transcript = "%x|%x|%s|%s" % (a_pub, pub, cn, sn)
+        rid = uuid.uuid4().hex[:8]
+        req = {"id": rid, "peer_id": peer_id, "name": name, "addr": addr[0], "event": threading.Event(), "code": None, "deny": False}
+        self._pair_reqs[rid] = req
+        ch.sock.settimeout(PAIR_WAIT + 30)
+        result = {"ok": False, "reason": "время ожидания вышло"}
+        try:
+            ch.send({"t": "preq_ok", "dh": "%x" % pub, "nonce": sn, "id": self.id, "name": self.name})
+            self._emit("pair_request", req_id=rid, peer_id=peer_id, name=name, addr=addr[0])
+            deadline = time.time() + PAIR_WAIT
+            while True:
+                while not req["event"].is_set():
+                    if time.time() > deadline or self._stop.is_set():
+                        raise _PairEnd("время ожидания вышло")
+                    r, _, _ = select.select([ch.sock], [], [], 0.4)
+                    if r:                                                  # запрашивающий закрыл связь или отменил
+                        raise _PairEnd("запрос отменён на другом ПК")
+                    if req["deny"]:
+                        ch.send({"t": "cancel"})
+                        raise _PairEnd("вы отклонили запрос")
+                req["event"].clear()
+                if req["deny"]:
+                    ch.send({"t": "cancel"})
+                    raise _PairEnd("вы отклонили запрос")
+                code = req["code"]
+                key_material = secret + code.encode()
+                ch.send({"t": "proof", "proof": _mac(key_material, "B", transcript).hex()})
+                r, _ = ch.recv()
+                if r.get("t") == "ok":
+                    if not hmac.compare_digest(bytes.fromhex(r.get("proof", "")), _mac(key_material, "A", transcript)):
+                        raise _PairEnd("проверка кода не прошла")
+                    key = _mac(key_material, "pairkey", transcript).hex()
+                    self.peers_paired[peer_id] = {"name": name, "key": key, "addr": addr[0], "port": int(h.get("port", PORT_TCP))}
+                    result = {"ok": True}
+                    self._emit("paired", id=peer_id, name=name, addr=addr[0])
+                    return
+                if r.get("t") == "retry":
+                    self._emit("pair_result", req_id=rid, ok=False, retry=True, left=r.get("left", 0), reason="неверный код")
+                    continue
+                raise _PairEnd(r.get("error", "отклонено"))
+        except _PairEnd as e:
+            result = {"ok": False, "reason": str(e)}
+        except (NetError, OSError, ValueError, KeyError):
+            result = {"ok": False, "reason": "связь прервана"}
+        finally:
+            self._pair_reqs.pop(rid, None)
+            self._emit("pair_result", req_id=rid, retry=False, **result)
+
+    def answer_pair(self, req_id, code):
+        """Человек ввёл 6 цифр с экрана другого ПК."""
+        req = self._pair_reqs.get(req_id)
+        code = "".join(c for c in str(code) if c.isdigit())
+        if not req or len(code) != 6:
+            return False
+        req["code"] = code
+        req["event"].set()
+        return True
+
+    def deny_pair(self, req_id):
+        req = self._pair_reqs.get(req_id)
+        if req:
+            req["deny"] = True
+            req["event"].set()
+
+    def pending_pair_requests(self):
+        return [{k: r[k] for k in ("id", "peer_id", "name", "addr")} for r in self._pair_reqs.values()]
+
+    def request_pair(self, addr, port=PORT_TCP, on_code=None, cancel=None):
+        """Запрашивающая сторона. on_code(code) показывает 6 цифр на экране; блокирует, пока человек на том ПК не введёт код.
+        Возвращает id спаренного ПК или бросает NetError (отклонено, время вышло, три неверных кода)."""
+        s = socket.create_connection((addr, port), timeout=10)
+        ch = Channel(s)
+        s.settimeout(PAIR_WAIT + 30)
+        try:
+            priv, pub = dh_keypair()
+            cn = os.urandom(16).hex()
+            ch.send({"t": "hello", "proto": PROTO, "mode": "preq", "id": self.id, "name": self.name, "nonce": cn,
+                     "dh": "%x" % pub, "port": self.port})
+            r, _ = ch.recv()
+            if r.get("t") != "preq_ok":
+                raise NetError(r.get("error", "ПК не принял запрос"))
+            b_pub, sn = int(r["dh"], 16), str(r["nonce"])
+            pid, pname = str(r["id"]), str(r.get("name", ""))[:64]
+            secret = dh_secret(priv, b_pub)
+            transcript = "%x|%x|%s|%s" % (pub, b_pub, cn, sn)
+            code = new_pin()
+            key_material = secret + code.encode()
+            if on_code:
+                on_code(code)
+            tries, deadline = 0, time.time() + PAIR_WAIT
+            while True:
+                while True:
+                    if cancel and cancel():
+                        raise NetError("запрос отменён")
+                    if time.time() > deadline:
+                        raise NetError("время ожидания вышло")
+                    r_, _, _ = select.select([s], [], [], 0.4)
+                    if r_:
+                        break
+                r, _ = ch.recv()
+                if r.get("t") == "cancel":
+                    raise NetError("ПК отклонил запрос")
+                if r.get("t") != "proof":
+                    raise NetError(r.get("error", "отказ"))
+                if hmac.compare_digest(bytes.fromhex(r["proof"]), _mac(key_material, "B", transcript)):
+                    ch.send({"t": "ok", "proof": _mac(key_material, "A", transcript).hex()})
+                    break
+                tries += 1
+                if tries >= PAIR_TRIES:
+                    ch.send({"t": "fail", "error": "слишком много неверных кодов"})
+                    raise NetError("слишком много неверных кодов")
+                ch.send({"t": "retry", "left": PAIR_TRIES - tries})
+            self.peers_paired[pid] = {"name": pname, "key": _mac(key_material, "pairkey", transcript).hex(), "addr": addr, "port": port}
+        except (OSError, ValueError, KeyError) as e:
+            raise NetError("связь прервана: %s" % e)
+        finally:
+            s.close()
+        self._emit("paired", id=pid, name=pname, addr=addr)
+        self._pool(self._connect, pid)
+        return pid
 
     # --- запросы и события от пира ---
     def _dispatch(self, sess, cmd, meta, data):
