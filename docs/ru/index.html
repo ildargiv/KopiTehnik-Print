@@ -35,6 +35,12 @@
   "softwareVersion": "1.8.0",
   "description": "Программа для печати фотографий на Windows: точный цвет по ICC-профилю принтера, печать без полей, умное кадрирование, печатные листы и встроенный MCP-сервер для ИИ-агентов.",
   "url": "https://ildargiv.github.io/KopiTehnik-Print/ru/",
+  "sameAs": [
+    "https://github.com/ildargiv/KopiTehnik-Print",
+    "https://pypi.org/project/kopitehnik-print-mcp/",
+    "https://github.com/ildargiv/scoop-bucket",
+    "https://registry.modelcontextprotocol.io/v0/servers?search=kopitehnik"
+  ],
   "downloadUrl": "https://github.com/ildargiv/KopiTehnik-Print/releases/latest",
   "installUrl": "https://github.com/ildargiv/KopiTehnik-Print/releases/latest",
   "softwareHelp": "https://github.com/ildargiv/KopiTehnik-Print/blob/main/README.md",
@@ -396,6 +402,11 @@ footer{padding:32px 0 44px;display:flex;flex-wrap:wrap;gap:10px 26px;justify-con
     <div>
       <h2>Скачайте KopiTehnik Print</h2>
       <p>Скачайте PhotoCropQt.exe для полного окна или PhotoCropAgent.exe для режима агента. Python не нужен. Исходники и сборка — на GitHub. Лицензия: бесплатно для личного использования и одного рабочего места; для сетей и нескольких рабочих мест нужна коммерческая лицензия.</p>
+
+      <pre class="code" tabindex="0"><span class="c">// или установите из командной строки</span>
+scoop bucket add ildargiv https://github.com/ildargiv/scoop-bucket
+scoop install kopitehnik-print</pre>
+      <p class="fine">Для ИИ-агентов: любой MCP-клиент подключает программу командой <span class="c">uvx kopitehnik-print-mcp</span>; в официальном реестре MCP — <span class="c">io.github.ildargiv/kopitehnik-print</span>.</p>
     </div>
     <div class="btns">
       <a class="btn primary big" href="https://github.com/ildargiv/KopiTehnik-Print/releases/latest">Скачать</a>
