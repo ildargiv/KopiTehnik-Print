@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://ildargiv.github.io/KopiTehnik-Print/sitemap.xml
