@@ -96,7 +96,7 @@ The agent works in the same window you see: changes appear live, Ctrl+Z undoes t
 }
 ```
 
-**Install from PyPI (any MCP client):** the same agent is published as `kopitehnik-print-mcp`, so a client that runs stdio servers can simply use `uvx kopitehnik-print-mcp` - the package only locates the installed agent and hands it stdio, nothing is reimplemented. Official MCP Registry: `io.github.ildargiv/kopitehnik-print`.
+**Install from PyPI (any MCP client):** the same agent is published as `kopitehnik-print-mcp`, so a client that runs stdio servers can simply use `uvx kopitehnik-print-mcp` - the package only locates the installed agent and hands it stdio, nothing is reimplemented. Official MCP Registry: `io.github.ildargiv/kopitehnik-print`. For one-click agent setup there is [llms-install.md](llms-install.md).
 
 **You stay in control.** In Settings you choose whether the agent may print, the maximum sheets per print job, and whether it must ask before printing. `PHOTOCROP_AGENT_DRYRUN=1` forbids real printing, and `PHOTOCROP_AGENT_ROOTS` limits the folders the agent can use. Sheets printed by the agent are counted in the print counter.
 
