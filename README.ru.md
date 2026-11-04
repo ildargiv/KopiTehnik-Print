@@ -2,13 +2,24 @@
 
 # KopiTehnik Print
 
-[![license](https://img.shields.io/badge/license-free%20for%20one%20workstation-2E7D32.svg)](https://github.com/ildargiv/KopiTehnik-Print/blob/main/LICENSE) [![release](https://img.shields.io/github/v/release/ildargiv/KopiTehnik-Print?label=release)](https://github.com/ildargiv/KopiTehnik-Print/releases/latest) ![Windows](https://img.shields.io/badge/Windows-10%20%7C%2011-0078D4) ![MCP](https://img.shields.io/badge/MCP-server-6E4AFF)
+[![license](https://img.shields.io/badge/license-free%20for%20one%20workstation-2E7D32.svg)](https://github.com/ildargiv/KopiTehnik-Print/blob/main/LICENSE) [![release](https://img.shields.io/github/v/release/ildargiv/KopiTehnik-Print?label=release)](https://github.com/ildargiv/KopiTehnik-Print/releases/latest) ![Windows](https://img.shields.io/badge/Windows-10%20%7C%2011-0078D4) ![MCP](https://img.shields.io/badge/MCP-server-6E4AFF) [![PyPI](https://img.shields.io/pypi/v/kopitehnik-print-mcp.svg)](https://pypi.org/project/kopitehnik-print-mcp/) [![scoop](https://img.shields.io/badge/scoop-kopitehnik--print-2E7D32)](https://github.com/ildargiv/scoop-bucket)
 
 **Фотокачество на совместимых чернилах.** Программа печати для Windows: точный цвет, печать без полей, умное кадрирование и подготовка заказов для небольших копицентров, фотосалонов и профессиональных печатников. Каждый отпечаток дешевле.
 
 **Легально, без взломов и вирусов.** Бесплатно для личного использования и для одного рабочего места. [Скачать для Windows](https://github.com/ildargiv/KopiTehnik-Print/releases/latest) · 15 языков интерфейса · Python не нужен
 
 <p align="center"><img src="docs/screenshots/main-window.png" width="900" alt="KopiTehnik Print: фото в рамке кадрирования, формат печати и профиль принтера в одном окне"></p>
+
+## Установка
+
+| Способ | Что даёт | Команда |
+|---|---|---|
+| **Установщик** | ярлык в меню «Пуск», запись в «Установке и удалении программ» | [Скачать Setup](https://github.com/ildargiv/KopiTehnik-Print/releases/latest) |
+| **Portable** | один exe, ничего не пишется в реестр | [Скачать Portable](https://github.com/ildargiv/KopiTehnik-Print/releases/latest) |
+| **Scoop** | portable-сборка в `~/scoop`, обновление через `scoop update` | `scoop bucket add ildargiv https://github.com/ildargiv/scoop-bucket`, затем `scoop install kopitehnik-print` |
+| **ИИ-агент (MCP)** | программу подключает Claude Desktop или любой MCP-клиент | `uvx kopitehnik-print-mcp` |
+
+Python для самой программы не нужен — это готовая сборка для Windows. Пакет на PyPI — только тонкий лаунчер для MCP-клиентов: он находит установленный агент и передаёт ему stdio.
 
 ## Почему KopiTehnik Print
 
