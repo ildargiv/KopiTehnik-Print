@@ -360,6 +360,7 @@ class QuickChat(QWidget):
         lay.setSpacing(4)
         lay.addLayout(top)
         lay.addWidget(self.l)
+        self.restyle()                                          # сразу: иначе до первого sync() поле белое с светлым текстом
 
     def restyle(self):
         import photo_crop_qt as q
