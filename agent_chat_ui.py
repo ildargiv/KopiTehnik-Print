@@ -9,6 +9,7 @@ import threading
 from pathlib import Path
 
 from PySide6.QtCore import Qt, Signal, QObject
+from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import (QPlainTextEdit, QWidget, QVBoxLayout, QHBoxLayout, QTextBrowser, QLineEdit, QPushButton, QLabel,
                                QMessageBox, QFileDialog, QComboBox)
 
@@ -57,6 +58,7 @@ def system_prompt(lang):
 
 
 # Быстрые кнопки: (подпись, задание агенту, группы инструментов, запрет печати). Автоматика здесь разрешена: человек сам нажал кнопку.
+# «Печать» и «Стоп» отдельными кнопками не нужны: большая «Печать» стоит рядом, а кнопка отправки на время работы становится «Стоп».
 _SCOPE = "the checked photos (or all open photos if none are checked)"
 QUICK = {
     "improve": ("Улучшить",
@@ -72,9 +74,6 @@ QUICK = {
                 "Prepare %s for printing: first do the smart crop, then the high-level colour improvement (see the tasks: for each photo analyze_photo, "
                 "set_adjust per colour channel, verify), then run preflight and report problems. Do NOT print." % _SCOPE,
                 ("prepare", "color", "auto", "profiles", "print"), True),
-    "print": ("Печать",
-              "Print %s now: run preflight first; if there are no errors, call print_photos. Report what was sent." % _SCOPE,
-              ("prepare", "profiles", "print"), False),
 }
 
 
@@ -102,44 +101,16 @@ class ChatDock(QWidget):
         self.log.setOpenExternalLinks(False)
         self.l_status = QLabel("")
         self.l_status.setWordWrap(True)
-        self.edit = QLineEdit()
-        self.edit.setPlaceholderText(_tr("Напишите задание, например: распечатай папку …"))
-        self.edit.returnPressed.connect(self.send)
-        self.b_send = QPushButton(_tr("Отправить"))
-        self.b_send.clicked.connect(self.send)
-        self.quick_btns = {}
-        for key, (title, _p, _g, _b) in QUICK.items():
-            b = QPushButton(_tr(title))
-            b.setMinimumHeight(34)
-            b.clicked.connect(lambda _=False, k=key: self.quick(k))
-            self.quick_btns[key] = b
-        self.b_stop = QPushButton(_tr("Стоп"))
-        self.b_stop.clicked.connect(self.stop)
-        self.b_stop.setEnabled(False)
-        self.b_new = QPushButton(_tr("Заново"))
-        self.b_new.clicked.connect(self.reset)
-        self.b_back = QPushButton(_tr("Откатить"))
-        self.b_back.setToolTip(_tr("Отменить всё, что агент изменил в окне с начала диалога"))
-        self.b_back.clicked.connect(self.rollback)
-        for b in (self.b_send, self.b_stop, self.b_new, self.b_back):
-            b.setMinimumHeight(34)                              # подписи не режутся: кнопки делят ширину панели по две в ряду
-        qrow1, qrow2 = QHBoxLayout(), QHBoxLayout()
-        qrow1.addWidget(self.quick_btns["improve"], 1)
-        qrow1.addWidget(self.quick_btns["crop"], 1)
-        qrow2.addWidget(self.quick_btns["prepare"], 1)
-        qrow2.addWidget(self.quick_btns["print"], 1)
-        row1, row2 = QHBoxLayout(), QHBoxLayout()
-        row1.addWidget(self.b_send, 1)
-        row1.addWidget(self.b_stop, 1)
-        row2.addWidget(self.b_new, 1)
-        row2.addWidget(self.b_back, 1)
+        # Во вкладке только история и две служебные кнопки: поле ввода, быстрые кнопки и «Стоп» живут в окошке под вкладками (QuickChat).
+        self.b_new = small_btn(_tr("Заново"), self.reset, _tr("Начать новый диалог"))
+        self.b_back = small_btn(_tr("Откатить"), self.rollback, _tr("Отменить всё, что агент изменил в окне с начала диалога"))
+        row = QHBoxLayout()
+        row.setSpacing(4)
+        row.addWidget(self.b_new, 1)
+        row.addWidget(self.b_back, 1)
         lay.addWidget(self.log, 1)
         lay.addWidget(self.l_status)
-        lay.addLayout(qrow1)
-        lay.addLayout(qrow2)
-        lay.addWidget(self.edit)
-        lay.addLayout(row1)
-        lay.addLayout(row2)
+        lay.addLayout(row)
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
         outer.addWidget(w)
@@ -149,6 +120,8 @@ class ChatDock(QWidget):
     def sync(self):
         """Показывает вкладку и кнопку в шапке, только если агент включён в настройках."""
         import photo_crop_qt as q
+        for b in (self.b_new, self.b_back):
+            restyle_small(b)
         self.log.setStyleSheet("QTextBrowser { background: %s; color: %s; border: 1px solid %s; border-radius: 8px; padding: 6px; }"
                                % (q.T["surface"], q.T["text"], q.T["border"]))
         on = bool(self.win.settings.get("chat_enabled", False))
@@ -262,27 +235,25 @@ class ChatDock(QWidget):
         title, prompt, groups, block = QUICK[key]
         self.send(prompt, shown=_tr(title), groups=list(groups), block_print=block)
 
-    def send(self, text=None, shown=None, groups=None, block_print=False):
-        text = (text if isinstance(text, str) else self.edit.text()).strip()
+    def send(self, text, shown=None, groups=None, block_print=False):
+        text = (text or "").strip()
         st = self.win.settings
         if not text or self.busy:
             return
         if not st.get("chat_url"):
             QMessageBox.information(self.win, _tr(TITLE), _tr("Укажите адрес модели в Настройках → Агент «Печатник»."))
             return
-        self.edit.clear()
         self._add("you", shown or text)
         if self.agent is None:
             self.agent = self._build()
         self.busy = True
-        self.b_stop.setEnabled(True)
         self.l_status.setText(_tr("Думаю…"))
         self._set_busy(True)
         threading.Thread(target=self._work, args=(text, groups, block_print), daemon=True).start()
 
     def _set_busy(self, on):
-        for b in self.quick_btns.values():
-            b.setEnabled(not on)
+        self.b_back.setEnabled(not on)
+        self.b_new.setEnabled(not on)
         q = getattr(self.win, "quick_chat", None)
         if q is not None:
             q.set_busy(on)
@@ -300,7 +271,6 @@ class ChatDock(QWidget):
 
     def _on_reply(self, text):
         self.busy = False
-        self.b_stop.setEnabled(False)
         self._set_busy(False)
         self.l_status.setText("")
         self._add("agent", text)
@@ -382,6 +352,25 @@ def settings_card(dlg):
                         "Агент видит только рабочую папку и папки, которые вы разрешили.", "muted", wrap=True))
 
 
+def small_btn(text, slot, tip=""):
+    """Компактная кнопка агента (ниже и мельче обычных кнопок окна)."""
+    b = QPushButton(text)
+    b.setFixedHeight(24)
+    b.setToolTip(tip)
+    b.setCursor(Qt.PointingHandCursor)
+    b.clicked.connect(lambda _=False: slot())
+    restyle_small(b)
+    return b
+
+
+def restyle_small(b):
+    import photo_crop_qt as q
+    t = q.T
+    b.setStyleSheet("QPushButton { background: %s; color: %s; border: 1px solid %s; border-radius: 6px; padding: 0 6px; font-size: 12px; }"
+                    "QPushButton:hover { border-color: %s; } QPushButton:disabled { color: %s; }"
+                    % (t["raised"], t["text"], t["border"], t["text"], t["muted"]))
+
+
 class QuickChat(QWidget):
     """Маленькое окно агента на две строки под вкладками: писать можно с любой вкладки. Enter отправляет, Shift+Enter — новая строка.
     Ответ коротко показан под полем, вся история во вкладке «Агент»."""
@@ -400,11 +389,8 @@ class QuickChat(QWidget):
         chips = QHBoxLayout()
         chips.setContentsMargins(0, 0, 0, 0)
         chips.setSpacing(4)
-        for key in ("improve", "crop", "prepare"):
-            c = QPushButton(_tr(QUICK[key][0]))
-            c.setMinimumHeight(28)
-            c.setStyleSheet("QPushButton { padding: 2px 6px; font-size: 12px; }")
-            c.clicked.connect(lambda _=False, k=key: self.chat.quick(k))
+        for key in QUICK:
+            c = small_btn(_tr(QUICK[key][0]), lambda k=key: self.chat.quick(k), _tr(QUICK[key][0]))
             chips.addWidget(c, 1)
             self.chips[key] = c
         self.l = QLabel("")
@@ -418,8 +404,8 @@ class QuickChat(QWidget):
         lay = QVBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(4)
-        lay.addLayout(chips)
         lay.addLayout(top)
+        lay.addLayout(chips)                                    # быстрые кнопки под полем ввода
         lay.addWidget(self.l)
         self.restyle()                                          # сразу: иначе до первого sync() поле белое с светлым текстом
 
@@ -428,8 +414,10 @@ class QuickChat(QWidget):
         self.edit.setStyleSheet("QPlainTextEdit { background: %s; color: %s; border: 1px solid %s; border-radius: 8px; padding: 4px 6px; }"
                                 % (q.T["surface"], q.T["text"], q.T["border"]))
         self.b.setIcon(q.icon("sparkle", q.T["accent_text"]))
-        self.b.setStyleSheet("QPushButton { background: %s; color: %s; border: 1px solid %s; border-radius: 8px; font-size: 16px; }"
+        self.b.setStyleSheet("QPushButton { background: %s; color: %s; border: 1px solid %s; border-radius: 8px; font-size: 12px; }"
                              "QPushButton:hover { border-color: %s; }" % (q.T["accent"], q.T["accent_text"], q.T["accent"], q.T["text"]))
+        for c in self.chips.values():
+            restyle_small(c)
 
     def set_busy(self, on):
         """Пока агент работает, кнопка отправки становится «Стоп», а быстрые кнопки недоступны."""
@@ -437,7 +425,11 @@ class QuickChat(QWidget):
             c.setEnabled(not on)
         self.b.setToolTip(_tr("Стоп") if on else _tr("Отправить агенту (Enter)"))
         self.b.setText(_tr("Стоп") if on else "")                # значка «стоп» в наборе иконок нет, пишем слово
-        self.b.setFixedWidth(64 if on else 34)
+        if on:
+            self.b.setIcon(QIcon())
+        else:
+            self.restyle()
+        self.b.setFixedWidth(56 if on else 34)
         self.stop_mode = on
 
     stop_mode = False
