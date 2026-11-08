@@ -377,6 +377,6 @@ def _is_local(url):
         return True                                              # localhost, имя из локальной сети
     try:
         ip = ipaddress.ip_address(host)
-        return ip.is_private or ip.is_loopback
+        return not ip.is_global                                   # частные, loopback и Tailscale (100.64.0.0/10)
     except ValueError:
         return host.endswith((".local", ".lan", ".home", ".internal"))

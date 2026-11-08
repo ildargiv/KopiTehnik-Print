@@ -167,6 +167,12 @@ class ChatTest(unittest.TestCase):
         a.say("x")
         self.assertEqual(cmds, [])
 
+    def test_local_hosts_skip_system_proxy(self):
+        for u in ("http://100.89.182.113:8080/v1", "http://192.168.1.5/v1", "http://localhost:8080/v1", "http://myhost:8090/v1"):
+            self.assertTrue(ac._is_local(u), u)
+        for u in ("http://8.8.8.8/v1", "https://api.example.com/v1"):
+            self.assertFalse(ac._is_local(u), u)
+
     def test_bad_arguments_json(self):
         a = ac.Agent(Stub([]), self.gate, lambda r: {"ok": True})
         out = json.loads(a._run({"function": {"name": "preflight", "arguments": "{bad"}}))
