@@ -8865,7 +8865,7 @@ pc.EN_FMT.update({
     "{n} фото на листе, ячейка {w}×{h} мм": "{n} photos per sheet, cell {w}×{h} mm", "Белое поле {m} мм вокруг каждого фото": "White border {m} mm around each photo",
     "Листов к печати: {n}": "Sheets to print: {n}", "Сохранить листы · {n}": "Save sheets · {n}", "Сохраняю листы: {n}": "Saving sheets: {n}",
     "Готовлю листы к печати: {n}": "Preparing sheets for print: {n}",
-    "{n} из {m} отмечено": "{n} of {m} checked", "Сохранить отмеченные · {n}": "Save checked · {n}", "Сохранить · {n}": "Save · {n}", "Сохранить": "Save",
+    "{n} из {m} отмечено": "{n} of {m} checked", "Сохранить отмеченные · {n}": "Save checked · {n}", "Сохранить · {n}": "Save · {n}", "Стоп": "Stop", "Подготовить": "Prepare", "Заново": "Restart", "Откатить": "Undo agent changes", "Отправить": "Send", "Сохранить": "Save",
     "Сохраняю: {n}": "Saving: {n}", "Готово: {n} файл(ов)": "Done: {n} file(s)", "На печать: {n} фото": "To print: {n} photos",
 })
 

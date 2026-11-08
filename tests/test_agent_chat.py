@@ -173,6 +173,19 @@ class ChatTest(unittest.TestCase):
         for u in ("http://8.8.8.8/v1", "https://api.example.com/v1"):
             self.assertFalse(ac._is_local(u), u)
 
+    def test_quick_groups_and_block_print(self):
+        spec = {n: ("d", []) for n in ("open_folder", "auto_crop", "set_adjust", "print_photos", "preflight", "analyze_photo", "list_printers")}
+        ran = []
+        gate = ac.ToolGate(spec, roots=[])
+        a = ac.Agent(Stub([("auto_crop", {}), ("print_photos", {}), "ok", "ok2"]), gate, lambda r: ran.append(r["cmd"]) or {"ok": True},
+                     confirm=lambda t: True)
+        a.say("prepare", groups=["prepare", "color", "auto", "print"], block_print=True)
+        self.assertEqual(ran, ["auto_crop"])                      # автоматика доступна, печать запрещена
+        self.assertNotIn("print_photos", gate.names)
+        a.say("print", groups=["prepare", "print"], block_print=False)
+        self.assertIn("print_photos", gate.names)
+        self.assertNotIn("auto_crop", gate.names)
+
     def test_bad_arguments_json(self):
         a = ac.Agent(Stub([]), self.gate, lambda r: {"ok": True})
         out = json.loads(a._run({"function": {"name": "preflight", "arguments": "{bad"}}))

@@ -21,6 +21,7 @@ GROUPS = {
     "profiles": ["list_icc_profiles", "set_color_profile", "get_color_profile", "printer_correction", "list_printers", "select_printer",
                  "driver_capabilities", "set_print_options", "get_print_options", "add_edge_test"],
     "print": ["plan_print", "render_sheet", "preflight", "print_photos", "doc_print", "print_status", "print_stats"],
+    "auto": ["auto_crop", "auto_adjust", "auto_levels", "enhance"],          # автоматика: только по кнопкам «Улучшить», «Кадрировать» и по просьбе
     "queue": ["printer_status", "queue", "jobs", "job_status", "wait_queue", "cancel_job"],
 }
 CONTROL = ["ask_user", "need_tools"]                             # всегда доступно
@@ -59,6 +60,7 @@ class ToolGate:
         self.required = required or {}
         self.groups = []
         self.names = set()
+        self.block_print = False                                  # на время «Подготовить к печати»: печатать нельзя
         self.set_groups(groups if groups is not None else list(GROUPS))
         self.roots = [r for r in roots if r]
         self.policy = {"print_mode": "ask", "allow_print": True, "max_sheets": 0, **(policy or {})}
@@ -69,6 +71,8 @@ class ToolGate:
         for g in self.groups:
             names.update(GROUPS[g])
         self.names = {n for n in names if n not in NEVER and (n in self.spec or n in CONTROL or n in MACROS)}
+        if self.block_print:
+            self.names -= PRINT_TOOLS
 
     def add_group(self, g):
         if g in GROUPS and g not in self.groups:
@@ -110,6 +114,8 @@ class ToolGate:
         if name not in self.names:
             return "tool '%s' is not available" % name
         if name in PRINT_TOOLS:
+            if self.block_print:
+                return "printing is not part of this task"
             if not self.policy["allow_print"] or self.policy["print_mode"] == "off":
                 return "printing by the agent is disabled in settings"
         bad = self.path_violation(args)
@@ -169,13 +175,19 @@ class Agent:
     def stop(self):
         self.stopped = True
 
-    def say(self, text):
-        """Реплика человека -> ответ агента (текст). Выполняет вызовы инструментов, пока модель их просит."""
+    def say(self, text, groups=None, block_print=False):
+        """Реплика человека -> ответ агента (текст). Выполняет вызовы инструментов, пока модель их просит.
+        groups: набор инструментов для быстрой кнопки вместо маршрутизатора; block_print: запретить печать на этот запрос."""
         self.stopped = False
+        self.gate.block_print = block_print
         if self.undo_base is None and self.undo_depth:
             self.undo_base = self.undo_depth()
-        if self.route:
+        if groups:
+            self.gate.set_groups(groups)
+        elif self.route:
             self.gate.route(text)
+        else:
+            self.gate.set_groups(self.gate.groups)                   # применить block_print
         self.messages.append({"role": "user", "content": text})
         recent = []
         for _ in range(self.max_steps):
