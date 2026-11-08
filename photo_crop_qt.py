@@ -9328,4 +9328,5 @@ def main():
 
 
 if __name__ == "__main__":
+    sys.modules.setdefault("photo_crop_qt", sys.modules["__main__"])     # `import photo_crop_qt` в агенте должен вернуть это же окно с живой темой, а не вторую копию
     main()
