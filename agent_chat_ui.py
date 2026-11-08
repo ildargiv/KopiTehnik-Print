@@ -81,6 +81,27 @@ QUICK = {
 }
 
 
+# Задания для модели со зрением: она сама смотрит на фото (preview_photo inline=true) и решает кадр и цвет.
+VISION = {
+    "improve": "Improve the colour of %s yourself, by eye. For each photo: look at it with preview_photo(photo=N, inline=true), decide what is wrong "
+               "(colour cast, too dark or light, flat, too saturated, skin tones) and fix it with set_adjust (levels for the common/R/G/B rows, "
+               "curves, selcol, temp/tint). Look again with preview_photo and correct until it looks natural; analyze_photo numbers help. "
+               "Report briefly what you changed per photo." % _SCOPE,
+    "crop": "Crop %s yourself, by eye, for the current print format. For each photo: look at it with preview_photo(photo=N, inline=true), decide what "
+            "is important (people, faces, the main subject) and what can be cut (empty edges, distractions), set the frame with set_crop "
+            "(cx, cy, scale, orient), then look again with preview_photo and correct so nothing important is cut. Report briefly per photo." % _SCOPE,
+}
+
+
+def quick_prompt(key, vision):
+    if vision and key in VISION:
+        return VISION[key]
+    if vision and key == "prepare":
+        return "Prepare %s for printing: first crop each photo by eye, then improve the colour by eye (see the tasks: preview_photo inline=true, " \
+               "set_crop, set_adjust per channel, look again), then run preflight and report problems. Do NOT print." % _SCOPE
+    return QUICK[key][1]
+
+
 class _Signals(QObject):
     reply = Signal(str)
     status = Signal(str)
@@ -168,7 +189,7 @@ class ChatDock(QWidget):
         prov = ac.OpenAICompatible(st.get("chat_url", ""), st.get("chat_model", ""), st.get("chat_key", ""))
         return ac.Agent(prov, gate, gui.execute, system_prompt(pc.get_language()), confirm=self._confirm_print, ask=self._ask,
                         allow_path=self._allow_path, log=self._log_call,
-                        undo_depth=lambda: len(self.win._undo))
+                        undo_depth=lambda: len(self.win._undo), vision=bool(st.get("chat_vision", False)))
 
     # ---------- диалоги (вызываются из рабочего потока, показ в потоке окна)
     def describe_print(self, text):
@@ -236,7 +257,8 @@ class ChatDock(QWidget):
     # ---------- чат
     def quick(self, key, extra=""):
         """Быстрая кнопка: готовое задание агенту с нужным набором инструментов. extra — то, что человек набрал в поле (папка, уточнение)."""
-        title, prompt, groups, block = QUICK[key]
+        title, _p, groups, block = QUICK[key]
+        prompt = quick_prompt(key, bool(self.win.settings.get("chat_vision", False)))
         prompt = "Do only this task; earlier requests in this chat are already done, do not repeat them. " + prompt
         extra = (extra or "").strip()
         if extra:
@@ -324,6 +346,7 @@ def settings_card(dlg):
     st = win.settings
     sw_on = q.Switch(st.get("chat_enabled", False))
     sw_dry = q.Switch(st.get("chat_dry", True))
+    sw_vision = q.Switch(st.get("chat_vision", False))
     cb_mode = QComboBox()
     cb_mode.addItem(_tr("Спрашивать перед каждой печатью"), "ask")
     cb_mode.addItem(_tr("Печатать по заданию"), "auto")
@@ -346,6 +369,14 @@ def settings_card(dlg):
 
     sw_on.toggled.connect(toggled)
     sw_dry.toggled.connect(lambda on: put("chat_dry", bool(on)))
+
+    def vision_toggled(on):
+        put("chat_vision", bool(on))
+        dock = getattr(win, "chat_dock", None)
+        if dock:
+            dock.agent = None                                   # новый диалог с новым режимом
+
+    sw_vision.toggled.connect(vision_toggled)
     cb_mode.currentIndexChanged.connect(lambda _i: put("chat_print_mode", cb_mode.currentData()))
     e_url.textEdited.connect(lambda v: put("chat_url", v.strip()))
     e_model.textEdited.connect(lambda v: put("chat_model", v.strip()))
@@ -371,6 +402,9 @@ def settings_card(dlg):
     e_folder.textEdited.connect(lambda v: put("chat_folder", v.strip()))
     return q.card("Агент «Печатник» (эксперимент)", q.row("Включить агента", sw_on),
                   q.row("Адрес модели (OpenAI-совместимый)", e_url), q.row("Имя модели", e_model), q.row("Ключ (если нужен)", e_key),
+                  q.row("Агент видит фото (превью уходят модели)", sw_vision),
+                  q.lbl("Включайте для модели, которая понимает изображения: тогда «Кадрировать» и «Улучшить» агент делает сам, глядя на фото. "
+                        "Превью уходят только на адрес модели выше.", "muted", wrap=True),
                   q.row("Пробный режим: не печатать", sw_dry), q.row("Печать", cb_mode),
                   q.row("Рабочая папка агента", e_folder),
                   q.hbox(q.btn("Создать папку", make_folder), q.btn("Выбрать…", pick_folder), spacing=6), l_note,

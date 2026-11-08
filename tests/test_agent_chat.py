@@ -186,6 +186,22 @@ class ChatTest(unittest.TestCase):
         self.assertIn("print_photos", gate.names)
         self.assertNotIn("auto_crop", gate.names)
 
+    def test_vision_sends_picture_as_image(self):
+        res = {"ok": True, "result": {"photo": "a.jpg", "_image_b64": "QUJD"}}
+        a = ac.Agent(Stub([("preflight", {}), "ok"]), self.gate, lambda r: json.loads(json.dumps(res)), route=False, vision=True)
+        a.say("x")
+        pics = [m for m in a.messages if isinstance(m.get("content"), list)]
+        self.assertEqual(len(pics), 1)
+        self.assertEqual(pics[0]["content"][1]["image_url"]["url"], "data:image/jpeg;base64,QUJD")
+        tool = [m for m in a.messages if m["role"] == "tool"][0]["content"]
+        self.assertNotIn("QUJD", tool)
+
+    def test_no_vision_no_picture(self):
+        res = {"ok": True, "result": {"_image_b64": "QUJD"}}
+        a = ac.Agent(Stub([("preflight", {}), "ok"]), self.gate, lambda r: json.loads(json.dumps(res)), route=False)
+        a.say("x")
+        self.assertFalse([m for m in a.messages if isinstance(m.get("content"), list)])
+
     def test_bad_arguments_json(self):
         a = ac.Agent(Stub([]), self.gate, lambda r: {"ok": True})
         out = json.loads(a._run({"function": {"name": "preflight", "arguments": "{bad"}}))

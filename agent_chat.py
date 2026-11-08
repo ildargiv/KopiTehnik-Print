@@ -16,7 +16,7 @@ RESULT_LIMIT = 3000                                              # знаков 
 # Группы инструментов: модели отдаём только набор под текущую задачу (малой локальной модели 100 команд много).
 GROUPS = {
     "prepare": ["app_state", "prepare_series", "find_problem_photos", "check_photos", "select_photo", "open_folder", "open_files", "list_photos", "photo_info", "set_format", "set_orientation", "set_layout", "set_copies", "doc_open", "doc_info", "doc_set"],
-    "color": ["analyze_photo", "analyze_photos", "set_crop", "move_crop", "rotate_photo", "flip_photo", "set_adjust", "white_balance",
+    "color": ["preview_photo", "analyze_photo", "analyze_photos", "set_crop", "move_crop", "rotate_photo", "flip_photo", "set_adjust", "white_balance",
               "color_presets", "color_preset_apply", "copy_adjust", "paste_adjust", "compare_photo", "contact_sheet", "undo", "redo"],
     "profiles": ["list_icc_profiles", "set_color_profile", "get_color_profile", "printer_correction", "list_printers", "select_printer",
                  "driver_capabilities", "set_print_options", "get_print_options", "add_edge_test"],
@@ -162,7 +162,7 @@ class Agent:
     """Один диалог. confirm(text) -> bool вызывается перед печатью в режиме 'ask'; ask(question, options) -> str для ask_user."""
 
     def __init__(self, provider, gate, execute, system="", confirm=None, ask=None, max_steps=MAX_STEPS, log=None, allow_path=None,
-                 undo_depth=None, route=True):
+                 undo_depth=None, route=True, vision=False):
         self.provider, self.gate, self.execute = provider, gate, execute
         self.confirm, self.ask, self.max_steps, self.log = confirm, ask, max_steps, log
         self.allow_path = allow_path                             # allow_path(path) -> bool: человек разрешает новую папку
@@ -171,6 +171,8 @@ class Agent:
         self.printed_ok = 0
         self.undo_depth, self.undo_base = undo_depth, None      # undo_depth() -> число шагов отмены окна: по ним откатываем действия агента
         self.route = route
+        self.vision = vision                                     # модель видит картинки: превью из ответов инструментов уходят ей изображением
+        self.pending_images = []
         self.user_text = ""                                      # всё, что человек написал в этом диалоге: отсюда «свои» пути
 
     def stop(self):
@@ -211,6 +213,11 @@ class Agent:
                 if len(recent) >= 3 and recent[-1] == recent[-2] == recent[-3]:
                     return "(the agent repeated the same step three times and was stopped; please rephrase the task)"
                 self.messages.append({"role": "tool", "tool_call_id": c.get("id", ""), "content": self._run(c)})
+            for name, b64 in self.pending_images:                # картинки отдельным сообщением: в ответе инструмента их не везде принимают
+                self.messages.append({"role": "user", "content": [
+                    {"type": "text", "text": "Picture returned by %s. Look at it to decide." % name},
+                    {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64," + b64}}]})
+            self.pending_images = []
         return "(step limit reached)"
 
     def user_gave(self, path):
@@ -236,6 +243,9 @@ class Agent:
         for m in tools[:-keep]:
             if len(m["content"]) > limit:
                 m["content"] = m["content"][:limit] + "…"
+        pics = [m for m in self.messages if isinstance(m.get("content"), list)]
+        for m in pics[:-2]:                                      # в истории держим только две последние картинки
+            m["content"] = "(earlier picture removed)"
 
     def rollback(self):
         """Откатывает всё, что агент изменил в окне с начала диалога (шаги Ctrl+Z). Возвращает число шагов."""
@@ -285,6 +295,10 @@ class Agent:
             res = self.execute({"cmd": name, **args})
         except Exception as ex:                                  # noqa: BLE001
             res = {"ok": False, "error": "%s: %s" % (ex.__class__.__name__, ex)}
+        if self.vision:
+            b64 = _take_image(res)
+            if b64:
+                self.pending_images.append((name, b64))
         return json.dumps(_slim(res), ensure_ascii=False, default=str)[:RESULT_LIMIT]
 
     def _call(self, cmd, **args):
@@ -341,6 +355,15 @@ def find_outliers(photos, dark=60, bright=205, clip_pct=8.0, blur_ratio=0.5):
         if why:
             out.append({"index": p.get("index"), "name": p.get("name"), "why": why})
     return out
+
+
+def _take_image(res):
+    """Достаёт картинку (_image_b64) из ответа команды: {"result": {..., "_image_b64": …}} или сам результат."""
+    if not isinstance(res, dict):
+        return None
+    inner = res.get("result") if isinstance(res.get("result"), dict) else res
+    v = inner.pop("_image_b64", None)
+    return v if isinstance(v, str) and v else None
 
 
 def _slim(o):
