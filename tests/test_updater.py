@@ -75,10 +75,18 @@ class UpdaterTest(unittest.TestCase):
 
     def test_script(self):
         s = updater.build_script(r"C:\Temp\Setup.exe", r"C:\Users\Я\KopiTehnik Print\PhotoCropQt.exe", 4321)
-        self.assertIn('IMAGENAME eq PhotoCropQt.exe', s)           # ждём по имени процесса: фоновые копии программы тоже закрываются
-        self.assertIn('"C:\\Temp\\Setup.exe" /SILENT', s)
-        self.assertLess(s.index("/SILENT"), s.rindex('start ""'))      # сначала установка, потом запуск
+        self.assertIn("$name = 'PhotoCropQt'", s)                 # ждём по имени процесса: фоновые копии программы тоже закрываются
+        self.assertIn("'C:\\Temp\\Setup.exe'", s)
+        self.assertIn("/SILENT", s)
+        self.assertLess(s.index("-ArgumentList"), s.rindex("Start-Process"))   # сначала установка, потом запуск
+        self.assertNotIn("RunAs", s)
+        self.assertNotIn("tasklist", s)                             # cmd-цикл с tasklist | find, который зависал, больше не используется
         self.assertTrue(s.endswith("\r\n"))
+
+    def test_script_elevated_and_quotes(self):
+        s = updater.build_script(r"C:\Temp\it's.exe", r"C:\Program Files\KT\PhotoCropQt.exe", 7, admin=True)
+        self.assertIn("-Wait -Verb RunAs", s)
+        self.assertIn("'C:\\Temp\\it''s.exe'", s)
 
     def test_source_run_has_no_self_update(self):
         self.assertIsNone(updater.install_kind())
@@ -97,18 +105,18 @@ class ScriptTest(unittest.TestCase):
                                  result=r"C:\D\KopiTehnik Print\update_result.txt", log=r"C:\D\KopiTehnik Print\update_install.log")
         self.assertIn("-Verb RunAs", s)
         self.assertIn("/ALLUSERS", s)
-        self.assertIn('IMAGENAME eq PhotoCropQt.exe', s)                        # ждём по имени процесса, а не по пути
-        self.assertIn("taskkill.exe /F /IM", s)                                    # зависший фоновый процесс не мешает установке
-        self.assertIn(r'update_result.txt"', s)
+        self.assertIn("$name = 'PhotoCropQt'", s)                      # ждём по имени процесса, а не по пути
+        self.assertIn("Stop-Process -Force", s)                                  # зависший фоновый процесс не мешает установке
+        self.assertIn(r"update_result.txt'", s)
         self.assertIn("update_install.log", s)
-        self.assertLess(s.index("-Verb RunAs"), s.index("echo %RC%"))
-        self.assertLess(s.index("echo %RC%"), s.index('start "" "C:\\Program Files'))   # программа запускается после записи итога
+        self.assertLess(s.index("-Verb RunAs"), s.index("Set-Content"))
+        self.assertLess(s.index("Set-Content"), s.rindex("Start-Process"))       # программа запускается после записи итога
 
     def test_user_script_has_no_uac(self):
         s = updater.build_script(self.SETUP, r"C:\Users\U\AppData\Local\Programs\KopiTehnik Print\PhotoCropQt.exe", 1, admin=False)
         self.assertNotIn("RunAs", s)
         self.assertIn("/CURRENTUSER", s)
-        self.assertIn('start "" /wait "%s"' % self.SETUP, s)
+        self.assertIn("Start-Process -FilePath '%s' -ArgumentList $a -Wait" % self.SETUP, s)
 
     def test_needs_admin_detects_program_files(self):
         import os
