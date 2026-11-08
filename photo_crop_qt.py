@@ -5221,8 +5221,8 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         return " | ".join((self.pr.get("printer", ""), self.s["format"], media))
 
     def profile_title(self, key=None):
-        pr_, fmt, media = (key or self.profile_key()).split(" | ")
-        return " · ".join(x for x in (pr_, fmt, media) if x)
+        parts = (key or self.profile_key()).split(" | ")          # в имени принтера или типе бумаги может встретиться « | »: тогда частей больше трёх
+        return " · ".join(x for x in parts if x)
 
     def _profiles(self):
         return self.settings.setdefault("print_profiles", {})
