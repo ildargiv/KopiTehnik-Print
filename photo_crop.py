@@ -26,6 +26,7 @@ import hashlib
 import ctypes
 import io
 import json
+import app_dirs
 import math
 import os
 import queue
@@ -104,7 +105,7 @@ CMS_BPC, CMS_SOFTPROOF, CMS_GAMUTCHECK = 0x2000, 0x4000, 0x1000   # компен
 UNDO_LIMIT = 500   # шагов отмены
 MIN_SCALE, MAX_SCALE = 0.05, 3.0   # размер рамки относительно максимально вписанной в фото
 
-SETTINGS_PATH = Path(os.environ.get("APPDATA", str(Path.home()))) / "PhotoCrop" / "settings.json"
+SETTINGS_PATH = app_dirs.data_dir() / "settings.json"
 
 
 # ---------------------------------------------------------------- логика
@@ -1916,6 +1917,60 @@ def _win():
             getattr(gd, fn).restype = ctypes.c_int
         _WIN = (wp, gd, wt)
     return _WIN
+
+
+_DRIVER_NAMES = {}
+
+
+def printer_driver_name(name):
+    """Имя драйвера очереди («EPSON L8050 Series»); не меняется, если очередь переименовали. Пустая строка при неудаче."""
+    if name in _DRIVER_NAMES:
+        return _DRIVER_NAMES[name]
+    out = ""
+    try:
+        wp, gd, wt = _win()
+        wp.GetPrinterW.argtypes = [wt.HANDLE, wt.DWORD, ctypes.c_void_p, wt.DWORD, ctypes.POINTER(wt.DWORD)]
+        wp.GetPrinterW.restype = wt.BOOL
+        h = wt.HANDLE()
+        if wp.OpenPrinterW(name, ctypes.byref(h), None):
+            try:
+                need = wt.DWORD(0)
+                wp.GetPrinterW(h, 2, None, 0, ctypes.byref(need))
+                if need.value:
+                    buf = ctypes.create_string_buffer(need.value)
+                    if wp.GetPrinterW(h, 2, buf, need.value, ctypes.byref(need)):
+                        ptrs = ctypes.cast(buf, ctypes.POINTER(ctypes.c_void_p))   # PRINTER_INFO_2W: server, printer, share, port, driver
+                        out = ctypes.wstring_at(ptrs[4]) if ptrs[4] else ""
+            finally:
+                wp.ClosePrinter(h)
+    except Exception:
+        out = ""
+    _DRIVER_NAMES[name] = out
+    return out
+
+
+def printer_port_name(name):
+    """Порт очереди («USB001», «FILE:», «COM1:»); пустая строка при неудаче. Не кешируется: порт могут сменить."""
+    try:
+        wp, gd, wt = _win()
+        wp.GetPrinterW.argtypes = [wt.HANDLE, wt.DWORD, ctypes.c_void_p, wt.DWORD, ctypes.POINTER(wt.DWORD)]
+        wp.GetPrinterW.restype = wt.BOOL
+        h = wt.HANDLE()
+        if not wp.OpenPrinterW(name, ctypes.byref(h), None):
+            return ""
+        try:
+            need = wt.DWORD(0)
+            wp.GetPrinterW(h, 2, None, 0, ctypes.byref(need))
+            if need.value:
+                buf = ctypes.create_string_buffer(need.value)
+                if wp.GetPrinterW(h, 2, buf, need.value, ctypes.byref(need)):
+                    ptrs = ctypes.cast(buf, ctypes.POINTER(ctypes.c_void_p))
+                    return ctypes.wstring_at(ptrs[3]) if ptrs[3] else ""
+        finally:
+            wp.ClosePrinter(h)
+    except Exception:
+        pass
+    return ""
 
 
 def list_printers():
@@ -4214,6 +4269,14 @@ class AgentSession:
         if not ch:
             raise AgentError("Нет полей для изменения.", "bad_request")
         new = devmode_write(self.blob, ch)
+        if "media_type" in ch:
+            try:                                                 # у моделей Epson по рецептам тип бумаги хранится ещё и в приватной зоне
+                import epson_priv
+                ep_ = epson_priv.EpsonPriv(self.printer, driver_name=printer_driver_name(self.printer))
+                if ep_.recipe:
+                    new = ep_.set_media(new, devmode_read(new)["settings"]["media_type"])
+            except Exception:
+                pass
         merged = merge_devmode(self.printer, new)
         after = devmode_read(merged)
         rejected = {}

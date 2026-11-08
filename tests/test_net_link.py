@@ -1,0 +1,355 @@
+import os
+import sys
+import threading
+import time
+
+import pytest
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import net_link as nl
+import multi_print
+
+
+def mk(name, **kw):
+    return nl.Node(name, host="127.0.0.1", port=0, udp_port=0, **kw).start()
+
+
+def pair(a, b):
+    code = b.open_pairing()
+    a.pair("127.0.0.1", code, b.port)
+    return code
+
+
+def wait(cond, t=5.0):
+    end = time.time() + t
+    while time.time() < end:
+        if cond():
+            return True
+        time.sleep(0.05)
+    return False
+
+
+@pytest.fixture
+def nodes():
+    made = []
+
+    def make(name, **kw):
+        n = mk(name, **kw)
+        made.append(n)
+        return n
+    yield make
+    for n in made:
+        n.stop()
+
+
+def test_pairing_and_presence(nodes):
+    events = []
+    a = nodes("A", on_event=lambda k, i: events.append((k, i.get("online"))))
+    b = nodes("B")
+    pair(a, b)
+    assert wait(lambda: a.online(b.id) and b.online(a.id))
+    assert b.peers_paired[a.id]["key"] == a.peers_paired[b.id]["key"]
+    assert ("presence", True) in events
+    b.sessions[a.id].close()
+    assert wait(lambda: not a.online(b.id))
+    assert wait(lambda: ("presence", False) in events)      # событие уходит чуть позже, чем сессия снята
+
+
+def test_pairing_wrong_code_and_closed(nodes):
+    a, b = nodes("A"), nodes("B")
+    with pytest.raises(nl.NetError):
+        a.pair("127.0.0.1", nl.new_code(), b.port)        # спаривание не открыто
+    b.open_pairing()
+    with pytest.raises(nl.NetError):
+        a.pair("127.0.0.1", nl.new_code(), b.port)        # чужой код
+    assert not a.peers_paired and not b.peers_paired
+
+
+def test_unpaired_node_rejected_and_forget(nodes):
+    a, b, c = nodes("A"), nodes("B"), nodes("C")
+    pair(a, b)
+    assert wait(lambda: a.online(b.id))
+    c.peers_paired[b.id] = {"name": "B", "key": nl.new_code(), "addr": "127.0.0.1", "port": b.port}
+    time.sleep(0.5)
+    assert not c.online(b.id)
+    b.forget(a.id)
+    assert wait(lambda: not a.online(b.id))
+    time.sleep(3.5)                                        # a пробует переподключиться, но b ключ забыл
+    assert not a.online(b.id)
+
+
+def test_submit_dedup_and_events(nodes):
+    printed = []
+    got = []
+    b = nodes("B", print_sheet=lambda m, d: printed.append((m["printer"], d)),
+              on_event=lambda k, i: got.append(k))
+    a = nodes("A")
+    pair(a, b)
+    assert wait(lambda: a.online(b.id))
+    a.send_sheet(b.id, "Epson", "j1", "s1", b"x" * 100000, total=2)
+    s = a.sessions[b.id]
+    h, _ = s.call("submit", {"printer": "Epson", "job_id": "j1", "sheet_id": "s1", "total": 2}, b"x")
+    assert h["duplicate"] and len(printed) == 1                       # повтор не печатается
+    a.send_sheet(b.id, "Epson", "j1", "s2", b"y", total=2)
+    assert len(printed) == 2
+    assert got.count("job_received") == 1                              # уведомление один раз на задание
+
+
+def test_limits_and_switch(nodes):
+    printed = []
+    b = nodes("B", print_sheet=lambda m, d: printed.append(1), max_sheets=3)
+    a = nodes("A")
+    pair(a, b)
+    assert wait(lambda: a.online(b.id))
+    with pytest.raises(nl.NetError):
+        a.send_sheet(b.id, "P", "big", "s1", b"x", total=4)
+    b.shared = {"Open"}
+    with pytest.raises(nl.NetError):
+        a.send_sheet(b.id, "Closed", "j", "s1", b"x")
+    a.send_sheet(b.id, "Open", "j", "s2", b"x")
+    b.net_enabled = False
+    with pytest.raises(nl.NetError):
+        a.send_sheet(b.id, "Open", "j", "s3", b"x")
+    assert len(printed) == 1
+
+
+def test_printer_failure_reported(nodes):
+    def boom(m, d):
+        raise RuntimeError("нет бумаги")
+    b = nodes("B", print_sheet=boom)
+    a = nodes("A")
+    pair(a, b)
+    assert wait(lambda: a.online(b.id))
+    with pytest.raises(nl.NetError, match="нет бумаги"):
+        a.send_sheet(b.id, "P", "j", "s1", b"x")
+
+
+def test_one_queue_per_printer(nodes):
+    active, peak = [0], [0]
+
+    def slow(m, d):
+        active[0] += 1
+        peak[0] = max(peak[0], active[0])
+        time.sleep(0.1)
+        active[0] -= 1
+    b = nodes("B", print_sheet=slow)
+    a = nodes("A")
+    pair(a, b)
+    assert wait(lambda: a.online(b.id))
+    ts = [threading.Thread(target=a.send_sheet, args=(b.id, "P", "j", f"s{i}", b"x", 4)) for i in range(4)]
+    [t.start() for t in ts]
+    [t.join() for t in ts]
+    assert peak[0] == 1
+
+
+def test_printer_state_and_chat(nodes):
+    chats = []
+    b = nodes("B", on_event=lambda k, i: chats.append(i) if k == "chat" else None)
+    a = nodes("A")
+    pair(a, b)
+    assert wait(lambda: a.online(b.id) and b.online(a.id))
+    b.publish_state("Epson", "attention", "нет бумаги")
+    assert wait(lambda: a.peer_state.get(b.id, {}).get("Epson", {}).get("level") == "attention")
+    a.chat_send(b.id, "жду фото", user="Аня")
+    assert wait(lambda: chats and chats[0]["text"] == "жду фото" and chats[0]["user"] == "Аня")
+    # офлайн: сообщение ждёт в очереди и доходит после переподключения
+    a.sessions[b.id].close()
+    assert wait(lambda: not a.online(b.id))
+    a.chat_send(b.id, "второе")
+    assert wait(lambda: len(chats) == 2, 10)
+
+
+def test_outcome_unknown_on_drop(nodes):
+    release = threading.Event()
+
+    def hang(m, d):
+        release.wait(5)
+    b = nodes("B", print_sheet=hang)
+    a = nodes("A")
+    pair(a, b)
+    assert wait(lambda: a.online(b.id))
+    threading.Timer(0.5, lambda: (a.sessions[b.id].close(), b.forget(a.id))).start()
+    with pytest.raises(nl.OutcomeUnknown):
+        a.send_sheet(b.id, "P", "j", "s1", b"x", timeout=3)
+    release.set()
+
+
+def test_tampered_frame_detected(nodes):
+    a, b = nodes("A"), nodes("B")
+    pair(a, b)
+    assert wait(lambda: a.online(b.id))
+    s = a.sessions[b.id]
+    s.ch.seq_out += 1                  # рассинхрон номера кадра = повтор/подмена
+    with pytest.raises(nl.NetError):
+        s.call("ping", timeout=2)
+    assert wait(lambda: not b.online(a.id))
+
+
+def test_discovery_and_remote_send_with_multirun(nodes):
+    import socket
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    s.bind(("127.0.0.1", 0))
+    port = s.getsockname()[1]
+    s.close()
+    printed, local = [], []
+    b = nodes("B", print_sheet=lambda m, d: printed.append(d))
+    a = nodes("A")
+    a.udp_port = b.udp_port = port
+    a.listen_discovery()
+    b.announce("127.0.0.1")
+    assert wait(lambda: b.id in a.found)
+    assert a.found[b.id]["port"] == b.port
+    pair(a, b)
+    assert wait(lambda: a.online(b.id))
+    remote = a.remote_send(b.id)
+
+    def send(printer, sheet):
+        if printer == "remote":
+            remote(printer, sheet)
+        else:
+            time.sleep(0.3)                  # медленный локальный принтер: часть листов уйдёт на удалённый
+            local.append(sheet)
+    multi_print.MultiRun([b"s1", b"s2", b"s3", b"s4"], ["local", "remote"], send).run()
+    assert len(printed) + len(local) == 4 and printed
+
+
+def test_pair_request_with_pin(nodes):
+    a, b = nodes("A"), nodes("B")
+    events, shown = [], []
+    b.on_event = lambda k, i: events.append((k, i))
+    res = {}
+    t = threading.Thread(target=lambda: res.setdefault("pid", a.request_pair("127.0.0.1", b.port, on_code=shown.append)))
+    t.start()
+    assert wait(lambda: b.pending_pair_requests() and shown)
+    req = b.pending_pair_requests()[0]
+    assert req["peer_id"] == a.id
+    assert not b.answer_pair(req["id"], "12")             # не 6 цифр
+    wrong = "%06d" % ((int(shown[0]) + 1) % 1000000)
+    assert b.answer_pair(req["id"], wrong)
+    assert wait(lambda: any(k == "pair_result" and i.get("retry") for k, i in events))
+    assert b.answer_pair(req["id"], shown[0][:3] + " " + shown[0][3:])
+    t.join(10)
+    assert res["pid"] == b.id
+    assert a.peers_paired[b.id]["key"] == b.peers_paired[a.id]["key"]
+    assert wait(lambda: a.online(b.id) and b.online(a.id))
+
+
+def test_pair_request_three_wrong_and_deny(nodes):
+    a, b = nodes("A"), nodes("B")
+    shown, errs = [], []
+
+    def go():
+        try:
+            a.request_pair("127.0.0.1", b.port, on_code=shown.append)
+        except nl.NetError as e:
+            errs.append(str(e))
+    t = threading.Thread(target=go)
+    t.start()
+    assert wait(lambda: b.pending_pair_requests() and shown)
+    rid = b.pending_pair_requests()[0]["id"]
+    wrong = "%06d" % ((int(shown[0]) + 1) % 1000000)
+    for _ in range(3):
+        b.answer_pair(rid, wrong)
+        time.sleep(0.8)
+    t.join(10)
+    assert errs and "неверных" in errs[0]
+    assert not a.peers_paired and not b.peers_paired
+    # отклонение
+    errs.clear()
+    shown.clear()
+    t = threading.Thread(target=go)
+    t.start()
+    assert wait(lambda: b.pending_pair_requests() and shown)
+    b.deny_pair(b.pending_pair_requests()[0]["id"])
+    t.join(10)
+    assert errs and "отклонил" in errs[0]
+
+
+def test_found_ttl_probe(nodes):
+    a, b = nodes("A"), nodes("B")
+    info = a.probe("127.0.0.1", b.port)
+    assert info["id"] == b.id and info["name"] == "B"
+    a._note_found(b.id, "B", "127.0.0.1", b.port)
+    assert [x["id"] for x in a.found_list()] == [b.id]
+    a.found[b.id]["seen"] -= nl.FOUND_TTL + 1
+    assert a.found_list() == []
+
+
+def test_pair_request_leaks_nothing_before_code(nodes):
+    """Принимающий ПК не шлёт проверочных данных, пока человек не ввёл код: офлайн-подбор невозможен."""
+    import socket
+    b = nodes("B")
+    s = socket.create_connection(("127.0.0.1", b.port), timeout=3)
+    ch = nl.Channel(s)
+    priv, pub = nl.dh_keypair(nl.pake_gen("123456"))
+    ch.send({"t": "hello", "proto": nl.PROTO, "mode": "preq", "id": "evil", "name": "Борис", "nonce": "00", "dh": "%x" % pub, "port": 1})
+    r, _ = ch.recv()
+    assert r["t"] == "preq_ok" and set(r) == {"t", "id", "name"}
+    s.settimeout(0.8)
+    with pytest.raises(OSError):
+        ch.recv()                                         # дальше тишина до ввода кода человеком
+    s.close()
+    assert wait(lambda: not b.pending_pair_requests())
+
+
+def test_pair_request_spam_limited(nodes):
+    import socket
+    b = nodes("B")
+    socks = []
+    for i in range(nl.PREQ_PER_MIN + 4):
+        s = socket.create_connection(("127.0.0.1", b.port), timeout=3)
+        ch = nl.Channel(s)
+        _, pub = nl.dh_keypair(nl.pake_gen("111111"))
+        ch.send({"t": "hello", "proto": nl.PROTO, "mode": "preq", "id": "e%d" % i, "name": "x", "nonce": "00", "dh": "%x" % pub, "port": 1})
+        r, _ = ch.recv()
+        socks.append((s, r))
+    assert len(b.pending_pair_requests()) <= 1               # с одного адреса одновременно только один запрос
+    assert sum(1 for _, r in socks if r["t"] == "preq_ok") == 1
+    [s.close() for s, _ in socks]
+
+
+def test_garbage_header_and_self_connect(nodes):
+    import socket
+    a = nodes("A")
+    s = socket.create_connection(("127.0.0.1", a.port), timeout=3)
+    nl.Channel(s).send([])                                   # не объект: узел не падает
+    s.close()
+    time.sleep(0.3)
+    assert a.probe("127.0.0.1", a.port)["id"] == a.id        # и продолжает отвечать
+    a.peers_paired[a.id] = {"name": "я", "key": "k", "addr": "127.0.0.1", "port": a.port}
+    a._connect(a.id)
+    assert not a.online(a.id)
+
+
+def test_many_files_sent_once_each(nodes, tmp_path):
+    b = nodes("B")
+    b.file_dir = str(tmp_path / "in")
+    a = nodes("A")
+    pair(a, b)
+    assert wait(lambda: a.online(b.id) and b.online(a.id))
+    files = []
+    for i in range(12):
+        f = tmp_path / ("f%d.bin" % i)
+        f.write_bytes(os.urandom(2000) + bytes([i]))
+        files.append(f)
+        a.chat_send(b.id, "", file=str(f))
+    assert wait(lambda: sum(1 for m in b.inbox if m.get("att")) == 12, 15)
+    time.sleep(1.0)
+    saved = [p for _, _, fs in os.walk(b.file_dir) for p in fs]
+    assert len(saved) == 12 and len(b.inbox) == 12
+
+
+def test_safe_filename_tricks():
+    assert nl.safe_filename("photo‮gpj.exe") == "photo_gpj.exe"
+    assert nl.safe_filename("CON.txt") == "_CON.txt"
+    assert nl.safe_filename("../../x.jpg") == "x.jpg"
+    assert nl.safe_filename("a. ") == "a"
+
+
+def test_repair_keeps_flags(nodes):
+    a, b = nodes("A"), nodes("B")
+    pair(a, b)
+    a.peers_paired[b.id].update(alias="Касса", hidden=True, trusted=False)
+    pair(a, b)
+    p = a.peers_paired[b.id]
+    assert p["alias"] == "Касса" and p["hidden"] and p["trusted"] is False

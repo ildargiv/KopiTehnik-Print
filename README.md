@@ -2,13 +2,24 @@
 
 # KopiTehnik Print
 
-[![license](https://img.shields.io/badge/license-free%20for%20one%20workstation-2E7D32.svg)](https://github.com/ildargiv/KopiTehnik-Print/blob/main/LICENSE) [![release](https://img.shields.io/github/v/release/ildargiv/KopiTehnik-Print?label=release)](https://github.com/ildargiv/KopiTehnik-Print/releases/latest) ![Windows](https://img.shields.io/badge/Windows-10%20%7C%2011-0078D4) ![MCP](https://img.shields.io/badge/MCP-server-6E4AFF)
+[![license](https://img.shields.io/badge/license-free%20for%20one%20workstation-2E7D32.svg)](https://github.com/ildargiv/KopiTehnik-Print/blob/main/LICENSE) [![release](https://img.shields.io/github/v/release/ildargiv/KopiTehnik-Print?label=release)](https://github.com/ildargiv/KopiTehnik-Print/releases/latest) ![Windows](https://img.shields.io/badge/Windows-10%20%7C%2011-0078D4) ![MCP](https://img.shields.io/badge/MCP-server-6E4AFF) [![PyPI](https://img.shields.io/pypi/v/kopitehnik-print-mcp.svg)](https://pypi.org/project/kopitehnik-print-mcp/) [![scoop](https://img.shields.io/badge/scoop-kopitehnik--print-2E7D32)](https://github.com/ildargiv/scoop-bucket)
 
 **Photo quality on compatible ink.** Print software for Windows: accurate colour, borderless printing, smart cropping and order preparation for small copy centers, photo desks and professional printers. Every print costs less.
 
 **Free, legal, no cracks, no malware.** Free for personal use and for a single workstation: copy shop, studio, workshop or independent printer. [Download for Windows](https://github.com/ildargiv/KopiTehnik-Print/releases/latest) · 15 interface languages · no Python needed
 
 <p align="center"><img src="docs/screenshots/main-window.png" width="900" alt="KopiTehnik Print: a photo in the crop frame, the print format and the printer profile in one window"></p>
+
+## Install
+
+| Way | What you get | Command |
+|---|---|---|
+| **Installer** | Start-menu shortcut and an uninstaller entry | [Download Setup](https://github.com/ildargiv/KopiTehnik-Print/releases/latest) |
+| **Portable** | One exe, nothing written to the registry | [Download Portable](https://github.com/ildargiv/KopiTehnik-Print/releases/latest) |
+| **Scoop** | Portable build in `~/scoop`, updates with `scoop update` | `scoop bucket add ildargiv https://github.com/ildargiv/scoop-bucket` then `scoop install kopitehnik-print` |
+| **AI agent (MCP)** | The same program driven by Claude Desktop or any MCP client | `uvx kopitehnik-print-mcp` |
+
+No Python is needed for the app itself: the download is a ready-made Windows build. The PyPI package is only a thin launcher for MCP clients and finds the installed agent.
 
 ## Why KopiTehnik Print
 
@@ -52,7 +63,7 @@ License: free for personal use and for a business with one workstation at one lo
 
 ## Installation
 
-- Easiest: download `PhotoCropQt.exe` (GUI) or `PhotoCropAgent.exe` (AI-agent / MCP) from the [Releases page](https://github.com/ildargiv/KopiTehnik-Print/releases/latest) and run it. No Python needed.
+- Easiest: download `KopiTehnikPrint-Setup-<version>.exe` (installer) or `KopiTehnikPrint-Portable-<version>.exe` (GUI, no install) or `PhotoCropAgent.exe` (AI-agent / MCP) from the [Releases page](https://github.com/ildargiv/KopiTehnik-Print/releases/latest) and run it. No Python needed.
 - Windows with Python 3.9+ ("Add python.exe to PATH"), or run `install.bat`: it installs Python (if missing), the packages and creates shortcuts. Internet is required.
 - Manual install: `pip install -r requirements.txt`.
 
@@ -84,6 +95,8 @@ The agent works in the same window you see: changes appear live, Ctrl+Z undoes t
   }
 }
 ```
+
+**Install from PyPI (any MCP client):** the same agent is published as `kopitehnik-print-mcp`, so a client that runs stdio servers can simply use `uvx kopitehnik-print-mcp` - the package only locates the installed agent and hands it stdio, nothing is reimplemented. Official MCP Registry: `io.github.ildargiv/kopitehnik-print`. For one-click agent setup there is [llms-install.md](llms-install.md).
 
 **You stay in control.** In Settings you choose whether the agent may print, the maximum sheets per print job, and whether it must ask before printing. `PHOTOCROP_AGENT_DRYRUN=1` forbids real printing, and `PHOTOCROP_AGENT_ROOTS` limits the folders the agent can use. Sheets printed by the agent are counted in the print counter.
 

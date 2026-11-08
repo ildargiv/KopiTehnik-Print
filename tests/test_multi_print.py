@@ -1,0 +1,171 @@
+import sys
+import threading
+import time
+import unittest
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+import multi_print as mp
+
+
+def fake(delays, broken=(), log=None):
+    def send(printer, sheet):
+        if printer in broken:
+            raise OSError("офлайн")
+        time.sleep(delays.get(printer, 0.0))
+        if log is not None:
+            log.append((printer, sheet))
+    return send
+
+
+class MultiPrint(unittest.TestCase):
+    def test_every_sheet_once(self):
+        log = []
+        rep = mp.MultiRun(range(30), ["A", "B", "C"], fake({"A": .002, "B": .002, "C": .002}, log=log)).run()
+        self.assertEqual(sorted(s for _, s in log), list(range(30)))
+        self.assertEqual(rep["failed"], [])
+
+    def test_fast_printer_gets_more(self):
+        rep = mp.MultiRun(range(40), ["fast", "slow"], fake({"fast": .002, "slow": .02})).run()
+        self.assertGreater(len(rep["sent"]["fast"]), len(rep["sent"]["slow"]) * 2)
+        self.assertEqual(len(rep["sent"]["fast"]) + len(rep["sent"]["slow"]), 40)
+
+    def test_broken_printer_excluded_sheets_rerouted(self):
+        rep = mp.MultiRun(range(12), ["A", "B"], fake({"A": .01}, broken=("B",))).run()     # A не успевает разобрать всю очередь до первого захода B
+        self.assertIn("B", rep["excluded"])
+        self.assertEqual(sorted(rep["sent"]["A"]), list(range(12)))
+        self.assertEqual(rep["failed"], [])
+
+    def test_all_broken(self):
+        rep = mp.MultiRun(range(5), ["A", "B"], fake({}, broken=("A", "B"))).run()
+        self.assertEqual(sorted(rep["failed"]), list(range(5)))
+        self.assertEqual(rep["sent"], {"A": [], "B": []})
+
+    def test_single_printer_failure_keeps_sheet_failed(self):
+        rep = mp.MultiRun([1, 2], ["A"], fake({}, broken=("A",))).run()
+        self.assertEqual(sorted(rep["failed"]), [1, 2])
+
+    def test_cancel(self):
+        ev = threading.Event()
+        log = []
+
+        def send(p, s):
+            log.append(s)
+            if len(log) == 3:
+                ev.set()
+            time.sleep(0.005)
+        rep = mp.MultiRun(range(50), ["A", "B"], send, cancel=ev).run()
+        self.assertTrue(rep["cancelled"])
+        self.assertLess(len(log), 50)
+        self.assertTrue(rep["not_started"])
+
+    def test_serialize_never_parallel(self):
+        active, peak = [0], [0]
+        lock = threading.Lock()
+
+        def send(p, s):
+            with lock:
+                active[0] += 1
+                peak[0] = max(peak[0], active[0])
+            time.sleep(0.003)
+            with lock:
+                active[0] -= 1
+        mp.MultiRun(range(20), ["A", "B", "C"], send, serialize=True).run()
+        self.assertEqual(peak[0], 1)
+
+    def test_flaky_printer_recovers(self):
+        calls = {"n": 0}
+
+        def send(p, s):
+            calls["n"] += 1
+            if p == "A" and calls["n"] == 1:
+                raise OSError("разово")
+        rep = mp.MultiRun(range(6), ["A", "B"], send).run()
+        self.assertEqual(rep["failed"], [])
+        self.assertEqual(sum(len(v) for v in rep["sent"].values()), 6)
+
+    def test_order_kept_when_other_printer_fails(self):
+        rep = mp.MultiRun(range(5), ["A", "B"], fake({"A": .005}, broken=("B",))).run()
+        self.assertEqual(rep["sent"]["A"], [0, 1, 2, 3, 4])
+
+    def test_last_printer_gets_retry(self):
+        n = {"c": 0}
+
+        def send(p, s):
+            if p == "A" and s == 3 and n["c"] < 1:
+                n["c"] += 1
+                raise OSError("разово")
+        rep = mp.MultiRun(range(5), ["A"], send, max_errors=2).run()
+        self.assertEqual(rep["failed"], [])
+
+    def test_cancelled_is_not_an_error(self):
+        def send(p, s):
+            raise mp.Cancelled()
+        rep = mp.MultiRun(range(3), ["A", "B"], send).run()
+        self.assertEqual(rep["errors"], {})
+        self.assertEqual(rep["excluded"], {})
+
+    def test_base_exception_does_not_hang(self):
+        def send(p, s):
+            if p == "A":
+                raise SystemExit(1)
+        rep = mp.MultiRun(range(4), ["A", "B"], send).run()
+        self.assertEqual(sorted(rep["sent"]["B"]), [0, 1, 2, 3])
+        self.assertIn("A", rep["excluded"])
+
+    def test_tuple_units_and_counter(self):
+        counts = []
+        units = [(k, r) for k in range(3) for r in range(2)]
+        mp.MultiRun(units, ["A", "B"], fake({}), on_event=lambda k, p, u, i: counts.append(i) if k == "sent" else None).run()
+        self.assertEqual(sorted(counts), list(range(1, 7)))
+
+    def test_backlog_window_slow_printer_gets_less(self):
+        """Принтер быстро «принимает» задания, но печатает медленно: окно в 2 задания не даёт ему набрать всю очередь."""
+        pending = {"fast": [], "slow": []}
+        lock = threading.Lock()
+        speed = {"fast": 0.01, "slow": 0.08}
+
+        def send(p, s):
+            with lock:
+                pending[p].append(time.time())
+
+        def backlog(p):
+            with lock:
+                now = time.time()
+                pending[p] = [t0 for t0 in pending[p] if now - t0 < speed[p]]   # задание вышло из очереди, когда напечаталось
+                return len(pending[p])
+        rep = mp.MultiRun(range(30), ["fast", "slow"], send, backlog=backlog, window=2, poll=0.005).run()
+        self.assertEqual(sum(len(v) for v in rep["sent"].values()), 30)
+        self.assertGreater(len(rep["sent"]["fast"]), len(rep["sent"]["slow"]) * 2)
+
+    def test_backlog_unknown_does_not_block(self):
+        rep = mp.MultiRun(range(6), ["A", "B"], fake({}), backlog=lambda p: None).run()
+        self.assertEqual(rep["failed"], [])
+
+    def test_backlog_cancel_while_waiting(self):
+        ev = threading.Event()
+        threading.Timer(0.1, ev.set).start()
+        t0 = time.time()
+        mp.MultiRun(range(5), ["A"], fake({}), cancel=ev, backlog=lambda p: 99).run()
+        self.assertLess(time.time() - t0, 2)
+
+    def test_blocks_are_contiguous(self):
+        rep = mp.MultiRun(range(10), ["A", "B"], fake({"A": .003, "B": .003}), blocks=True).run()
+        self.assertEqual(sorted(rep["sent"]["A"]), list(range(0, 5)))
+        self.assertEqual(sorted(rep["sent"]["B"]), list(range(5, 10)))
+        self.assertEqual(rep["sent"]["A"], sorted(rep["sent"]["A"]))
+
+    def test_blocks_fast_printer_steals_tail(self):
+        rep = mp.MultiRun(range(20), ["fast", "slow"], fake({"fast": .002, "slow": .03}), blocks=True).run()
+        self.assertEqual(sorted(rep["sent"]["fast"] + rep["sent"]["slow"]), list(range(20)))
+        self.assertGreater(len(rep["sent"]["fast"]), 10)
+        self.assertEqual(rep["sent"]["slow"], sorted(rep["sent"]["slow"]))     # у медленного свой блок идёт подряд
+
+    def test_blocks_broken_printer_block_rerouted(self):
+        rep = mp.MultiRun(range(10), ["A", "B"], fake({"A": .003}, broken=("B",)), blocks=True).run()
+        self.assertEqual(sorted(rep["sent"]["A"]), list(range(10)))
+        self.assertEqual(rep["failed"], [])
+
+
+if __name__ == "__main__":
+    unittest.main()

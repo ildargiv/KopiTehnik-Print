@@ -1,0 +1,31 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "kopitehnik-print-mcp"
+version = "1.8.0"
+description = "MCP stdio bridge to KopiTehnik Print: let an AI agent prepare and print photos on a real printer (Windows)"
+readme = "README.md"
+requires-python = ">=3.9"
+authors = [{ name = "Ildar Giv" }]
+keywords = ["mcp", "model-context-protocol", "printing", "photo", "windows", "icc", "epson", "canon"]
+license = { text = "Free for personal use and one workstation; see the KopiTehnik Print Licence" }
+classifiers = [
+  "Operating System :: Microsoft :: Windows",
+  "Programming Language :: Python :: 3",
+  "Topic :: Printing",
+  "Topic :: Multimedia :: Graphics",
+]
+dependencies = []
+
+[project.urls]
+Homepage = "https://ildargiv.github.io/KopiTehnik-Print/"
+Repository = "https://github.com/ildargiv/KopiTehnik-Print"
+Download = "https://github.com/ildargiv/KopiTehnik-Print/releases/latest"
+
+[project.scripts]
+kopitehnik-mcp = "kopitehnik_mcp.__main__:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["kopitehnik_mcp"]

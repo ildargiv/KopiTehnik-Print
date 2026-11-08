@@ -20,6 +20,7 @@ SmartCrop — «умное» кадрирование домашних фото�
 """
 import hashlib
 import json
+import app_dirs
 import math
 import os
 import sys
@@ -32,8 +33,8 @@ from PIL import Image, ImageDraw, ImageFont, ImageOps
 __version__ = "0.1"
 
 APPDATA = Path(os.environ.get("APPDATA", str(Path.home())))
-MODELS_DIR = APPDATA / "PhotoCrop" / "models"
-CACHE_DIR = APPDATA / "PhotoCrop" / "smartcrop_cache"
+MODELS_DIR = app_dirs.data_dir() / "models"
+CACHE_DIR = app_dirs.data_dir() / "smartcrop_cache"
 
 _ZOO = "https://media.githubusercontent.com/media/opencv/opencv_zoo/main/models"
 MODEL_FILES = {   # ключ: (имя файла, url, примерный размер МБ)

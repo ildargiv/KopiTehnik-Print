@@ -2,9 +2,53 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
+<link rel="icon" type="image/png" sizes="256x256" href="favicon-256.png">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>KopiTehnik Print</title>
 <meta name="description" content="KopiTehnik Print: crop, colour-correct and print photos on Windows, with a smart frame, 15 interface languages and an AI agent mode.">
+<meta property="og:type" content="website">
+<meta property="og:locale" content="en_US">
+<meta property="og:locale:alternate" content="ru_RU">
+<meta property="og:site_name" content="KopiTehnik Print">
+<meta property="og:title" content="KopiTehnik Print - photo printing for Windows">
+<meta property="og:description" content="ICC colour, exact borderless printing, smart crop and sheet layout for photo desks and copy centres. Free for one workstation. Built-in MCP server for AI agents.">
+<meta property="og:url" content="https://ildargiv.github.io/KopiTehnik-Print/">
+<meta property="og:image" content="https://ildargiv.github.io/KopiTehnik-Print/screenshots/print-sheet.png">
+<meta property="og:image:alt" content="KopiTehnik Print: four photos laid out on a print sheet with cut marks">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="KopiTehnik Print - photo printing for Windows">
+<meta name="twitter:description" content="ICC colour, borderless printing, smart crop and sheet layout. Built-in MCP server for AI agents.">
+<meta name="twitter:image" content="https://ildargiv.github.io/KopiTehnik-Print/screenshots/print-sheet.png">
+<link rel="canonical" href="https://ildargiv.github.io/KopiTehnik-Print/">
+<link rel="alternate" hreflang="en" href="https://ildargiv.github.io/KopiTehnik-Print/">
+<link rel="alternate" hreflang="ru" href="https://ildargiv.github.io/KopiTehnik-Print/ru/">
+<link rel="alternate" hreflang="x-default" href="https://ildargiv.github.io/KopiTehnik-Print/">
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "SoftwareApplication",
+  "name": "KopiTehnik Print",
+  "applicationCategory": "MultimediaApplication",
+  "operatingSystem": "Windows 10, Windows 11",
+  "softwareVersion": "1.8.0",
+  "description": "Print software for Windows: accurate colour through the printer ICC profile, borderless printing, smart cropping, print sheets and a built-in MCP server for AI agents.",
+  "url": "https://ildargiv.github.io/KopiTehnik-Print/",
+  "sameAs": [
+    "https://github.com/ildargiv/KopiTehnik-Print",
+    "https://pypi.org/project/kopitehnik-print-mcp/",
+    "https://github.com/ildargiv/scoop-bucket",
+    "https://registry.modelcontextprotocol.io/v0/servers?search=kopitehnik"
+  ],
+  "downloadUrl": "https://github.com/ildargiv/KopiTehnik-Print/releases/latest",
+  "installUrl": "https://github.com/ildargiv/KopiTehnik-Print/releases/latest",
+  "softwareHelp": "https://github.com/ildargiv/KopiTehnik-Print/blob/main/README.md",
+  "license": "https://github.com/ildargiv/KopiTehnik-Print/blob/main/LICENSE",
+  "author": { "@type": "Person", "name": "Ildar Gaisin" },
+  "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD", "description": "Free for personal use and one workstation" },
+  "screenshot": "https://ildargiv.github.io/KopiTehnik-Print/screenshots/print-sheet.png",
+  "inLanguage": ["en", "ru"]
+}
+</script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
@@ -189,7 +233,7 @@ footer{padding:32px 0 44px;display:flex;flex-wrap:wrap;gap:10px 26px;justify-con
 <div class="wrap">
   <div class="topbar">
     <a class="brand" href="#top"><span class="logo" aria-hidden="true"><i></i><i></i><i></i></span>KopiTehnik Print</a>
-    <nav><a href="#how">How it works</a><a href="#agent">AI agent</a><a href="#languages">Languages</a><a href="#download">Download</a></nav>
+    <nav><a href="#how">How it works</a><a href="#agent">AI agent</a><a href="#languages">Languages</a><a href="#download">Download</a><a href="ru/" hreflang="ru" lang="ru">Русский</a></nav>
     <div class="themes" id="themes" role="group" aria-label="Colour theme, same themes as the app"></div>
   </div>
 
@@ -355,7 +399,12 @@ footer{padding:32px 0 44px;display:flex;flex-wrap:wrap;gap:10px 26px;justify-con
   <section class="dl card" id="download">
     <div>
       <h2>Get KopiTehnik Print</h2>
-      <p>Download PhotoCropQt.exe for the full window, or PhotoCropAgent.exe for agent mode. No Python needed. Source and build workflow are on GitHub. License: not selected yet.</p>
+      <p>Download PhotoCropQt.exe for the full window, or PhotoCropAgent.exe for agent mode. No Python needed. Source and build workflow are on GitHub. Licence: free for personal use and one workstation; chains and several workstations need a commercial licence.</p>
+
+      <pre class="code" tabindex="0"><span class="c">// or install from the command line</span>
+scoop bucket add ildargiv https://github.com/ildargiv/scoop-bucket
+scoop install kopitehnik-print</pre>
+      <p class="fine">AI agents: any MCP client can attach the program with <span class="c">uvx kopitehnik-print-mcp</span>; in the official MCP Registry it is <span class="c">io.github.ildargiv/kopitehnik-print</span>.</p>
     </div>
     <div class="btns">
       <a class="btn primary big" href="https://github.com/ildargiv/KopiTehnik-Print/releases/latest">Download</a>
