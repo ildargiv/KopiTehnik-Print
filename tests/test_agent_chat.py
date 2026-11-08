@@ -214,6 +214,31 @@ class AllowPathTest(unittest.TestCase):
         self.assertEqual(ran, [])
 
 
+    def test_path_written_by_person_needs_no_question(self):
+        root, other = tempfile.mkdtemp(), tempfile.mkdtemp()
+        ran, asked = [], []
+        gate = ac.ToolGate(SPEC, roots=[root])
+        a = ac.Agent(Stub([("open_folder", {"path": other + "/sub"}), "ok"]), gate, lambda r: ran.append(r) or {"ok": True},
+                     allow_path=lambda p: asked.append(p) or False, route=False)
+        a.say("распечатай папку %s 10x15" % other)
+        self.assertEqual(len(ran), 1)
+        self.assertEqual(asked, [])
+
+    def test_other_path_still_asks(self):
+        root, other, said = tempfile.mkdtemp(), tempfile.mkdtemp(), tempfile.mkdtemp()
+        asked = []
+        gate = ac.ToolGate(SPEC, roots=[root])
+        a = ac.Agent(Stub([("open_folder", {"path": other}), "ok"]), gate, lambda r: {"ok": True},
+                     allow_path=lambda p: asked.append(p) or False, route=False)
+        a.say("открой %s" % said)
+        self.assertEqual(asked, [other])
+
+    def test_drive_root_in_message_does_not_open_everything(self):
+        a = ac.Agent(Stub([]), ac.ToolGate(SPEC), lambda r: {"ok": True})
+        a.user_text = "печатай всё с /"
+        self.assertFalse(a.user_gave("/etc/passwd"))
+
+
 class ProviderTest(unittest.TestCase):
     def test_openai_compatible_roundtrip(self):
         import threading

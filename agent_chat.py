@@ -171,6 +171,7 @@ class Agent:
         self.printed_ok = 0
         self.undo_depth, self.undo_base = undo_depth, None      # undo_depth() -> число шагов отмены окна: по ним откатываем действия агента
         self.route = route
+        self.user_text = ""                                      # всё, что человек написал в этом диалоге: отсюда «свои» пути
 
     def stop(self):
         self.stopped = True
@@ -188,6 +189,7 @@ class Agent:
             self.gate.route(text)
         else:
             self.gate.set_groups(self.gate.groups)                   # применить block_print
+        self.user_text += "\n" + (text or "")
         self.messages.append({"role": "user", "content": text})
         recent = []
         for _ in range(self.max_steps):
@@ -210,6 +212,23 @@ class Agent:
                     return "(the agent repeated the same step three times and was stopped; please rephrase the task)"
                 self.messages.append({"role": "tool", "tool_call_id": c.get("id", ""), "content": self._run(c)})
         return "(step limit reached)"
+
+    def user_gave(self, path):
+        """Путь (или папка, в которой он лежит) встречается в сообщениях человека. Корень диска («C:\\», «/») не считается."""
+        import os
+        import re
+        norm = lambda x: x.replace("/", "\\").rstrip("\\").casefold()
+        said = norm(self.user_text)
+        p = os.path.abspath(path)
+        while True:
+            n = norm(p)
+            # путь должен стоять в сообщении целиком (за ним пробел, кавычка, знак или конец), а не быть началом другого пути
+            if len(n) > 3 and re.search(re.escape(n) + r"\\?(?=$|[\s\"'»,;.)\]])", said):
+                return True
+            up = os.path.dirname(p)
+            if up == p:
+                return False
+            p = up
 
     def _compact(self, keep=4, limit=300):
         """Старые ответы инструментов сжимаем до первых символов: малой модели хватает окна на вчерашние разговоры."""
@@ -237,10 +256,11 @@ class Agent:
             return json.dumps({"ok": False, "error": "arguments must be valid JSON"})
         if not isinstance(args, dict):
             return json.dumps({"ok": False, "error": "arguments must be an object"})
-        if self.allow_path and name in self.gate.names:
+        if name in self.gate.names:
+            import os
             for p in self.gate.path_violation(args):
-                if self.allow_path(p):
-                    import os
+                # путь, который человек сам написал в чате (или папка внутри него), разрешаем без вопроса, на этот диалог
+                if self.user_gave(p) or (self.allow_path and self.allow_path(p)):
                     self.gate.roots.append(p if os.path.isdir(p) else os.path.dirname(p))
         denied = self.gate.check(name, args)
         if denied:
