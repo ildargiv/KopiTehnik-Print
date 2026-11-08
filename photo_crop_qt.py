@@ -5220,6 +5220,12 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         media = self.cb_media.currentText() if hasattr(self, "cb_media") and self.cb_media.isEnabled() and self.cb_media.count() else ""
         return " | ".join((self.pr.get("printer", ""), self.s["format"], media))
 
+    @staticmethod
+    def _key_parts(key):
+        """(принтер, формат, бумага) из ключа связки; терпит « | » внутри названий (тогда лишнее уходит в середину)."""
+        p = key.split(" | ")
+        return (p[0], " | ".join(p[1:-1]), p[-1]) if len(p) >= 3 else (p + ["", "", ""])[:3]
+
     def profile_title(self, key=None):
         parts = (key or self.profile_key()).split(" | ")          # в имени принтера или типе бумаги может встретиться « | »: тогда частей больше трёх
         return " · ".join(x for x in parts if x)
@@ -5247,8 +5253,8 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         profs = self._profiles()
         prof, how = profs.get(key), "own"
         if prof is None:                                             # ближайшая: тот же принтер и тип бумаги, другой формат
-            pr_, _fmt, media = key.split(" | ")
-            near = [k for k in profs if k.split(" | ")[0] == pr_ and k.split(" | ")[2] == media]
+            pr_, _fmt, media = self._key_parts(key)
+            near = [k for k in profs if self._key_parts(k)[0] == pr_ and self._key_parts(k)[2] == media]
             if near:
                 prof, how = profs[near[0]], near[0]
         self._prof_lock = True
