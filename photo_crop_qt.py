@@ -5479,7 +5479,7 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         self.quick_chat = acu.QuickChat(self.chat_dock)      # маленькое окно агента: писать можно с любой вкладки
         self.quick_chat.setVisible(bool(self.settings.get("chat_enabled", False)))
         self.b_save.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
-        self.b_save.setMaximumWidth(120)                        # «Сохранить» уже и рядом с «Печать»
+        self.b_save.setMaximumWidth(150)                        # «Сохранить» уже и рядом с «Печать»
         self.b_save.setFixedHeight(side)
         bottom = hbox(self.b_save, self.b_print, self.b_remote, self.b_multi, spacing=8)
         bottom.setStretch(1, 1)

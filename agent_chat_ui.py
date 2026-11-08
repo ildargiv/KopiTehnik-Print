@@ -58,7 +58,8 @@ def system_prompt(lang):
 
 
 # Быстрые кнопки: (подпись, задание агенту, группы инструментов, запрет печати). Автоматика здесь разрешена: человек сам нажал кнопку.
-# «Печать» и «Стоп» отдельными кнопками не нужны: большая «Печать» стоит рядом, а кнопка отправки на время работы становится «Стоп».
+# Текст из поля ввода (например путь к папке) уходит вместе с заданием кнопки; нажатия во время работы агента встают в очередь.
+# «Стоп» отдельной кнопкой не нужен: кнопка отправки на время работы становится «Стоп» (и очищает очередь).
 _SCOPE = "the checked photos (or all open photos if none are checked)"
 QUICK = {
     "improve": ("Улучшить",
@@ -74,6 +75,9 @@ QUICK = {
                 "Prepare %s for printing: first do the smart crop, then the high-level colour improvement (see the tasks: for each photo analyze_photo, "
                 "set_adjust per colour channel, verify), then run preflight and report problems. Do NOT print." % _SCOPE,
                 ("prepare", "color", "auto", "profiles", "print"), True),
+    "print": ("Печать",
+              "Print %s now: run preflight first; if there are no errors, call print_photos. Report what was sent." % _SCOPE,
+              ("prepare", "profiles", "print"), False),
 }
 
 
@@ -230,20 +234,32 @@ class ChatDock(QWidget):
         self.sig.status.emit("%s: %s" % (what, name))
 
     # ---------- чат
-    def quick(self, key):
-        """Быстрая кнопка: готовое задание агенту с нужным набором инструментов."""
+    def quick(self, key, extra=""):
+        """Быстрая кнопка: готовое задание агенту с нужным набором инструментов. extra — то, что человек набрал в поле (папка, уточнение)."""
         title, prompt, groups, block = QUICK[key]
-        self.send(prompt, shown=_tr(title), groups=list(groups), block_print=block)
+        prompt = "Do only this task; earlier requests in this chat are already done, do not repeat them. " + prompt
+        extra = (extra or "").strip()
+        if extra:
+            prompt = ("The person wrote: «%s». If it names a folder or files, open them first (open_folder / open_files) and work on them. "
+                      "Then: %s" % (extra, prompt))
+        self.send(prompt, shown=_tr(title) + (": " + extra if extra else ""), groups=list(groups), block_print=block)
+
+    queue = ()
 
     def send(self, text, shown=None, groups=None, block_print=False):
         text = (text or "").strip()
         st = self.win.settings
-        if not text or self.busy:
+        if not text:
+            return
+        if self.busy:                                           # агент занят: задание встаёт в очередь и выполнится следом
+            self.queue = list(self.queue) + [(text, shown, groups, block_print)]
+            self._add("you", (shown or text) + "  ⏳ " + _tr("в очереди"))
             return
         if not st.get("chat_url"):
             QMessageBox.information(self.win, _tr(TITLE), _tr("Укажите адрес модели в Настройках → Агент «Печатник»."))
             return
-        self._add("you", shown or text)
+        if shown is not False:
+            self._add("you", shown or text)
         if self.agent is None:
             self.agent = self._build()
         self.busy = True
@@ -266,6 +282,7 @@ class ChatDock(QWidget):
         self.sig.reply.emit(out)
 
     def stop(self):
+        self.queue = []
         if self.agent:
             self.agent.stop()
 
@@ -277,12 +294,21 @@ class ChatDock(QWidget):
         q = getattr(self.win, "quick_chat", None)
         if q is not None:
             q.show_reply(text)
+        if self.queue:                                          # следующее задание из очереди
+            nxt, self.queue = self.queue[0], list(self.queue[1:])
+            text, shown, groups, block = nxt
+            self.busy = False
+            self._add_hint(shown or text[:80])
+            self.send(text, False, groups, block)
 
     def _on_status(self, text):
         self.l_status.setText(text)
         q = getattr(self.win, "quick_chat", None)
         if q is not None:
             q.show_status(text)
+
+    def _add_hint(self, text):
+        self.log.append("<i>%s: %s</i><br>" % (_tr("Выполняю"), text.replace("&", "&amp;").replace("<", "&lt;")))
 
     def _add(self, who, text):
         name = _tr("Вы") if who == "you" else _tr(TITLE)
@@ -366,7 +392,7 @@ def small_btn(text, slot, tip=""):
 def restyle_small(b):
     import photo_crop_qt as q
     t = q.T
-    b.setStyleSheet("QPushButton { background: %s; color: %s; border: 1px solid %s; border-radius: 6px; padding: 0 6px; font-size: 12px; }"
+    b.setStyleSheet("QPushButton { background: %s; color: %s; border: 1px solid %s; border-radius: 6px; padding: 0 3px; font-size: 11px; }"
                     "QPushButton:hover { border-color: %s; } QPushButton:disabled { color: %s; }"
                     % (t["raised"], t["text"], t["border"], t["text"], t["muted"]))
 
@@ -390,8 +416,9 @@ class QuickChat(QWidget):
         chips.setContentsMargins(0, 0, 0, 0)
         chips.setSpacing(4)
         for key in QUICK:
-            c = small_btn(_tr(QUICK[key][0]), lambda k=key: self.chat.quick(k), _tr(QUICK[key][0]))
-            chips.addWidget(c, 1)
+            c = small_btn(_tr(QUICK[key][0]), lambda k=key: self.quick(k), _tr(QUICK[key][0]))
+            c.setMinimumWidth(0)
+            chips.addWidget(c, len(c.text()))                   # ширина по длине подписи: «Кадрировать» шире «Печать»
             self.chips[key] = c
         self.l = QLabel("")
         self.l.setWordWrap(True)
@@ -419,10 +446,14 @@ class QuickChat(QWidget):
         for c in self.chips.values():
             restyle_small(c)
 
+    def quick(self, key):
+        """Кнопка вместе с тем, что набрано в поле: «C:\\Фото\\Иванов» + «Кадрировать» — одна команда."""
+        extra = self.edit.toPlainText().strip()
+        self.edit.clear()
+        self.chat.quick(key, extra)
+
     def set_busy(self, on):
-        """Пока агент работает, кнопка отправки становится «Стоп», а быстрые кнопки недоступны."""
-        for c in self.chips.values():
-            c.setEnabled(not on)
+        """Пока агент работает, кнопка отправки становится «Стоп»; быстрые кнопки остаются: их задания встают в очередь."""
         self.b.setToolTip(_tr("Стоп") if on else _tr("Отправить агенту (Enter)"))
         self.b.setText(_tr("Стоп") if on else "")                # значка «стоп» в наборе иконок нет, пишем слово
         if on:
@@ -439,7 +470,7 @@ class QuickChat(QWidget):
             self.chat.stop()
             return
         text = self.edit.toPlainText().strip()
-        if text and not self.chat.busy:
+        if text:
             self.edit.clear()
             self.chat.send(text)
 
