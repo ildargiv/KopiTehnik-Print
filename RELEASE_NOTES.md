@@ -1,5 +1,17 @@
 **English** | [Русский](RELEASE_NOTES.ru.md) | [Español](RELEASE_NOTES.es.md) | [简体中文](RELEASE_NOTES.zh-CN.md) | [繁體中文](RELEASE_NOTES.zh-Hant.md) | [Deutsch](RELEASE_NOTES.de.md) | [Français](RELEASE_NOTES.fr.md) | [Português](RELEASE_NOTES.pt.md) | [日本語](RELEASE_NOTES.ja.md) | [한국어](RELEASE_NOTES.ko.md) | [Türkçe](RELEASE_NOTES.tr.md) | [Bahasa Indonesia](RELEASE_NOTES.id.md) | [العربية](RELEASE_NOTES.ar.md) | [हिन्दी](RELEASE_NOTES.hi.md) | [Italiano](RELEASE_NOTES.it.md) | [Polski](RELEASE_NOTES.pl.md) | [Українська](RELEASE_NOTES.uk.md) | [Tiếng Việt](RELEASE_NOTES.vi.md) | [ไทย](RELEASE_NOTES.th.md) | [Татарча](RELEASE_NOTES.tt.md)
 
+# Release notes — v1.9.0
+
+- **Built-in AI agent “Print Assistant” (beta, off by default)**: an agent tab in the right panel and a two-line input under the tabs (works from any tab), quick buttons Improve, Crop, Prepare, Print. A typed folder plus a button is one command; several buttons run in order. Nothing is sent until you enable the agent and set a model address.
+- **Any OpenAI-compatible model**: local llama.cpp, Ollama, vLLM or a cloud service. Local and Tailscale addresses bypass the system proxy. Settings card: Test connection, a warning for a non-local address, the API key stored encrypted on Windows.
+- **The agent sees the photos**: with “Agent sees photos” on, the model looks at the previews and crops and fixes colour by itself.
+- **Print complaints in plain words** (“too pink”, “darker than the screen”, a tint in black-and-white) adjust the printer correction for the current printer and paper in fixed steps.
+- Safety: the agent only sees its work folder (default `Desktop\Печать ИИ`) and the folders and files you type in the chat; printing asks first (optional auto mode after 3 confirmations), always runs the pre-print check and is limited to 20 sheets per print by default; trial mode is on by default.
+- Reliability: Stop interrupts the model at once, every tool call gets an id and an answer, runaway loops and turns longer than 15 minutes are stopped, Roll back undoes everything the agent changed in the conversation. The agent answers in the interface language, its strings are translated into 13 additional interface languages.
+- Fixed: a request with a wrong key to the agent endpoint could end with a dropped connection instead of error 401.
+
+Release files: `KopiTehnikPrint-Setup-1.9.0.exe`, `KopiTehnikPrint-Portable-1.9.0.exe`, `SHA256SUMS.txt`.
+
 # Release notes — v1.8.0
 
 - **Network: auto-discovery and easy connect**: the app now finds other copies on the local network (and online Tailscale PCs) by itself. Click "+" in the chat, pick a found PC and press "Connect": a 6-digit code appears on your screen and must be typed in the request window on the other PC. Three wrong codes cancel the request. You can enter an address manually if a PC is not found.
@@ -17,13 +29,6 @@ Release files: `KopiTehnikPrint-Setup-1.8.0.exe`, `KopiTehnikPrint-Portable-1.8.
 - **Network (new)**: connect several copies of the program over the local network or Tailscale. Pair PCs with a one-time code; a chat panel on the left (text, emoji, any files; photos shown as pictures with a Download button; sounds on/off) and the foundation for printing on another PC's printer (sheets are prepared on your PC and printed with the printing PC's own colour profile and driver settings). Network access is off until you connect the first PC; connections are authenticated with a per-pair key but not encrypted (use a trusted LAN or Tailscale).
 - Printer state, remote printing from the print dialog and the status buttons of connected PCs are not in the window yet.
 
-Files in the release: `KopiTehnikPrint-Setup-1.7.0.exe`, `KopiTehnikPrint-Portable-1.7.0.exe`.
-
-# Release notes — v1.6.1
-
-- **AI agent (MCP)**: new tools `multi_print` (printers, Quick Start slot per printer, blocks / one-at-a-time modes, resume), `zoom_photo` (percent, fit, fill, original) and `crop_apply` (crop to the frame into the "Обрезанные" subfolder). With several printers ticked, `print_photos` distributes the sheets between them.
-- **Translations**: English for all strings added in 1.5–1.6 (multi-printer, Quick Start, Epson controls, zoom/crop); key labels in the other interface languages (machine-assisted, not reviewed by native speakers).
-- The portable file is now `KopiTehnikPrint-Portable-<version>.exe`.
-- The data folder is now `%APPDATA%\KopiTehnik Print`; the old `PhotoCrop` folder (settings, projects, logs, models) is moved there on first start.
+Release files: `KopiTehnikPrint-Setup-1.7.0.exe`, `KopiTehnikPrint-Portable-1.7.0.exe`.
 
 
