@@ -6,6 +6,11 @@ Versions released on or after 2026-10-22 are under the KopiTehnik Print Licence;
 
 ## Unreleased
 
+- Built-in AI agent “Print Assistant” (beta, off by default): a chat tab and a two-line input under the tabs, quick buttons Improve, Crop, Prepare, Print. Works with any OpenAI-compatible model (local llama.cpp, Ollama, vLLM or a cloud service); nothing is sent until you enable it and set the model address.
+- The agent sees only its work folder (default `Desktop\Печать ИИ`) and folders you type in the chat; printing asks first, runs the pre-print check and is limited to 20 sheets per print by default.
+- With “Agent sees photos” on, the agent looks at each photo to crop it and fix its colour by itself.
+- Print complaints in plain words (“too pink”, “darker than the screen”, a tint in black-and-white) adjust the printer correction for the current printer and paper.
+- Stop interrupts the model at once; Roll back undoes everything the agent changed in the conversation; Test connection in Settings; the API key is stored encrypted on Windows.
 - Tests and the Qt self-test run on GitHub for every push and pull request and before a release build.
 - Release builds use pinned package versions (`requirements-lock.txt`) and publish `SHA256SUMS.txt`.
 - Fixed: a request with a wrong key to the agent endpoint could end with a dropped connection instead of error 401.

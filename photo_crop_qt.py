@@ -5280,6 +5280,8 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         self.seg_view = Segmented([("Кадр", "crop"), ("Лист", "sheet")], self.view)
         self.seg_view.changed.connect(self.set_view)
         self.seg_view.setFixedHeight(38)                         # та же высота и вид, что у вкладок справа, и по центру шапки
+        self.b_chat = ibtn("sparkle", "Агент «Печатник»", lambda: self.show_page(5))        # дублирует вкладку «Агент»
+        self.b_chat.setVisible(bool(self.settings.get("chat_enabled", False)))
         self.b_grid = ibtn("grid", "Сетка третей", self._toggle_grid, color=T["select"] if self.s["grid"] else T["muted"])
         more = ibtn("project", "Проект: открыть или сохранить рамки и настройки")
         menu = QMenu(more)
@@ -5288,7 +5290,7 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         more.setMenu(menu)
         more.setPopupMode(QToolButton.InstantPopup)
         l = hbox(logo, name, 10, btn("Открыть", self.open_any, "primary", ico="open", tip="Открыть фото или папку (Ctrl+O)"), 10,
-                 self.mode_switch, 10, cap("Бумага"), self.cb_format, 6,
+                 self.mode_switch, 10, cap("Бумага"), self.cb_format, 6, self.b_chat,
                  None, self.l_agent,
                  self.seg_view, 6, self.b_grid, more, GearButton("Настройки", "Настройки программы: оформление, язык, печать", self.open_settings),
                  spacing=8, margins=(16, 0, 12, 0))
@@ -5431,9 +5433,13 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         self.pages.addWidget(self._page_print())
         self.pages.addWidget(self._page_smart())
         self.pages.addWidget(self._page_doc())
-        self.seg_page = Segmented([("Макет", 0), ("Цвет", 1), ("Умная рамка", 3), ("Принтер", 2), ("Документ", 4)], 0)
+        import agent_chat_ui as acu
+        self.chat_dock = acu.ChatDock(self)                  # вкладка «Агент» (эксперимент): видна, только если агент включён в настройках
+        self.pages.addWidget(self.chat_dock)
+        self.seg_page = Segmented([("Макет", 0), ("Цвет", 1), ("Умная рамка", 3), ("Принтер", 2), ("Документ", 4), ("Агент", 5)], 0)
         self.seg_page.group.button(4).hide()                 # вкладка «Документ» видна только в режиме документа
-        self.seg_page.setStyleSheet('QPushButton[kind="seg"]{padding:6px 9px;}')       # пять вкладок должны уместиться в панели
+        self.chat_dock.sync()                                # вкладка «Агент» видна только при включённом агенте
+        self.seg_page.setStyleSheet('QPushButton[kind="seg"]{padding:6px 5px;}')       # пять вкладок должны уместиться в панели
         for b in self.seg_page.group.buttons():                 # вкладки делят ширину панели поровну: край в край с карточками
             b.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
             self.seg_page.layout().setStretchFactor(b, 1)
@@ -5445,7 +5451,7 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         self.l_prog.hide()
         self.b_cancel = btn("Отменить печать", self.cancel.set, "link")
         self.b_cancel.hide()
-        self.b_save = btn("Сохранить отмеченные", lambda: self.save(True), big=True, ico="save", tip="Ctrl+Shift+S; Ctrl+S — только текущее фото")
+        self.b_save = btn("Сохранить", lambda: self.save(True), big=True, ico="save", tip="Сохранить отмеченные. Ctrl+Shift+S; Ctrl+S — только текущее фото")
         self.b_resume = btn("", self.multi_resume, ico="reset")
         self.b_resume.hide()
         self.l_multi = lbl("", "muted", wrap=True)
@@ -5470,8 +5476,15 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         side = max(44, self.b_print.sizeHint().height())
         self.b_multi.setFixedSize(side, side)
         self.b_remote.setFixedSize(side, side)
-        lay = vbox(hbox(self.seg_page, margins=(0, 0, 16, 0)), self.pages, self.progress, self.l_prog, self.l_multi, self.b_cancel, self.b_resume, self.b_save, hbox(self.b_print, self.b_remote, self.b_multi, spacing=8),
-                   spacing=10, margins=(4, 12, 14, 12))
+        self.quick_chat = acu.QuickChat(self.chat_dock)      # маленькое окно агента: писать можно с любой вкладки
+        self.quick_chat.setVisible(bool(self.settings.get("chat_enabled", False)))
+        self.b_save.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
+        self.b_save.setMaximumWidth(150)                        # «Сохранить» уже и рядом с «Печать»
+        self.b_save.setFixedHeight(side)
+        bottom = hbox(self.b_save, self.b_print, self.b_remote, self.b_multi, spacing=8)
+        bottom.setStretch(1, 1)
+        lay = vbox(hbox(self.seg_page, margins=(0, 0, 16, 0)), self.pages, self.progress, self.l_prog, self.l_multi, self.b_cancel, self.b_resume,
+                   self.quick_chat, bottom, spacing=10, margins=(4, 12, 14, 12))
         lay.setStretch(1, 1)
         w.setLayout(lay)
         QTimer.singleShot(0, self.reload_printers)
@@ -7334,7 +7347,7 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         if hasattr(self, "left_w"):
             self.left_w.setVisible(not doc)
             for i, b in enumerate(self.seg_page.group.buttons()):   # кнопки вкладок: Макет, Цвет, Умная рамка, Принтер, Документ
-                b.setVisible((i >= 3) if doc else (i < 4))
+                b.setVisible(bool(self.settings.get("chat_enabled", False)) if i == 5 else (i >= 3) if doc else (i < 4))
             self.b_save.setVisible(not doc)
             for w in self._photo_only:
                 w.setVisible(not doc and not (self.compact and w in self._caps))
@@ -7881,8 +7894,8 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         else:
             self.l_sheet.setText(tr("Одно фото на лист, без полей"))
             self.l_sheet2.setText(trf("Листов к печати: {n}", n=ns))
-        self.b_save.setText((trf("Сохранить листы · {n}", n=ns) if self.sheet_mode() else trf("Сохранить отмеченные · {n}", n=len(chk)))
-                            if self.files else tr("Сохранить отмеченные"))
+        self.b_save.setText(trf("Сохранить · {n}", n=ns if self.sheet_mode() else len(chk)) if self.files else tr("Сохранить"))
+        self.b_save.setToolTip(tr("Сохранить листы") if self.sheet_mode() else tr("Сохранить отмеченные"))
         self.b_undo.setEnabled(bool(self._undo))
         self.b_redo.setEnabled(bool(self._redo))
         if not cur:
@@ -8851,7 +8864,7 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         s = self.s
         self._bleed_flush()
         fresh = pc.load_settings()                    # окно печати пишет свои разделы в тот же файл — не затираем их
-        for k in ("last_dir", "start_dir_mode", "snap_px", "anim", "icc_dir", "check_updates", "skip_update", "doc_paper", "doc_fit", "doc_margin", "doc_cm_on", "doc_icc", "converter_path", "adj_presets", "adj_preset_names", "confirm_actions", "agent_enabled", "agent_badge", "agent_lock", "agent_token", "agent_port", "agent_allow_print", "agent_max_sheets", "agent_confirm_print", "multi_enabled", "multi_printers", "multi_modes", "multi_on", "multi_serialize", "multi_blocks", "qs_visible", "qs_enabled", "qs_highlight"):
+        for k in ("last_dir", "start_dir_mode", "snap_px", "anim", "icc_dir", "check_updates", "skip_update", "doc_paper", "doc_fit", "doc_margin", "doc_cm_on", "doc_icc", "converter_path", "adj_presets", "adj_preset_names", "confirm_actions", "agent_enabled", "agent_badge", "agent_lock", "agent_token", "agent_port", "agent_allow_print", "agent_max_sheets", "agent_confirm_print", "multi_enabled", "multi_printers", "multi_modes", "multi_on", "multi_serialize", "multi_blocks", "qs_visible", "qs_enabled", "qs_highlight", "chat_enabled", "chat_url", "chat_model", "chat_key", "chat_dry", "chat_print_mode", "chat_folder", "chat_roots", "chat_confirmed", "chat_auto_offered", "chat_vision", "chat_max_sheets"):
             if k in self.settings:
                 fresh[k] = self.settings[k]
         fresh.update(format=s["format"], orient=s["orient"], mode=s["mode"], recursive=s["recursive"], subfolder=s["subfolder"],
@@ -9803,6 +9816,8 @@ class SettingsDialog(QDialog):
         if net_pages:
             section("Сеть", "desktop", net_pages)
         section("ИИ-агент (MCP)", "sparkle", [("Подключение и права", [self._agent_card()])])
+        import agent_chat_ui as acu
+        section("Агент «Печатник»", "sparkle", [("Модель, папки, печать", [acu.settings_card(self)])])
         section("О программе", "doc", [("Версия и обновления", [upd_card])])
         self.tree.currentItemChanged.connect(lambda cur, _prev: self.stack.setCurrentIndex(int(cur.data(0, Qt.UserRole) or 0)) if cur is not None else None)
         self.tree.setCurrentItem(first)
@@ -10450,6 +10465,12 @@ for _k, _v in i18n_161.EN_FMT.items():
 for _code, _tab in i18n_161.OTHER.items():
     for _k, _v in _tab.items():
         i18n.TABLE.get(_code, {}).setdefault(_k, _v)
+import i18n_agent                                        # noqa: E402  (встроенный агент «Печатник»)
+for _k, _v in i18n_agent.EN.items():
+    pc.EN.setdefault(_k, _v)
+for _code, _tab in i18n_agent.OTHER.items():
+    for _k, _v in _tab.items():
+        i18n.TABLE.get(_code, {}).setdefault(_k, _v)
 pc.EN.update({
     "После анализа сортировать фото: красные первыми": "After analysis sort photos: red first",
     "Красные и жёлтые кадры — в начало списка, зелёные — в конец. Поправленные вручную становятся зелёными.": "Red and yellow shots go to the top of the list, green to the end. Shots you fix by hand turn green.",
@@ -10511,7 +10532,7 @@ pc.EN_FMT.update({
     "{n} фото на листе, ячейка {w}×{h} мм": "{n} photos per sheet, cell {w}×{h} mm", "Белое поле {m} мм вокруг каждого фото": "White border {m} mm around each photo",
     "Листов к печати: {n}": "Sheets to print: {n}", "Сохранить листы · {n}": "Save sheets · {n}", "Сохраняю листы: {n}": "Saving sheets: {n}",
     "Готовлю листы к печати: {n}": "Preparing sheets for print: {n}",
-    "{n} из {m} отмечено": "{n} of {m} checked", "Сохранить отмеченные · {n}": "Save checked · {n}",
+    "{n} из {m} отмечено": "{n} of {m} checked", "Сохранить отмеченные · {n}": "Save checked · {n}", "Сохранить · {n}": "Save · {n}", "Стоп": "Stop", "Подготовить": "Prepare", "Заново": "Restart", "Откатить": "Undo agent changes", "Отправить": "Send", "Сохранить": "Save",
     "Сохраняю: {n}": "Saving: {n}", "Готово: {n} файл(ов)": "Done: {n} file(s)", "На печать: {n} фото": "To print: {n} photos",
 })
 
@@ -11225,4 +11246,5 @@ def main():
 
 
 if __name__ == "__main__":
+    sys.modules.setdefault("photo_crop_qt", sys.modules["__main__"])     # `import photo_crop_qt` в агенте должен вернуть это же окно с живой темой, а не вторую копию
     main()

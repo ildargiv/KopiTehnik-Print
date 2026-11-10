@@ -1,0 +1,392 @@
+import json
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT))
+
+import agent_chat as ac  # noqa: E402
+
+SPEC = {n: ("d", [("path", "string", "p")]) for n in ("open_folder", "set_format", "print_photos", "preflight", "app_settings", "clear_queue")}
+
+
+class Stub:
+    def __init__(self, calls):
+        self.calls = list(calls)
+        self.seen = []
+
+    def chat(self, messages, tools):
+        self.seen.append(len(messages))
+        c = self.calls.pop(0)
+        if isinstance(c, str):
+            return {"content": c}
+        return {"content": "", "tool_calls": [{"id": "1", "function": {"name": c[0], "arguments": json.dumps(c[1])}}]}
+
+
+class ChatTest(unittest.TestCase):
+    def setUp(self):
+        self.root = tempfile.mkdtemp()
+        self.ran = []
+        self.gate = ac.ToolGate(SPEC, roots=[self.root])
+
+    def agent(self, calls, **kw):
+        return ac.Agent(Stub(calls), kw.pop("gate", self.gate), lambda r: self.ran.append(r) or {"ok": True}, **kw)
+
+    def test_tools_whitelist_hides_forbidden(self):
+        names = {t["function"]["name"] for t in self.gate.tools()}
+        self.assertIn("open_folder", names)
+        self.assertNotIn("app_settings", names)
+        self.assertNotIn("clear_queue", names)
+
+    def test_forbidden_tool_not_executed(self):
+        a = self.agent([("app_settings", {}), "done"])
+        a.say("x")
+        self.assertEqual(self.ran, [])
+
+    def test_path_outside_roots_denied(self):
+        a = self.agent([("open_folder", {"path": "/etc"}), "done"])
+        a.say("x")
+        self.assertEqual(self.ran, [])
+        a = self.agent([("open_folder", {"path": self.root + "/a"}), "done"])
+        a.say("x")
+        self.assertEqual(len(self.ran), 1)
+
+    def test_path_traversal_denied(self):
+        a = self.agent([("open_folder", {"path": self.root + "/../x"}), "done"])
+        a.say("x")
+        self.assertEqual(self.ran, [])
+
+    def test_no_roots_means_no_files(self):
+        g = ac.ToolGate(SPEC, roots=[])
+        a = self.agent([("open_folder", {"path": self.root}), "done"], gate=g)
+        a.say("x")
+        self.assertEqual(self.ran, [])
+
+    def test_print_asks_and_declines(self):
+        a = self.agent([("print_photos", {}), "ok"], confirm=lambda t: False)
+        a.say("print")
+        self.assertEqual([r["cmd"] for r in self.ran], ["preflight"])     # проверка до вопроса, сама печать не ушла
+
+    def test_print_confirmed(self):
+        a = self.agent([("print_photos", {}), "ok"], confirm=lambda t: True)
+        a.say("print")
+        self.assertEqual([r["cmd"] for r in self.ran], ["preflight", "print_photos"])
+        self.assertEqual(a.printed_ok, 1)
+
+    def test_print_disabled(self):
+        g = ac.ToolGate(SPEC, roots=[self.root], policy={"allow_print": False})
+        a = self.agent([("print_photos", {}), "ok"], gate=g, confirm=lambda t: True)
+        a.say("print")
+        self.assertEqual(self.ran, [])
+
+    def test_step_limit(self):
+        a = self.agent([("preflight", {"path": self.root + "/%d" % i}) for i in range(5)], max_steps=3, route=False)
+        self.assertIn("limit", a.say("x"))
+        self.assertEqual(len(self.ran), 3)
+
+    def test_stop(self):
+        a = self.agent([("preflight", {}), "x"], route=False)
+        a.stop()
+        a.stopped = False
+        orig = a.execute
+        a.execute = lambda r: (a.stop(), orig(r))[1]
+        self.assertEqual(a.say("x"), "(stopped)")
+
+    def test_repeated_call_stops(self):
+        a = self.agent([("preflight", {})] * 5, route=False)
+        self.assertIn("repeating", a.say("x"))
+        self.assertEqual(len(self.ran), 2)
+
+    def test_text_tool_call_is_parsed(self):
+        a = self.agent(['<tool_call>{"name": "preflight", "arguments": {}}</tool_call>', "done"], route=False)
+        self.assertEqual(a.say("x"), "done")
+        self.assertEqual(len(self.ran), 1)
+
+    def test_routing_limits_tools(self):
+        spec = {n: ("d", []) for n in ("open_folder", "set_adjust", "print_photos", "list_printers")}
+        gate = ac.ToolGate(spec, groups=[])
+        gate.route("открой папку")
+        self.assertNotIn("print_photos", gate.names)
+        gate.route("распечатай")
+        self.assertIn("print_photos", gate.names)
+        self.assertIn("list_printers", gate.names)
+
+    def test_need_tools_adds_group(self):
+        a = self.agent([("need_tools", {"group": "print"}), ("preflight", {}), "ok"])
+        a.say("x")
+        self.assertEqual(len(self.ran), 1)
+
+    def test_images_are_dropped_from_results(self):
+        a = ac.Agent(Stub([("preflight", {}), "ok"]), self.gate, lambda r: {"ok": True, "_image_b64": "A" * 5000, "n": 1}, route=False)
+        a.say("x")
+        tool = [m for m in a.messages if m["role"] == "tool"][0]["content"]
+        self.assertNotIn("AAAA", tool)
+
+    def test_required_in_schema(self):
+        g = ac.ToolGate(SPEC, required={"open_folder": ["path"]})
+        t = [x for x in g.tools() if x["function"]["name"] == "open_folder"][0]
+        self.assertEqual(t["function"]["parameters"]["required"], ["path"])
+
+    def test_rollback_uses_undo_steps(self):
+        depth = [3]
+        a = ac.Agent(Stub([("preflight", {}), "ok"]), self.gate, lambda r: self.ran.append(r) or depth.__setitem__(0, depth[0] + 2) or {"ok": True},
+                     undo_depth=lambda: depth[0], route=False)
+        a.say("x")
+        self.assertEqual(a.rollback(), 2)
+        self.assertEqual(self.ran[-1], {"cmd": "undo", "steps": 2})
+
+    def test_find_outliers(self):
+        ph = [{"index": i, "name": "%d.jpg" % i, "mean_luma": 120, "sharpness": 10, "shadow_clip_pct": 0, "highlight_clip_pct": 0} for i in range(5)]
+        ph[1]["mean_luma"] = 30
+        ph[3]["sharpness"] = 2
+        out = ac.find_outliers(ph)
+        self.assertEqual([o["index"] for o in out], [1, 3])
+        self.assertIn("dark", out[0]["why"])
+
+    def test_prepare_series_runs_subcommands_and_respects_roots(self):
+        cmds = []
+
+        def ex(r):
+            cmds.append(r["cmd"])
+            if r["cmd"] == "open_folder":
+                return {"ok": True, "result": {"photo_count": 4}}
+            if r["cmd"] == "preflight":
+                return {"ok": True, "result": {"ready": True, "checks": [], "sheets_to_print": 8}}
+            return {"ok": True, "result": {}}
+        spec = {n: ("d", []) for n in ("open_folder", "set_format", "set_copies", "preflight", "analyze_photos")}
+        gate = ac.ToolGate(spec, roots=[self.root])
+        a = ac.Agent(Stub([("prepare_series", {"folder": self.root, "format": "10x15", "copies": 2}), "ok"]), gate, ex, route=False)
+        a.say("x")
+        self.assertEqual(cmds, ["open_folder", "set_format", "set_copies", "preflight"])
+        self.assertNotIn("print_photos", cmds)
+        other = tempfile.mkdtemp()
+        cmds.clear()
+        a = ac.Agent(Stub([("prepare_series", {"folder": other, "format": "10x15"}), "ok"]), gate, ex, route=False)
+        a.say("x")
+        self.assertEqual(cmds, [])
+
+    def test_local_hosts_skip_system_proxy(self):
+        for u in ("http://100.89.182.113:8080/v1", "http://192.168.1.5/v1", "http://localhost:8080/v1", "http://myhost:8090/v1"):
+            self.assertTrue(ac._is_local(u), u)
+        for u in ("http://8.8.8.8/v1", "https://api.example.com/v1"):
+            self.assertFalse(ac._is_local(u), u)
+
+    def test_quick_groups_and_block_print(self):
+        spec = {n: ("d", []) for n in ("open_folder", "auto_crop", "set_adjust", "print_photos", "preflight", "analyze_photo", "list_printers")}
+        ran = []
+        gate = ac.ToolGate(spec, roots=[])
+        a = ac.Agent(Stub([("auto_crop", {}), ("print_photos", {}), "ok", "ok2"]), gate, lambda r: ran.append(r["cmd"]) or {"ok": True},
+                     confirm=lambda t: True)
+        a.say("prepare", groups=["prepare", "color", "auto", "print"], block_print=True)
+        self.assertEqual(ran, ["auto_crop"])                      # автоматика доступна, печать запрещена
+        self.assertNotIn("print_photos", gate.names)
+        a.say("print", groups=["prepare", "print"], block_print=False)
+        self.assertIn("print_photos", gate.names)
+        self.assertNotIn("auto_crop", gate.names)
+
+    def test_vision_sends_picture_as_image(self):
+        res = {"ok": True, "result": {"photo": "a.jpg", "_image_b64": "QUJD"}}
+        a = ac.Agent(Stub([("preflight", {}), "ok"]), self.gate, lambda r: json.loads(json.dumps(res)), route=False, vision=True)
+        a.say("x")
+        pics = [m for m in a.messages if isinstance(m.get("content"), list)]
+        self.assertEqual(len(pics), 1)
+        self.assertEqual(pics[0]["content"][1]["image_url"]["url"], "data:image/jpeg;base64,QUJD")
+        tool = [m for m in a.messages if m["role"] == "tool"][0]["content"]
+        self.assertNotIn("QUJD", tool)
+
+    def test_no_vision_no_picture(self):
+        res = {"ok": True, "result": {"_image_b64": "QUJD"}}
+        a = ac.Agent(Stub([("preflight", {}), "ok"]), self.gate, lambda r: json.loads(json.dumps(res)), route=False)
+        a.say("x")
+        self.assertFalse([m for m in a.messages if isinstance(m.get("content"), list)])
+
+    def test_bad_arguments_json(self):
+        a = ac.Agent(Stub([]), self.gate, lambda r: {"ok": True})
+        out = json.loads(a._run({"function": {"name": "preflight", "arguments": "{bad"}}))
+        self.assertFalse(out["ok"])
+
+
+class ReviewFixesTest(unittest.TestCase):
+    """Находки проверки 10.11: доступ к папкам, печать, история вызовов, «Стоп», жалобы на отпечаток."""
+
+    def setUp(self):
+        self.root = tempfile.mkdtemp()
+        self.ran = []
+        self.answers = {}
+
+    def exe(self, r):
+        self.ran.append(r)
+        return self.answers.get(r["cmd"], {"ok": True, "result": {}})
+
+    def agent(self, calls, gate=None, **kw):
+        g = gate or ac.ToolGate(SPEC, roots=[self.root], policy=kw.pop("policy", None))
+        return ac.Agent(Stub(calls), g, self.exe, route=False, **kw)
+
+    def test_typed_file_does_not_open_its_folder(self):
+        import os
+        d = os.path.join(self.root, "Documents")
+        os.makedirs(os.path.join(d, "Private"))
+        f = os.path.join(d, "a.jpg")
+        g = ac.ToolGate(SPEC, roots=[])
+        a = self.agent([("open_folder", {"path": f}), ("open_folder", {"path": os.path.join(d, "Private")}), "done"], gate=g)
+        a.say("открой " + f)
+        self.assertEqual([r["path"] for r in self.ran], [f])
+
+    def test_one_folder_question_per_turn(self):
+        asked = []
+        g = ac.ToolGate(SPEC, roots=[])
+        a = self.agent([("open_folder", {"path": "/x1"}), ("open_folder", {"path": "/x2"}), "done"], gate=g,
+                       allow_path=lambda p: asked.append(p) or False)
+        a.say("go")
+        self.assertEqual(asked, ["/x1"])
+
+    def test_print_refused_when_preflight_has_errors(self):
+        self.answers["preflight"] = {"ok": True, "result": {"ready": False, "checks": [{"level": "error", "message": "no printer"}]}}
+        a = self.agent([("print_photos", {}), "ok"], policy={"print_mode": "auto"})
+        a.say("print")
+        self.assertNotIn("print_photos", [r["cmd"] for r in self.ran])
+
+    def test_sheet_limit_forced(self):
+        a = self.agent([("print_photos", {"max_sheets": 999}), "ok"], policy={"print_mode": "auto", "max_sheets": 20})
+        a.say("print")
+        self.assertEqual(self.ran[-1]["max_sheets"], 20)
+
+    def test_repeat_stop_answers_every_call(self):
+        a = self.agent([("preflight", {})] * 5)
+        a.say("x")
+        ids = {c["id"] for m in a.messages if m.get("tool_calls") for c in m["tool_calls"]}
+        answered = {m["tool_call_id"] for m in a.messages if m.get("role") == "tool"}
+        self.assertEqual(ids, answered)
+
+    def test_alternating_loop_stops(self):
+        calls = [("preflight", {}), ("set_format", {"path": ""})] * 10 + ["done"]
+        out = self.agent(calls).say("x")
+        self.assertIn("repeating", out)
+        self.assertLessEqual(len(self.ran), 8)
+
+    def test_missing_call_id_generated(self):
+        class NoId(Stub):
+            def chat(self, messages, tools):
+                r = super().chat(messages, tools)
+                for c in r.get("tool_calls") or []:
+                    c["id"] = ""
+                return r
+        a = ac.Agent(NoId([("preflight", {}), "done"]), ac.ToolGate(SPEC, roots=[self.root]), self.exe, route=False)
+        a.say("x")
+        tool = [m for m in a.messages if m.get("role") == "tool"][0]
+        self.assertTrue(tool["tool_call_id"])
+
+    def test_think_removed(self):
+        self.assertEqual(self.agent(["<think>hmm</think>Готово"]).say("x"), "Готово")
+
+    def test_stop_interrupts_waiting_for_model(self):
+        import threading
+        import time
+
+        class Slow(ac.OpenAICompatible):
+            def _chat(self, messages, tools):
+                time.sleep(5)
+                return {"content": "late"}
+        p = Slow("http://localhost:1/v1")
+        a = ac.Agent(p, ac.ToolGate(SPEC, roots=[]), self.exe, route=False)
+        threading.Timer(0.2, a.stop).start()
+        t0 = time.monotonic()
+        self.assertEqual(a.say("x"), "(stopped)")
+        self.assertLess(time.monotonic() - t0, 2)
+
+    def test_complaints(self):
+        self.assertEqual(ac.parse_complaint("розовит"), [("tone", (0, -1))])
+        self.assertEqual(ac.parse_complaint("темнее экрана"), [("gamma", 1)])
+        self.assertEqual(ac.parse_complaint("сделай темнее"), [("gamma", -1)])
+        self.assertEqual(ac.parse_complaint("всё хорошо"), [])
+
+    def test_fix_print_adds_step_to_current(self):
+        self.answers["printer_correction"] = {"ok": True, "result": {"printer_correction": {
+            "on": False, "tone": {"shadows": [0, 0], "mids": [0, 5], "lights": [0, 0]}, "gamma": 0, "sat": 0}}}
+        spec = dict(SPEC, printer_correction=("d", []))
+        g = ac.ToolGate(spec, groups=["color"], roots=[self.root])
+        a = self.agent([("fix_print", {"problem": "розовит и темнее экрана", "strength": "slight"}), "ok"], gate=g)
+        a.say("x")
+        w = self.ran[-1]
+        self.assertTrue(w["on"])
+        self.assertEqual(w["tone"]["mids"], [0, 0])
+        self.assertEqual(w["gamma"], 5)
+
+
+if __name__ == "__main__":
+    unittest.main()
+
+
+class AllowPathTest(unittest.TestCase):
+    def test_person_allows_new_folder(self):
+        root, other = tempfile.mkdtemp(), tempfile.mkdtemp()
+        ran = []
+        gate = ac.ToolGate(SPEC, roots=[root])
+        a = ac.Agent(Stub([("open_folder", {"path": other}), "ok"]), gate, lambda r: ran.append(r) or {"ok": True}, allow_path=lambda p: True)
+        a.say("x")
+        self.assertEqual(len(ran), 1)
+
+    def test_person_refuses_new_folder(self):
+        root, other = tempfile.mkdtemp(), tempfile.mkdtemp()
+        ran = []
+        gate = ac.ToolGate(SPEC, roots=[root])
+        a = ac.Agent(Stub([("open_folder", {"path": other}), "ok"]), gate, lambda r: ran.append(r) or {"ok": True}, allow_path=lambda p: False)
+        a.say("x")
+        self.assertEqual(ran, [])
+
+
+    def test_path_written_by_person_needs_no_question(self):
+        root, other = tempfile.mkdtemp(), tempfile.mkdtemp()
+        ran, asked = [], []
+        gate = ac.ToolGate(SPEC, roots=[root])
+        a = ac.Agent(Stub([("open_folder", {"path": other + "/sub"}), "ok"]), gate, lambda r: ran.append(r) or {"ok": True},
+                     allow_path=lambda p: asked.append(p) or False, route=False)
+        a.say("распечатай папку %s 10x15" % other)
+        self.assertEqual(len(ran), 1)
+        self.assertEqual(asked, [])
+
+    def test_other_path_still_asks(self):
+        root, other, said = tempfile.mkdtemp(), tempfile.mkdtemp(), tempfile.mkdtemp()
+        asked = []
+        gate = ac.ToolGate(SPEC, roots=[root])
+        a = ac.Agent(Stub([("open_folder", {"path": other}), "ok"]), gate, lambda r: {"ok": True},
+                     allow_path=lambda p: asked.append(p) or False, route=False)
+        a.say("открой %s" % said)
+        self.assertEqual(asked, [other])
+
+    def test_drive_root_in_message_does_not_open_everything(self):
+        a = ac.Agent(Stub([]), ac.ToolGate(SPEC), lambda r: {"ok": True})
+        a.user_text = "печатай всё с /"
+        self.assertFalse(a.user_gave("/etc/passwd"))
+
+
+class ProviderTest(unittest.TestCase):
+    def test_openai_compatible_roundtrip(self):
+        import threading
+        from http.server import BaseHTTPRequestHandler, HTTPServer
+        seen = {}
+
+        class H(BaseHTTPRequestHandler):
+            def log_message(self, *a):
+                pass
+
+            def do_POST(self):
+                seen["path"], seen["auth"] = self.path, self.headers.get("Authorization")
+                seen["body"] = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+                out = json.dumps({"choices": [{"message": {"role": "assistant", "content": "hi"}}]}).encode()
+                self.send_response(200)
+                self.send_header("Content-Length", str(len(out)))
+                self.end_headers()
+                self.wfile.write(out)
+
+        srv = HTTPServer(("127.0.0.1", 0), H)
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+        try:
+            r = ac.OpenAICompatible("http://127.0.0.1:%d/v1" % srv.server_port, "m").chat([{"role": "user", "content": "x"}], [])
+        finally:
+            srv.shutdown()
+        self.assertEqual(r["content"], "hi")
+        self.assertEqual(seen["path"], "/v1/chat/completions")
+        self.assertIsNone(seen["auth"])
