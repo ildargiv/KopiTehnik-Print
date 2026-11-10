@@ -8864,7 +8864,7 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         s = self.s
         self._bleed_flush()
         fresh = pc.load_settings()                    # окно печати пишет свои разделы в тот же файл — не затираем их
-        for k in ("last_dir", "start_dir_mode", "snap_px", "anim", "icc_dir", "check_updates", "skip_update", "doc_paper", "doc_fit", "doc_margin", "doc_cm_on", "doc_icc", "converter_path", "adj_presets", "adj_preset_names", "confirm_actions", "agent_enabled", "agent_badge", "agent_lock", "agent_token", "agent_port", "agent_allow_print", "agent_max_sheets", "agent_confirm_print", "multi_enabled", "multi_printers", "multi_modes", "multi_on", "multi_serialize", "multi_blocks", "qs_visible", "qs_enabled", "qs_highlight", "chat_enabled", "chat_url", "chat_model", "chat_key", "chat_dry", "chat_print_mode", "chat_folder", "chat_roots", "chat_confirmed", "chat_auto_offered", "chat_vision"):
+        for k in ("last_dir", "start_dir_mode", "snap_px", "anim", "icc_dir", "check_updates", "skip_update", "doc_paper", "doc_fit", "doc_margin", "doc_cm_on", "doc_icc", "converter_path", "adj_presets", "adj_preset_names", "confirm_actions", "agent_enabled", "agent_badge", "agent_lock", "agent_token", "agent_port", "agent_allow_print", "agent_max_sheets", "agent_confirm_print", "multi_enabled", "multi_printers", "multi_modes", "multi_on", "multi_serialize", "multi_blocks", "qs_visible", "qs_enabled", "qs_highlight", "chat_enabled", "chat_url", "chat_model", "chat_key", "chat_dry", "chat_print_mode", "chat_folder", "chat_roots", "chat_confirmed", "chat_auto_offered", "chat_vision", "chat_max_sheets"):
             if k in self.settings:
                 fresh[k] = self.settings[k]
         fresh.update(format=s["format"], orient=s["orient"], mode=s["mode"], recursive=s["recursive"], subfolder=s["subfolder"],
@@ -10463,6 +10463,12 @@ for _k, _v in i18n_161.EN.items():
 for _k, _v in i18n_161.EN_FMT.items():
     pc.EN_FMT.setdefault(_k, _v)
 for _code, _tab in i18n_161.OTHER.items():
+    for _k, _v in _tab.items():
+        i18n.TABLE.get(_code, {}).setdefault(_k, _v)
+import i18n_agent                                        # noqa: E402  (встроенный агент «Печатник»)
+for _k, _v in i18n_agent.EN.items():
+    pc.EN.setdefault(_k, _v)
+for _code, _tab in i18n_agent.OTHER.items():
     for _k, _v in _tab.items():
         i18n.TABLE.get(_code, {}).setdefault(_k, _v)
 pc.EN.update({

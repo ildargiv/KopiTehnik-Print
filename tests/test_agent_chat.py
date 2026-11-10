@@ -67,12 +67,12 @@ class ChatTest(unittest.TestCase):
     def test_print_asks_and_declines(self):
         a = self.agent([("print_photos", {}), "ok"], confirm=lambda t: False)
         a.say("print")
-        self.assertEqual(self.ran, [])
+        self.assertEqual([r["cmd"] for r in self.ran], ["preflight"])     # проверка до вопроса, сама печать не ушла
 
     def test_print_confirmed(self):
         a = self.agent([("print_photos", {}), "ok"], confirm=lambda t: True)
         a.say("print")
-        self.assertEqual(len(self.ran), 1)
+        self.assertEqual([r["cmd"] for r in self.ran], ["preflight", "print_photos"])
         self.assertEqual(a.printed_ok, 1)
 
     def test_print_disabled(self):
@@ -96,7 +96,7 @@ class ChatTest(unittest.TestCase):
 
     def test_repeated_call_stops(self):
         a = self.agent([("preflight", {})] * 5, route=False)
-        self.assertIn("repeated", a.say("x"))
+        self.assertIn("repeating", a.say("x"))
         self.assertEqual(len(self.ran), 2)
 
     def test_text_tool_call_is_parsed(self):
@@ -206,6 +206,113 @@ class ChatTest(unittest.TestCase):
         a = ac.Agent(Stub([]), self.gate, lambda r: {"ok": True})
         out = json.loads(a._run({"function": {"name": "preflight", "arguments": "{bad"}}))
         self.assertFalse(out["ok"])
+
+
+class ReviewFixesTest(unittest.TestCase):
+    """Находки проверки 10.11: доступ к папкам, печать, история вызовов, «Стоп», жалобы на отпечаток."""
+
+    def setUp(self):
+        self.root = tempfile.mkdtemp()
+        self.ran = []
+        self.answers = {}
+
+    def exe(self, r):
+        self.ran.append(r)
+        return self.answers.get(r["cmd"], {"ok": True, "result": {}})
+
+    def agent(self, calls, gate=None, **kw):
+        g = gate or ac.ToolGate(SPEC, roots=[self.root], policy=kw.pop("policy", None))
+        return ac.Agent(Stub(calls), g, self.exe, route=False, **kw)
+
+    def test_typed_file_does_not_open_its_folder(self):
+        import os
+        d = os.path.join(self.root, "Documents")
+        os.makedirs(os.path.join(d, "Private"))
+        f = os.path.join(d, "a.jpg")
+        g = ac.ToolGate(SPEC, roots=[])
+        a = self.agent([("open_folder", {"path": f}), ("open_folder", {"path": os.path.join(d, "Private")}), "done"], gate=g)
+        a.say("открой " + f)
+        self.assertEqual([r["path"] for r in self.ran], [f])
+
+    def test_one_folder_question_per_turn(self):
+        asked = []
+        g = ac.ToolGate(SPEC, roots=[])
+        a = self.agent([("open_folder", {"path": "/x1"}), ("open_folder", {"path": "/x2"}), "done"], gate=g,
+                       allow_path=lambda p: asked.append(p) or False)
+        a.say("go")
+        self.assertEqual(asked, ["/x1"])
+
+    def test_print_refused_when_preflight_has_errors(self):
+        self.answers["preflight"] = {"ok": True, "result": {"ready": False, "checks": [{"level": "error", "message": "no printer"}]}}
+        a = self.agent([("print_photos", {}), "ok"], policy={"print_mode": "auto"})
+        a.say("print")
+        self.assertNotIn("print_photos", [r["cmd"] for r in self.ran])
+
+    def test_sheet_limit_forced(self):
+        a = self.agent([("print_photos", {"max_sheets": 999}), "ok"], policy={"print_mode": "auto", "max_sheets": 20})
+        a.say("print")
+        self.assertEqual(self.ran[-1]["max_sheets"], 20)
+
+    def test_repeat_stop_answers_every_call(self):
+        a = self.agent([("preflight", {})] * 5)
+        a.say("x")
+        ids = {c["id"] for m in a.messages if m.get("tool_calls") for c in m["tool_calls"]}
+        answered = {m["tool_call_id"] for m in a.messages if m.get("role") == "tool"}
+        self.assertEqual(ids, answered)
+
+    def test_alternating_loop_stops(self):
+        calls = [("preflight", {}), ("set_format", {"path": ""})] * 10 + ["done"]
+        out = self.agent(calls).say("x")
+        self.assertIn("repeating", out)
+        self.assertLessEqual(len(self.ran), 8)
+
+    def test_missing_call_id_generated(self):
+        class NoId(Stub):
+            def chat(self, messages, tools):
+                r = super().chat(messages, tools)
+                for c in r.get("tool_calls") or []:
+                    c["id"] = ""
+                return r
+        a = ac.Agent(NoId([("preflight", {}), "done"]), ac.ToolGate(SPEC, roots=[self.root]), self.exe, route=False)
+        a.say("x")
+        tool = [m for m in a.messages if m.get("role") == "tool"][0]
+        self.assertTrue(tool["tool_call_id"])
+
+    def test_think_removed(self):
+        self.assertEqual(self.agent(["<think>hmm</think>Готово"]).say("x"), "Готово")
+
+    def test_stop_interrupts_waiting_for_model(self):
+        import threading
+        import time
+
+        class Slow(ac.OpenAICompatible):
+            def _chat(self, messages, tools):
+                time.sleep(5)
+                return {"content": "late"}
+        p = Slow("http://localhost:1/v1")
+        a = ac.Agent(p, ac.ToolGate(SPEC, roots=[]), self.exe, route=False)
+        threading.Timer(0.2, a.stop).start()
+        t0 = time.monotonic()
+        self.assertEqual(a.say("x"), "(stopped)")
+        self.assertLess(time.monotonic() - t0, 2)
+
+    def test_complaints(self):
+        self.assertEqual(ac.parse_complaint("розовит"), [("tone", (0, -1))])
+        self.assertEqual(ac.parse_complaint("темнее экрана"), [("gamma", 1)])
+        self.assertEqual(ac.parse_complaint("сделай темнее"), [("gamma", -1)])
+        self.assertEqual(ac.parse_complaint("всё хорошо"), [])
+
+    def test_fix_print_adds_step_to_current(self):
+        self.answers["printer_correction"] = {"ok": True, "result": {"printer_correction": {
+            "on": False, "tone": {"shadows": [0, 0], "mids": [0, 5], "lights": [0, 0]}, "gamma": 0, "sat": 0}}}
+        spec = dict(SPEC, printer_correction=("d", []))
+        g = ac.ToolGate(spec, groups=["color"], roots=[self.root])
+        a = self.agent([("fix_print", {"problem": "розовит и темнее экрана", "strength": "slight"}), "ok"], gate=g)
+        a.say("x")
+        w = self.ran[-1]
+        self.assertTrue(w["on"])
+        self.assertEqual(w["tone"]["mids"], [0, 0])
+        self.assertEqual(w["gamma"], 5)
 
 
 if __name__ == "__main__":
