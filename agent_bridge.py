@@ -81,14 +81,30 @@ class AgentHttpServer:
                 got = (self.headers.get("Authorization") or "").strip()
                 return secrets.compare_digest(got, "Bearer " + server.token)
 
+            def _reject(self, code, body):
+                """Отказ до разбора запроса. Тело сначала дочитываем: если закрыть сокет с непрочитанными
+                данными, Windows рвёт соединение (WinError 10053) и клиент не видит код ответа."""
+                try:
+                    n = int(self.headers.get("Content-Length") or 0)
+                except ValueError:
+                    n = 0
+                if 0 < n <= MAX_BODY:
+                    try:
+                        self.rfile.read(n)
+                    except OSError:
+                        pass
+                elif n:
+                    self.close_connection = True
+                self._send(code, body)
+
             def do_GET(self):
                 self._send(405, b'{"error":"use POST"}')
 
             def do_POST(self):
                 if self.path.split("?")[0] != "/mcp":
-                    return self._send(404, b'{"error":"not found"}')
+                    return self._reject(404, b'{"error":"not found"}')
                 if not self._auth():
-                    return self._send(401, b'{"error":"unauthorized"}')
+                    return self._reject(401, b'{"error":"unauthorized"}')
                 try:
                     n = int(self.headers.get("Content-Length") or 0)
                     if n > MAX_BODY:
