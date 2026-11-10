@@ -48,7 +48,7 @@ try:
                                 QAbstractListModel, QModelIndex, QEvent, QPropertyAnimation, QEasingCurve, Property, QByteArray,
                                 QVariantAnimation)
     from PySide6.QtGui import (QPainter, QColor, QPen, QBrush, QPixmap, QImage, QIcon, QPolygonF, QPainterPath, QFont, QIntValidator, QLinearGradient, QRadialGradient, QConicalGradient, QFontMetricsF,
-                               QKeySequence, QShortcut, QFontMetrics, QTransform)
+                               QKeySequence, QShortcut, QFontMetrics, QFontInfo, QTransform)
     from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QFrame, QLabel, QPushButton, QToolButton, QHBoxLayout,
                                    QVBoxLayout, QGridLayout, QComboBox, QLineEdit, QSlider, QRadioButton, QButtonGroup,
                                    QListView, QStyledItemDelegate, QStyle, QScrollArea, QStackedWidget, QDialog, QFileDialog,
@@ -619,7 +619,50 @@ class ModeSwitch(QWidget):
         p.end()
 
 
-class MotionButton(QPushButton):
+class FitButton(QPushButton):
+    """Кнопка, у которой подпись при нехватке ширины становится мельче (не ниже fit_min px), а не обрезается:
+    узкая панель (316 px) и длинные слова в немецком, русском, арабском. Включается fit_text()."""
+    fit_min = 10
+
+    def fit_text(self, on=True):
+        self._fit_on, self._fit_base, self._fit_over, self._fit_cur = on, 0, 0, None
+        return self
+
+    def resizeEvent(self, e):
+        super().resizeEvent(e)
+        if getattr(self, "_fit_on", False):
+            self._fit_now()
+
+    def _fit_now(self):
+        """Сначала сужаются поля кнопки (16 → 5 px), и только потом уменьшается шрифт."""
+        txt, w = self.text(), self.width()
+        sheet = self.styleSheet()
+        if not txt or w < 20 or (sheet and "/*fit*/" not in sheet):      # у кнопки свой стиль (например, зелёная): не трогаем
+            return
+        if not self._fit_base:                                        # первое измерение: стиль ещё не менялся
+            self._fit_base = QFontInfo(self.font()).pixelSize()
+            if self._fit_base <= 0:                                   # шрифт задан в пунктах
+                self._fit_base = max(self.fit_min + 1, round(self.font().pointSizeF() * 96 / 72))
+            self._fit_over = self.sizeHint().width() - self.fontMetrics().horizontalAdvance(txt)
+        f = QFont(self.font())
+        f.setPixelSize(self._fit_base)
+        if self._fit_over + QFontMetrics(f).horizontalAdvance(txt) <= w:
+            want = (self._fit_base, False)
+        else:
+            tight = 12 + (self.iconSize().width() + 4 if not self.icon().isNull() else 0)      # поля 5 px + рамка + значок
+            px = self._fit_base
+            while px > self.fit_min:
+                f.setPixelSize(px)
+                if tight + QFontMetrics(f).horizontalAdvance(txt) <= w:
+                    break
+                px -= 1
+            want = (px, True)
+        if want != self._fit_cur:
+            self._fit_cur = want
+            self.setStyleSheet("/*fit*/ QPushButton { font-size: %dpx; padding-left: 5px; padding-right: 5px; }" % want[0] if want[1] else "")
+
+
+class MotionButton(FitButton):
     """Кнопка с живым откликом: плавная подсветка при наведении и волна от места нажатия."""
 
     def __init__(self, text=""):
@@ -806,7 +849,7 @@ class GearButton(MotionButton):
 
 
 def btn(text, slot=None, kind=None, big=False, ico=None, ico_color=None, tip=None):
-    b = MotionButton(tr(text))
+    b = MotionButton(tr(text)).fit_text()
     if kind:
         b.setProperty("kind", kind)
     if big:
@@ -1155,7 +1198,7 @@ class Segmented(QFrame):
         l = hbox(spacing=2, margins=(3, 3, 3, 3))
         self.values = []
         for i, (text, val) in enumerate(options):
-            b = QPushButton(tr(text))
+            b = FitButton(tr(text)).fit_text()
             b.setProperty("kind", "seg")
             b.setCheckable(True)
             b.setCursor(Qt.PointingHandCursor)
@@ -5879,10 +5922,11 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         self.seg_pc_zone = Segmented([(n, z) for z, n in self.PC_ZONES], "mids")
         self.seg_pc_zone.changed.connect(lambda z: (setattr(self, "_pc_zone", z), self.pcorr_sync()))
         names = [("Красный", 0), ("Жёлтый", 1), ("Зелёный", 2), ("Голубой", 3), ("Синий", 4), ("Пурпурный", 5)]
-        self.seg_pc_sel = Segmented([(n, i) for n, i in names], 0)
-        self.seg_pc_sel.changed.connect(lambda i: (setattr(self, "_pc_sel", i), self.pcorr_sync()))
-        for b in self.seg_pc_sel.group.buttons():
-            b.setStyleSheet("padding:6px 5px;")
+        self.seg_pc_sel = Segmented(names[:3], 0)               # шесть названий в один ряд на панели 316 px не помещаются: два ряда по три
+        self.seg_pc_sel2 = Segmented(names[3:], 0)
+        self.seg_pc_sel2.clear()
+        self.seg_pc_sel.changed.connect(lambda i: (self.seg_pc_sel2.clear(), setattr(self, "_pc_sel", i), self.pcorr_sync()))
+        self.seg_pc_sel2.changed.connect(lambda i: (self.seg_pc_sel.clear(), setattr(self, "_pc_sel", i), self.pcorr_sync()))
         self.l_pcorr = lbl("", "muted", wrap=True)
         self.l_pc_prof = lbl("", "muted", wrap=True)
         body = vbox(
@@ -5890,7 +5934,7 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
             lbl("Нейтраль (серый)", "muted"), self.seg_pc_zone,
             self._pc_slider("Тепло", tone_get(0), tone_set(0), "холоднее", "теплее"),
             self._pc_slider("Пурпур", tone_get(1), tone_set(1), "зеленее", "пурпурнее"),
-            lbl("По цветам", "muted"), self.seg_pc_sel,
+            lbl("По цветам", "muted"), self.seg_pc_sel, self.seg_pc_sel2,
             self._pc_slider("Оттенок", sel_get(0), sel_set(0)),
             self._pc_slider("Насыщ.", sel_get(1), sel_set(1)),
             self._pc_slider("Яркость", sel_get(2), sel_set(2)),
@@ -5898,8 +5942,8 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
             self._pc_slider("Гамма", key_get("gamma"), key_set("gamma"), "темнее", "светлее"),
             self._pc_slider("Цвета", key_get("sat"), key_set("sat"), "бледнее", "ярче"),
             self.l_pcorr, self.l_pc_prof,
-            hbox(btn("Сбросить", self.pcorr_reset), btn("Тестовая страница", self.add_pcorr_test, ico="image"),
-                 btn("Тестовый лист", self.add_test_sheet, ico="image"), None, spacing=6),
+            hbox(btn("Сбросить", self.pcorr_reset), btn("Тестовый лист", self.add_test_sheet, ico="image"), None, spacing=6),
+            hbox(btn("Тестовая страница", self.add_pcorr_test, ico="image"), None, spacing=6),         # три кнопки в ряд на панели 316 px обрезались
             spacing=6)
         self.w_pcorr_body = QWidget()
         self.w_pcorr_body.setLayout(body)
@@ -7003,6 +7047,8 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         b_wb = ibtn("pipette", "Баланс белого: щёлкните по фото в месте, которое должно быть серым или белым", self.pick_white, 34, True)
         b_enh = btn("Улучшить", lambda: self.enhance(1), ico="sparkle", tip="Улучшение для печати на Epson: светлее, чуть контрастнее и резче. Подбирается под каждый снимок. Прежняя коррекция сбрасывается.")
         b_sup = btn("Супер", lambda: self.enhance(2), ico="sparkle", tip="Более сильное улучшение: ярче, сочнее, резче")
+        b_enh.setIconSize(QSize(16, 16))
+        b_sup.setIconSize(QSize(16, 16))
         self.b_pre, self.b_pre_save, self.b_pre_ren = {}, {}, {}
         cols = []
         for n in (1, 2, 3):
@@ -10358,6 +10404,22 @@ pc.EN.update({
 })
 pc.EN_FMT.update({"Относится к профилю печати: {t}": "Belongs to the print profile: {t}", "Пресет {n}": "Preset {n}", "Название пресета {n}": "Name of preset {n}", "Вход {a} → выход {b}": "Input {a} → output {b}", "Пресет {n} пока пуст. Настройте ползунки и нажмите «Сохранить» под ним.": "Preset {n} is empty. Set the sliders and press Save under it.", "Заменить сохранённый пресет {n} текущими настройками?": "Replace saved preset {n} with the current settings?", "Применён пресет {n}": "Preset {n} applied", "Пресет {n} сохранён": "Preset {n} saved", "Страниц: {n}": "Pages: {n}", "Открыть документ «{name}»": "Open document “{name}”"})
 pc.EN.update({
+    "По числу": "By count", "По размеру": "By size",
+    "Рамка": "Frame",
+    "Увеличение этого фото": "Zoom of this photo",
+    "Быстрый старт": "Quick start",
+    "Настройки программы: оформление, язык, печать": "Program settings: look, language, printing",
+    "Отразить фото слева направо": "Flip the photo left to right",
+    "Отразить фото сверху вниз": "Flip the photo top to bottom",
+    "Сохранить сюда текущие настройки": "Save the current settings here",
+    "Сколько ячеек показывать": "How many cells to show",
+    "Забыть сохранённые настройки этой связки (принтер, формат, тип бумаги)": "Forget the saved settings of this combination (printer, format, paper type)",
+    "Баланс белого: щёлкните по фото в месте, которое должно быть серым или белым": "White balance: click the photo where it should be grey or white",
+    "Вернуть исходный кадр: фото заполняет рамку (100%), по центру": "Back to the original frame: the photo fills the frame (100%), centred",
+    "Фото целиком внутри рамки, по краям остаются поля": "The whole photo inside the frame, margins stay at the edges",
+    "Кадрировать по рамке: всё за рамкой удаляется, белые поля внутри рамки остаются. Исходный файл не меняется.": "Crop to the frame: everything outside is removed, white margins inside the frame stay. The original file is not changed.",
+})
+pc.EN.update({
     "не шифруется": "not encrypted",
     "Публичный адрес: данные подписаны, но не шифруются. Используйте Tailscale или домашнюю сеть.":
         "Public address: data is signed but not encrypted. Use Tailscale or a home network.",
@@ -10609,6 +10671,16 @@ def selftest(app):
     step("вкладка «Цвет» открывается без фото", color_tab_empty)
     step("открыть папку", lambda: win.load_folder(tmp))
     step("снимок окна", lambda: shot("main"))
+    def labels_not_clipped():
+        win.resize(1280, 820)
+        for page in range(win.pages.count()):
+            win.show_page(page)
+            app.processEvents()
+            for bt in win.findChildren(FitButton):
+                if getattr(bt, "_fit_on", False) and bt.isVisibleTo(win) and bt.width() > 20 and bt.text()                         and bt.sizeHint().width() > bt.width() + 2:
+                    raise RuntimeError("подпись кнопки %r не помещается: нужно %d px, есть %d (вкладка %d)" % (bt.text(), bt.sizeHint().width(), bt.width(), page))
+        win.show_page(0)
+    step("подписи кнопок не обрезаются", labels_not_clipped)
     step("следующее фото", lambda: win.go(1))
     step("поворот", lambda: win.rotate_photo(90))
     step("наклон", lambda: win.tilt(1.5))
