@@ -95,6 +95,7 @@ class PlotterCanvas(QWidget):
         self.sel = None
         self.extra = []           # остальные выделенные файлы (sel — главный, его свойства показаны справа)
         self._band = None         # рамка выделения мышью (QRectF в пикселях) или None
+        self._rs = None           # состояние перетаскивания ручки размера или None
         self.thumbs = {}          # id(item) -> QPixmap
         self.snap_on = True
         self._drag = None
@@ -178,6 +179,78 @@ class PlotterCanvas(QWidget):
         self.selected.emit(self.sel)
         self.update()
 
+    # --- ручки изменения размера
+    HANDLE = 9                # сторона квадрата-ручки, px
+    HIT = 8                   # радиус попадания в ручку, px
+
+    def sel_bbox(self):
+        """Рамка всех выделенных включённых файлов (x0, y0, x1, y1) в мм или None."""
+        its = [i for i in self.selection() if i.enabled]
+        if not its:
+            return None
+        return min(i.x for i in its), min(i.y for i in its), max(i.right for i in its), max(i.bottom for i in its)
+
+    def handle_points(self):
+        """Углы рамки группы в px: 0 — левый верхний, 1 — правый верхний, 2 — левый нижний, 3 — правый нижний."""
+        bb = self.sel_bbox()
+        if bb is None:
+            return []
+        x0, y0, x1, y1 = bb
+        return [self.to_px(x0, y0), self.to_px(x1, y0), self.to_px(x0, y1), self.to_px(x1, y1)]
+
+    def handle_at(self, pos):
+        for n, pt in enumerate(self.handle_points()):
+            if abs(pos.x() - pt.x()) <= self.HIT and abs(pos.y() - pt.y()) <= self.HIT:
+                return n
+        return None
+
+    def _start_resize(self, n):
+        x0, y0, x1, y1 = self.sel_bbox()
+        its = [i for i in self.selection() if i.enabled]
+        ax, ay = (x1 if n in (0, 2) else x0), (y1 if n in (0, 1) else y0)       # якорь — противоположный угол
+        self.hist.push()
+        self._rs = {"n": n, "ax": ax, "ay": ay, "W0": max(1e-6, x1 - x0), "H0": max(1e-6, y1 - y0), "moved": False,
+                    "orig": [(i, i.x, i.y, i.w, i.h) for i in its]}
+
+    def _do_resize(self, pos, shift):
+        rs, L = self._rs, self.layout_
+        mx, my = self.to_mm(pos)
+        mx, my = max(0.0, mx), max(0.0, my)
+        tol = 6 / self.k
+        for edge in (0.0, L.printable_w):                    # привязка вертикального края к краям печатной зоны
+            if abs(mx - edge) <= tol:
+                mx = edge
+        ax, ay, orig = rs["ax"], rs["ay"], rs["orig"]
+        kx, ky = abs(mx - ax) / rs["W0"], abs(my - ay) / rs["H0"]
+        kminx = max(5.0 / i.ow for i, *_ in orig)            # не меньше 5 мм у каждого файла
+        kminy = max(5.0 / i.oh for i, *_ in orig)
+        lock = getattr(getattr(self, "parent_page", None), "cb_lock", None)
+        prop = lock.isChecked() if lock is not None else True
+        if len(orig) == 1 and shift:
+            prop = not prop
+        if prop or len(orig) > 1:
+            kx = ky = max(kx, ky, kminx, kminy)
+        else:
+            kx, ky = max(kx, kminx), max(ky, kminy)
+        for it, x, y, w, h in orig:
+            it.x, it.y = ax + (x - ax) * kx, ay + (y - ay) * ky
+            if it.rot in (90, 270):
+                it.h, it.w = h * kx, w * ky
+            else:
+                it.w, it.h = w * kx, h * ky
+        rs["moved"] = True
+        self.selected.emit(self.sel)
+        self.update_size()
+
+    def _hover_cursor(self, pos):
+        n = self.handle_at(pos)
+        if n is not None:
+            self.setCursor(Qt.SizeFDiagCursor if n in (0, 3) else Qt.SizeBDiagCursor)
+        elif any(i.enabled and self.item_rect(i).contains(pos) for i in self.selection()):
+            self.setCursor(Qt.SizeAllCursor)
+        else:
+            self.unsetCursor()
+
     def item_at(self, pos):
         for it in reversed(self.layout_.items):
             if it.enabled and self.item_rect(it).contains(pos):
@@ -256,6 +329,17 @@ class PlotterCanvas(QWidget):
             it, r = self.sel, self.item_rect(self.sel)
             p.setPen(_col("select", "#1e6fe8"))
             p.drawText(QPointF(r.left() + 4, r.bottom() - 5), "x %s  y %s" % (self._n(it.x / 10), self._n(it.y / 10)))
+        pts = self.handle_points()
+        if pts:                                               # пунктирная рамка группы и 4 угловые ручки
+            tl, br = pts[0], pts[3]
+            p.setPen(QPen(_col("select", "#1e6fe8"), 1, Qt.DashLine))
+            p.setBrush(Qt.NoBrush)
+            p.drawRect(QRectF(tl, br))
+            h = self.HANDLE
+            for pt in pts:
+                p.setPen(QPen(QColor("white"), 1))
+                p.setBrush(_col("select", "#1e6fe8"))
+                p.drawRect(QRectF(pt.x() - h / 2, pt.y() - h / 2, h, h))
         if self._band is not None:                            # рамка выделения
             p.setPen(QPen(_col("select", "#1e6fe8"), 1, Qt.DashLine))
             p.setBrush(QColor(30, 111, 232, 40))
@@ -296,6 +380,10 @@ class PlotterCanvas(QWidget):
         self.setFocus()
         if e.button() != Qt.LeftButton:
             return
+        n = self.handle_at(e.position())                                     # ручка размера проверяется раньше самого файла
+        if n is not None:
+            self._start_resize(n)
+            return
         it = self.item_at(e.position())
         if e.modifiers() & (Qt.ControlModifier | Qt.ShiftModifier):          # Ctrl/Shift: добавить файл в выделение или убрать
             cur = self.selection()
@@ -318,6 +406,11 @@ class PlotterCanvas(QWidget):
         self._drag = (it, x - it.x, y - it.y, False, [(i, i.x, i.y) for i in self.selection()], it.x, it.y)
 
     def mouseMoveEvent(self, e):
+        if self._rs is not None:
+            self._do_resize(e.position(), bool(e.modifiers() & Qt.ShiftModifier))
+            return
+        if self._band is None and not self._drag:
+            self._hover_cursor(e.position())
         if self._band is not None:
             r = QRectF(self._band_start, e.position()).normalized()
             self._band = r
@@ -340,6 +433,14 @@ class PlotterCanvas(QWidget):
         self.update_size()
 
     def mouseReleaseEvent(self, e):
+        if self._rs is not None:
+            moved = self._rs["moved"]
+            self._rs = None
+            if not moved and self.hist.undo_s:
+                self.hist.undo_s.pop()            # щелчок по ручке без движения не считается действием
+            self.changed.emit()
+            self.update()
+            return
         if self._band is not None:
             self._band = None
             self.update()
