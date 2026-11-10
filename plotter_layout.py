@@ -12,6 +12,34 @@ MAX_PAPER_LEN_MM = 3276.7      # dmPaperLength: short в 0,1 мм
 UNITS = {"mm": 1.0, "cm": 10.0, "in": 25.4}
 
 
+# Стандартные форматы бумаги, мм (меньшая сторона, большая)
+PAPERS = {"A0": (841, 1189), "A1": (594, 841), "A2": (420, 594), "A3": (297, 420), "A4": (210, 297), "A5": (148, 210),
+          "B1": (707, 1000), "B2": (500, 707), "B3": (353, 500), "B4": (250, 353)}
+COMMON_DPI = (72, 96, 100, 150, 200, 254, 300, 360, 600)
+
+
+def standard_paper(w_mm, h_mm, px_w=0, px_h=0, tol=0.02):
+    """Если размер файла (мм) близок к стандартному формату — возвращает (имя, ширина, высота) этого формата в ориентации файла.
+    Если по метаданным размер не совпал, но пиксели ровно соответствуют формату при привычном dpi — тоже берём формат."""
+    def match(a, b):
+        lo, hi = min(a, b), max(a, b)
+        for name, (pw, ph) in PAPERS.items():
+            if abs(lo - pw) <= pw * tol and abs(hi - ph) <= ph * tol:
+                return name
+        return None
+    n = match(w_mm, h_mm)
+    if not n and px_w and px_h:
+        for d in COMMON_DPI:
+            n = match(px_w / d * 25.4, px_h / d * 25.4)
+            if n:
+                break
+    if not n:
+        return None
+    lo, hi = PAPERS[n]
+    portrait = (px_w <= px_h) if (px_w and px_h) else (w_mm <= h_mm)
+    return (n, lo, hi) if portrait else (n, hi, lo)
+
+
 def to_mm(value, unit="mm"):
     return float(value) * UNITS[unit]
 

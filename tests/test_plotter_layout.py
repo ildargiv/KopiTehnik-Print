@@ -76,3 +76,16 @@ def test_too_long_and_snap():
     k = L.add(pl.Item("c", 100, 100, x=2, y=3))
     L.snap(k)
     assert (k.x, k.y) == (0, 0)
+
+
+def test_standard_paper_snap_and_no_rescale_on_roll_change():
+    assert pl.standard_paper(296, 421)[0] == "A3"
+    n, w, h = pl.standard_paper(420.5, 296.5)
+    assert (n, w, h) == ("A3", 420, 297)                     # альбомная ориентация сохраняется
+    assert pl.standard_paper(100, 100) is None
+    assert pl.standard_paper(10, 10, 3508, 4961)[0] == "A3"  # по пикселям: A3 при 300 dpi
+    L = pl.Layout(roll_w=610)
+    it = L.add(pl.Item("a3", 297, 420, x=0, y=0))
+    L.roll_w = 914
+    L.roll_w = 432
+    assert (it.w, it.h) == (297, 420)

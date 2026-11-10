@@ -43,6 +43,9 @@ def load_file(path):
         w, h = sz.width() / 72 * 25.4, sz.height() / 72 * 25.4
         k = THUMB / max(sz.width(), sz.height())
         img = doc.render(0, QSize(max(1, round(sz.width() * k)), max(1, round(sz.height() * k))))
+        sp = pl.standard_paper(w, h)
+        if sp:
+            w, h = sp[1], sp[2]
         return img, round(w / 25.4 * 300), round(h / 25.4 * 300), w, h
     from PIL import Image
     if ext in (".psd", ".psb"):
@@ -63,6 +66,9 @@ def load_file(path):
         dpi = (dx if dx >= 10 else DEFAULT_DPI, dy if dy >= 10 else DEFAULT_DPI)
     pw, ph = im.size
     w, h = pw / dpi[0] * 25.4, ph / dpi[1] * 25.4
+    sp = pl.standard_paper(w, h, pw, ph)           # файл формата А3 и т.п. ложится на рулон точно этим форматом
+    if sp:
+        w, h = sp[1], sp[2]
     th = im.copy()
     th.thumbnail((THUMB, THUMB))
     th = th.convert("RGBA")
@@ -489,8 +495,8 @@ class PlotterPage(QWidget):
                 errors.append("%s: %s" % (os.path.basename(p), ex))
                 continue
             it = pl.Item(p, w, h, pw, ph, x, y)
-            if it.ow > self.L.printable_w:
-                self.L.fit_to_width(it)
+            if it.ow > self.L.printable_w + 0.05 and it.oh <= self.L.printable_w + 0.05:
+                it.rotate(90)                          # размер не трогаем: не влезает по ширине, но влезет, если повернуть
             if at:
                 it.x, it.y = max(0.0, at[0]), max(0.0, at[1])
                 self.L.clamp_inside(it)
