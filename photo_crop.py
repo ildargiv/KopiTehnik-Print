@@ -26,6 +26,7 @@ import hashlib
 import ctypes
 import io
 import json
+import logging
 import app_dirs
 import math
 import os
@@ -40,6 +41,7 @@ import time
 from pathlib import Path
 
 import color_tools
+log = logging.getLogger(__name__)
 
 try:
     import tkinter as tk
@@ -281,7 +283,7 @@ def cmyk_to_srgb(img, icc):
             if src.profile.xcolor_space.strip() == "CMYK":
                 return ImageCms.profileToProfile(img, src, _srgb(), renderingIntent=1, outputMode="RGB", flags=CMS_BPC)
         except Exception:
-            pass
+            log.warning("CMYK ICC-профиль из файла не применён, цвет не преобразован", exc_info=True)
     return img.convert("RGB")
 
 
@@ -409,7 +411,7 @@ def _rgb_profile(icc):
             if p.profile.xcolor_space.strip() == "RGB":
                 return p
         except Exception:
-            pass
+            log.warning("встроенный RGB ICC-профиль не прочитан", exc_info=True)
     return None
 
 
@@ -1246,7 +1248,7 @@ def save_settings(d):
     try:
         write_json_atomic(SETTINGS_PATH, d)
     except Exception:
-        pass
+        log.warning("не удалось сохранить настройки", exc_info=True)
 
 
 AUTOSAVE_DIR = SETTINGS_PATH.parent / "autosave"
@@ -1776,7 +1778,7 @@ def _tile(ph, ppi, o, mode, fast, cache):
             if "sRGB" not in (ImageCms.getProfileDescription(src) or ""):
                 out = ImageCms.profileToProfile(out, src, _srgb(), renderingIntent=1, outputMode="RGB", flags=CMS_BPC)
         except Exception:
-            pass
+            log.warning("преобразование цвета в sRGB при печати не удалось", exc_info=True)
     out = adjust_detail(out, o, ppi)
     if cache is not None:
         px = sum(t.width * t.height for t in cache.values()) + out.width * out.height
@@ -1969,7 +1971,7 @@ def printer_port_name(name):
         finally:
             wp.ClosePrinter(h)
     except Exception:
-        pass
+        log.warning("не удалось получить имя порта принтера", exc_info=True)
     return ""
 
 
@@ -2216,7 +2218,7 @@ def make_geom_for(printer, blob, o):
                 if abs(g2["paper"][0] - g["paper"][0]) <= 2 and abs(g2["paper"][1] - g["paper"][1]) <= 2:
                     return g2
             except Exception:
-                pass
+                log.warning("пересчёт геометрии принтера не удался, оставлена прежняя", exc_info=True)
         return g
     return geom_for
 
@@ -2310,7 +2312,7 @@ def run_sheets_job(c, progress, cancel):
             print_stats.record(c["printer"], len(names), "%gx%g" % (round(pw, 1), round(ph, 1)), c.get("mode", ""),
                                c.get("source", "app"), copies, names, kind="photo")
         except Exception:
-            pass
+            log.warning("не удалось записать статистику печати", exc_info=True)
 
     if c["kind"] == "print":
         title = c.get("title") or "PhotoCrop"
@@ -3075,7 +3077,7 @@ class AgentSession:
                 if devmode_valid(b):
                     self.blob = b
             except Exception:
-                pass
+                log.warning("не удалось восстановить настройки драйвера принтера (DEVMODE)", exc_info=True)
         if self.blob is None:
             try:
                 self.blob = default_devmode(self.printer)
@@ -3131,7 +3133,7 @@ class AgentSession:
                 if devmode_valid(b):
                     self.blob = b
             except Exception:
-                pass
+                log.warning("не удалось восстановить настройки драйвера принтера из проекта", exc_info=True)
 
     def save_state(self):
         if not self.persist:
@@ -3139,7 +3141,7 @@ class AgentSession:
         try:
             write_json_atomic(self.state_path, self.to_project())
         except Exception:
-            pass
+            log.warning("не удалось сохранить состояние проекта", exc_info=True)
 
     def load_state(self):
         try:
@@ -3960,7 +3962,7 @@ class AgentSession:
                         desc, space, ok = profile_info(f)
                         row.update(description=desc, space=space)
                     except Exception:
-                        pass
+                        log.warning("не удалось прочитать ICC-профиль для списка", exc_info=True)
                     out.append(row)
         return out
 
@@ -4276,7 +4278,7 @@ class AgentSession:
                 if ep_.recipe:
                     new = ep_.set_media(new, devmode_read(new)["settings"]["media_type"])
             except Exception:
-                pass
+                log.warning("не удалось применить тип носителя Epson", exc_info=True)
         merged = merge_devmode(self.printer, new)
         after = devmode_read(merged)
         rejected = {}
@@ -4758,7 +4760,7 @@ def mcp_install(args):
             cur["agent_enabled"] = True
             save_settings(cur)
         except Exception:
-            pass
+            log.warning("не удалось сохранить настройку агента", exc_info=True)
     return 0 if ok else 2
 
 
@@ -6182,7 +6184,7 @@ class App:
         try:
             self._autosave_now()
         except Exception:
-            pass
+            log.warning("автосохранение проекта не удалось", exc_info=True)
         try:
             self.root.after(AUTOSAVE_SECONDS * 1000, self._autosave_tick)
         except Exception:
@@ -7202,7 +7204,7 @@ class App:
         try:
             self._autosave_now()
         except Exception:
-            pass
+            log.warning("автосохранение при закрытии не удалось", exc_info=True)
         pd = self.print_dialog
         if pd is not None:
             try:
@@ -7815,7 +7817,7 @@ class PrintDialog:
                 if devmode_valid(b):
                     self.blob = b
             except Exception:
-                pass
+                log.warning("не удалось восстановить настройки драйвера принтера (DEVMODE)", exc_info=True)
         if self.blob is None:
             try:
                 self.blob = default_devmode(name)
@@ -7903,7 +7905,7 @@ class PrintDialog:
                     self.blob = b
                     self._save_blob()
             except Exception:
-                pass
+                log.warning("не удалось загрузить настройки драйвера из пресета", exc_info=True)
         self._schedule(0)
 
     def _preset_delete(self):

@@ -12,6 +12,7 @@
 import base64
 import struct
 import json
+import logging
 import math
 import os
 import subprocess
@@ -69,6 +70,7 @@ except ImportError:
 
 tr, trf = pc.tr, pc.trf
 LOG_PATH = pc.SETTINGS_PATH.parent / "qt_error.log"
+log = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------- дизайн: цвета тем и иконки
 
@@ -4832,7 +4834,7 @@ class DocMixin:
             import print_stats
             print_stats.record(j["printer"], 0, "%gx%g" % dt.PAPERS[j["paper"]], "document", "app", sent, [j["name"]], kind="doc")
         except Exception:
-            pass
+            log.warning("не удалось записать статистику печати документа", exc_info=True)
         return True, sent
 
 
@@ -5641,7 +5643,7 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         try:
             pc.save_settings(self.settings)
         except Exception:
-            pass
+            log.warning("не удалось сохранить настройки принтеров", exc_info=True)
         self.reload_printers()
         return True
 
@@ -5666,7 +5668,7 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
                     if pc.devmode_valid(b):
                         self.blob = b
                 except Exception:
-                    pass
+                    log.warning("не удалось восстановить настройки драйвера принтера (DEVMODE)", exc_info=True)
             if self.blob is None:
                 try:
                     self.blob = pc.default_devmode(name)
@@ -5811,7 +5813,7 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
                             self.settings.setdefault("print_devmodes", {})[self.pr["printer"]] = prof["blob"]
                             self._fill_driver()
                     except Exception:
-                        pass
+                        log.warning("не удалось применить профиль печати", exc_info=True)
                 self.cm_changed()
             else:                                                    # у связки нет своего профиля: чужая поправка к ней не относится
                 self.s["pcorr"] = pcr.default()
@@ -6529,7 +6531,7 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
             try:
                 pc.save_settings(self.settings)
             except Exception:
-                pass
+                log.warning("не удалось сохранить настройки многопринтерной печати", exc_info=True)
         self.multi_refresh()
 
     def _multi_profile(self, printer):
@@ -7710,7 +7712,7 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         try:
             self._autosave_now()
         except Exception:
-            pass
+            log.warning("автосохранение проекта не удалось", exc_info=True)
 
     def save_project(self):
         if not self.files:
@@ -8926,11 +8928,11 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         try:
             self._autosave_now()
         except Exception:
-            pass
+            log.warning("автосохранение при закрытии не удалось", exc_info=True)
         try:
             self.persist()
         except Exception:
-            pass
+            log.warning("не удалось сохранить настройки при закрытии", exc_info=True)
         e.accept()
 
 
