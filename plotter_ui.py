@@ -82,12 +82,16 @@ class PlotterCanvas(QWidget):
     changed = Signal()            # раскладка изменена (после отпускания мыши и т.п.)
     selected = Signal(object)
 
+    zoomed = Signal(float)        # масштаб изменился (px/мм)
+
     RULER = 26
+    MIN_K, MAX_K = 0.02, 8.0
 
     def __init__(self, layout, history):
         super().__init__()
         self.layout_, self.hist = layout, history
         self.k = 0.4              # пикселей на мм
+        self.fit_mode = "width"   # «width» | «all» | None (вручную): по умолчанию рулон на всю ширину окна
         self.sel = None
         self.thumbs = {}          # id(item) -> QPixmap
         self.snap_on = True
@@ -113,15 +117,47 @@ class PlotterCanvas(QWidget):
         a = self.to_px(it.x, it.y)
         return QRectF(a.x(), a.y(), it.ow * self.k, it.oh * self.k)
 
+    def real_k(self):
+        """Пикселей на мм при настоящем размере на экране (1 мм бумаги = 1 мм на мониторе)."""
+        try:
+            return self.logicalDpiX() / 25.4
+        except Exception:
+            return 3.78
+
     def fit_view(self):
-        w = max(100, self.width() - self.RULER - 40)
-        self.k = max(0.02, w / max(1.0, self.layout_.printable_w))
+        """Пересчитать масштаб по режиму: «width» — рулон по ширине окна, «all» — вся раскладка целиком, None — масштаб задан вручную."""
+        if self.fit_mode:
+            w = max(100, self.width() - self.RULER - 40)
+            k = w / max(1.0, self.layout_.printable_w)
+            if self.fit_mode == "all":
+                vh = self.parent().height() if self.parent() is not None else self.height()
+                k = min(k, max(100, vh - self.RULER - 40) / max(self.layout_.length(), 400))
+            self.k = min(self.MAX_K, max(self.MIN_K, k))
         self.update_size()
 
+    def set_fit(self, mode):
+        self.fit_mode = mode
+        self.fit_view()
+
+    def zoom_to(self, k):
+        self.fit_mode = None
+        self.k = min(self.MAX_K, max(self.MIN_K, k))
+        self.update_size()
+
+    def zoom_by(self, f):
+        self.zoom_to(self.k * f)
+
+    def resizeEvent(self, e):
+        super().resizeEvent(e)
+        if self.fit_mode:
+            self.fit_view()
+
     def update_size(self):
-        h = int(self.RULER + 40 + max(self.layout_.length(), 400) * self.k + 200)
+        slack = 0 if self.fit_mode == "all" else 200
+        h = int(self.RULER + 40 + max(self.layout_.length(), 400) * self.k + slack)
         self.setMinimumHeight(h)
         self.update()
+        self.zoomed.emit(self.k)
 
     def set_thumb(self, it, qimage):
         self.thumbs[id(it)] = QPixmap.fromImage(qimage)
@@ -269,8 +305,7 @@ class PlotterCanvas(QWidget):
 
     def wheelEvent(self, e):
         if e.modifiers() & Qt.ControlModifier:
-            self.k = min(3.0, max(0.02, self.k * (1.15 if e.angleDelta().y() > 0 else 1 / 1.15)))
-            self.update_size()
+            self.zoom_by(1.15 if e.angleDelta().y() > 0 else 1 / 1.15)
             e.accept()
         else:
             e.ignore()
@@ -426,6 +461,25 @@ class PlotterPage(QWidget):
             bar.addWidget(self._button(text, fn, ico))
         bar.addStretch(1)
 
+        # --- масштаб поля: − / + / по ширине / целиком / 1:1 (Ctrl+колесо тоже работает)
+        self.l_zoom = QLabel("")
+        self.l_zoom.setMinimumWidth(48)
+        self.l_zoom.setAlignment(Qt.AlignCenter)
+        self.l_zoom.setToolTip(_tr("Масштаб на экране: 100% = настоящий размер (1 мм бумаги = 1 мм на мониторе)"))
+        for text, fn, tip in (("−", lambda: self.canvas.zoom_by(1 / 1.25), "Уменьшить (Ctrl+−)"),):
+            b = self._button(text, fn, None)
+            b.setToolTip(_tr(tip))
+            bar.addWidget(b)
+        bar.addWidget(self.l_zoom)
+        for text, fn, tip in (("+", lambda: self.canvas.zoom_by(1.25), "Увеличить (Ctrl++)"),
+                              (_tr("По ширине"), lambda: self.canvas.set_fit("width"), "Рулон на всю ширину окна (Ctrl+0)"),
+                              (_tr("Весь рулон"), lambda: self.canvas.set_fit("all"), "Вся раскладка в окне (Ctrl+9)"),
+                              ("1:1", lambda: self.canvas.zoom_to(self.canvas.real_k()), "Настоящий размер на экране (Ctrl+1)")):
+            b = self._button(text, fn, None)
+            b.setToolTip(_tr(tip))
+            bar.addWidget(b)
+        self.canvas.zoomed.connect(lambda k: self.l_zoom.setText("%d%%" % round(k / self.canvas.real_k() * 100)))
+
         # --- таблица
         self.tbl = QTableWidget(0, 6)
         self.tbl.setHorizontalHeaderLabels([_tr("Файл"), _tr("Ширина, см"), _tr("Высота, см"), _tr("Поворот"), _tr("Копий"), "DPI"])
@@ -443,6 +497,11 @@ class PlotterPage(QWidget):
         lay.addWidget(self.tbl)
         for keys, fn in ((QKeySequence.Undo, self.undo), (QKeySequence.Redo, self.redo)):
             QShortcut(keys, self, activated=fn)
+        for keys, fn in (("Ctrl+0", lambda: self.canvas.set_fit("width")), ("Ctrl+9", lambda: self.canvas.set_fit("all")),
+                         ("Ctrl+1", lambda: self.canvas.zoom_to(self.canvas.real_k())),
+                         ("Ctrl+=", lambda: self.canvas.zoom_by(1.25)), ("Ctrl++", lambda: self.canvas.zoom_by(1.25)),
+                         ("Ctrl+-", lambda: self.canvas.zoom_by(1 / 1.25))):
+            QShortcut(QKeySequence(keys), self, activated=fn)
         self.restyle()
         self.refresh()
 
