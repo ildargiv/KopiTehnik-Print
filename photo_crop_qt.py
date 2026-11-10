@@ -4796,24 +4796,28 @@ class DocMixin:
                 self.sig.printed.emit("error", 0, "%s: %s" % (ex.__class__.__name__, ex))
         threading.Thread(target=work, daemon=True).start()
 
-    def print_plotter(self):
-        """Печать раскладки на рулон: бумага = ширина рулона × вычисленная длина, лист рендерится полосами."""
+    def print_plotter(self, proof=False):
+        """Печать раскладки на рулон: бумага = ширина рулона × вычисленная длина, лист рендерится полосами.
+        proof — пробный отпечаток: уменьшенная копия всей раскладки на A4."""
         if self.saving or self.printing:
             return
         pg, L = self.plot_page, self.plot_page.L
         if not L.active():
             info(self, "Добавьте файлы на поле плоттера.")
             return
+        self._plot_pending = 0.0
+        if proof:
+            L = L.proof_layout()
         pr = self.pr
         if not pr["printer"] or self.blob is None:
             self.show_page(2)
             info(self, "Принтер не выбран или недоступен. Выберите принтер на вкладке «Принтер».")
             return
-        if L.too_long():
+        if not proof and L.too_long():
             warn(self, "Раскладка длиннее 3,27 м: драйвер не примет такую бумагу. Сократите раскладку.")
             return
         kinds = {k for _, k in L.problems()}
-        ppi = int(pg.cb_dpi.currentData() or 150)
+        ppi = 150 if proof else int(pg.cb_dpi.currentData() or 150)
         pw_mm, pl_mm = L.paper_size_mm()
         try:
             blob = pc.devmode_write(self.blob, {"paper_mm": [round(pw_mm, 1), round(pl_mm, 1)]})
@@ -4823,8 +4827,10 @@ class DocMixin:
             warn(self, tr("Не удалось подготовить печать") + ":\n%s" % ex)
             return
         text = "%s\n%s: %s\n%s: %g × %s мм (%s: %.2f м²)\n%s: %d, %s: %d dpi" % (
-            tr("Плоттер"), tr("Принтер"), pr["printer"], tr("Бумага"), pw_mm, ("%.0f" % pl_mm), tr("площадь"), L.area_m2(),
+            tr("Пробный отпечаток (A4)") if proof else tr("Плоттер"), tr("Принтер"), pr["printer"], tr("Бумага"), pw_mm, ("%.0f" % pl_mm), tr("площадь"), L.area_m2(),
             tr("Файлов"), len(L.expand_copies()), tr("Разрешение"), ppi)
+        if not proof and pg.sp_left.value() > 0 and L.length() > pg.roll_left_mm():
+            text += "\n" + tr("Внимание: рулона может не хватить") + " (%.2f м)." % (pg.sp_left.value())
         if kinds & {"overlap", "out"}:
             text += "\n" + tr("Внимание: файлы перекрываются или выходят за поле.")
         if "dpi" in kinds:
@@ -4840,6 +4846,7 @@ class DocMixin:
                 return
         if not ask(self, text + "\n\n" + tr("Начать печать?")):
             return
+        self._plot_pending = 0.0 if proof else L.length()
         self.cancel.clear()
         self.printing = True
         self._print_files = []
@@ -5172,6 +5179,9 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         plotter_ui.T = T                                  # тема программы
         plotter_ui.make_button[0] = lambda text, fn, ico=None: btn(text, fn, ico=ico)
         self.plot_page = plotter_ui.PlotterPage()
+        self.plot_page.proof_requested.connect(lambda: self.print_plotter(proof=True))
+        self.plot_page.sp_left.setValue(float(self.settings.get("plot_roll_left", 0) or 0))
+        self.plot_page.roll_left_changed.connect(lambda v: (self.settings.__setitem__("plot_roll_left", v), pc.save_settings(self.settings)))
         self.center_stack.addWidget(self.plot_page)      # страница 3: режим «Плоттер»
         self.overlay = SendOverlay(self.center_stack)
         outer = vbox(self._topbar(), spacing=0)
@@ -6918,6 +6928,10 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
 
     def _print_done(self, kind, n, err):
         self.last_print = {"result": kind, "sheets_sent": n, "error": err or None}
+        if getattr(self, "_plot_pending", 0):                 # плоттер: после успешной печати уменьшаем остаток рулона
+            if kind == "done":
+                self.plot_page.consume_roll(self._plot_pending)
+            self._plot_pending = 0.0
         self.b_print.setText(self._print_label())
         self.b_print.set_progress(None)
         if kind == "done":

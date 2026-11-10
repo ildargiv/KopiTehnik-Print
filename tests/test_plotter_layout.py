@@ -89,3 +89,19 @@ def test_standard_paper_snap_and_no_rescale_on_roll_change():
     L.roll_w = 914
     L.roll_w = 432
     assert (it.w, it.h) == (297, 420)
+
+
+def test_marks_proof_and_json():
+    L = pl.Layout(roll_w=610, edge=5, gap=10)
+    L.marks = True
+    L.add(pl.Item("a", 200, 100, x=0, y=0))
+    L.add(pl.Item("b", 200, 100, x=210, y=0))
+    segs = L.mark_segments()
+    assert len(segs) == 2 * 4 * 2                               # 2 файла × 4 угла × 2 штриха
+    L.gap = 3
+    assert "marks" in {k for _, k in L.problems()}
+    L.gap = 10
+    P = L.proof_layout()
+    assert P.paper_size_mm() == (210.0, 297.0)
+    assert P.items[0].w < L.items[0].w and abs(P.items[0].w / P.items[0].h - 2.0) < 1e-9
+    assert pl.Layout.from_json(L.to_json()).marks is True

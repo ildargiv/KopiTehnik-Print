@@ -2,7 +2,7 @@
 Логика — в plotter_layout.py (без Qt). Здесь только интерфейс (PySide6)."""
 import os
 
-from PySide6.QtCore import Qt, QRectF, QPointF, Signal
+from PySide6.QtCore import Qt, QRectF, QPointF, QLineF, Signal
 from PySide6.QtGui import QColor, QFont, QImage, QKeySequence, QPainter, QPen, QPixmap, QShortcut, QTransform
 from PySide6.QtWidgets import (QAbstractItemView, QGridLayout, QCheckBox, QComboBox, QDoubleSpinBox, QFileDialog, QFormLayout, QGroupBox, QHBoxLayout,
                                QLabel, QPushButton, QScrollArea, QSizePolicy, QSpinBox, QSplitter, QTableWidget, QTableWidgetItem,
@@ -195,6 +195,10 @@ class PlotterCanvas(QWidget):
             p.fillRect(lab, QColor(0, 0, 0, 170))
             p.setPen(QColor("white"))
             p.drawText(lab.adjusted(4, 0, 0, 0), Qt.AlignVCenter | Qt.AlignLeft, label)
+        if L.marks:                                           # метки реза
+            p.setPen(QPen(QColor(0, 0, 0), 1))
+            for x1, y1, x2, y2 in L.mark_segments():
+                p.drawLine(QLineF(self.to_px(x1, y1), self.to_px(x2, y2)))
         # выбранный: размеры до краёв
         if self.sel and self.sel.enabled:
             it, r = self.sel, self.item_rect(self.sel)
@@ -317,10 +321,12 @@ class PlotterCanvas(QWidget):
 class PlotterPage(QWidget):
     """Страница режима «Плоттер»: поле слева, справа настройки рулона, свойства файла, таблица."""
     changed = Signal()
+    proof_requested = Signal()      # «Пробный отпечаток»: окно программы печатает уменьшенную копию на A4
+    roll_left_changed = Signal(float)
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.L = pl.Layout(roll_w=914)
+        self.L = pl.Layout(roll_w=610)                    # HP DesignJet Z2100: рулон 61 см
         self.hist = pl.History(self.L)
         self.unit = "cm"
         self._busy = False
@@ -338,9 +344,9 @@ class PlotterPage(QWidget):
         for w in pl.ROLL_WIDTHS_MM:
             self.cb_roll.addItem("%d мм" % w, w)
         self.cb_roll.addItem(_tr("Своя ширина"), 0)
-        self.cb_roll.setCurrentIndex(pl.ROLL_WIDTHS_MM.index(914))
+        self.cb_roll.setCurrentIndex(pl.ROLL_WIDTHS_MM.index(610))
         self.cb_roll.currentIndexChanged.connect(self._roll_changed)
-        self.sp_roll = self._spin(1, 5000, 914, " мм")
+        self.sp_roll = self._spin(1, 5000, 610, " мм")
         self.sp_roll.valueChanged.connect(self._roll_custom)
         self.sp_roll.setEnabled(False)
         self.sp_gap = self._spin(0, 500, 1.0, " см")
@@ -362,7 +368,13 @@ class PlotterPage(QWidget):
         self.cb_dpi.setCurrentIndex(1)
         self.cb_mirror = QCheckBox(_tr("Зеркально (для переноса)"))
         self.cb_neg = QCheckBox(_tr("Негатив"))
-        self._print_rows = [(_tr("Разрешение печати"), self.cb_dpi), (None, self.cb_mirror), (None, self.cb_neg)]
+        self.cb_marks = QCheckBox(_tr("Метки реза"))
+        self.cb_marks.toggled.connect(self._marks_changed)
+        self.sp_left = self._spin(0, 500, 0, " м")
+        self.sp_left.setToolTip(_tr("Сколько метров осталось в рулоне. 0 — не учитывать. После печати остаток уменьшается."))
+        self.sp_left.valueChanged.connect(lambda v: (self.roll_left_changed.emit(v), self.refresh()))
+        self._print_rows = [(_tr("Разрешение печати"), self.cb_dpi), (None, self.cb_mirror), (None, self.cb_neg), (None, self.cb_marks),
+                            (_tr("Остаток рулона"), self.sp_left)]
 
         # --- итог
         self.l_total = QLabel()
@@ -439,7 +451,7 @@ class PlotterPage(QWidget):
         t = lambda k, d: T.get(k, d)
         spin = ("QDoubleSpinBox, QSpinBox {background:%s;color:%s;border:1px solid %s;border-radius:8px;padding:4px 8px;min-width:96px;}"
                 "QDoubleSpinBox:disabled, QSpinBox:disabled {color:%s;}" % (t("raised", "#333"), t("text", "#eee"), t("border", "#444"), t("muted", "#888")))
-        for w in (self.sp_roll, self.sp_gap, self.sp_edge, self.sp_w, self.sp_h, self.sp_x, self.sp_y, self.sp_pct, self.sp_copies):
+        for w in (self.sp_left, self.sp_roll, self.sp_gap, self.sp_edge, self.sp_w, self.sp_h, self.sp_x, self.sp_y, self.sp_pct, self.sp_copies):
             w.setStyleSheet(spin)
         self.tbl.setStyleSheet("QTableWidget{background:%s;color:%s;gridline-color:%s;border:0;selection-background-color:%s;selection-color:%s;}"
                                "QHeaderView::section{background:%s;color:%s;border:0;padding:6px;}"
@@ -467,7 +479,7 @@ class PlotterPage(QWidget):
                 out.append(row(label, w) if label else w)
             return out
         c_roll = card(_tr("Рулон"), *rows(self._roll_rows))
-        c_print = card(_tr("Печать"), *rows(self._print_rows))
+        c_print = card(_tr("Печать"), *rows(self._print_rows), self._button(_tr("Пробный отпечаток (A4)"), self.proof_requested.emit))
         c_tot = card(_tr("Итог"), self.l_total, self.l_note, self.l_warn)
         btns = QWidget()
         bl = QGridLayout(btns)
@@ -587,6 +599,9 @@ class PlotterPage(QWidget):
         with open(f, encoding="utf-8") as fh:
             self.hist.push()
             self.L.restore(fh.read())
+            self.cb_marks.blockSignals(True)
+            self.cb_marks.setChecked(self.L.marks)
+            self.cb_marks.blockSignals(False)
         for it in self.L.items:
             try:
                 qi = load_file(it.path)[0]
@@ -611,6 +626,20 @@ class PlotterPage(QWidget):
             self.L.roll_w = float(v)
             self.canvas.fit_view()
             self.refresh()
+
+    def _marks_changed(self, on):
+        if self.L.marks != on:
+            self.hist.push()
+            self.L.marks = on
+            self.refresh()
+
+    def roll_left_mm(self):
+        return self.sp_left.value() * 1000.0
+
+    def consume_roll(self, length_mm):
+        """После успешной печати: вычесть израсходованную длину из остатка рулона."""
+        if self.sp_left.value() > 0:
+            self.sp_left.setValue(max(0.0, self.sp_left.value() - length_mm / 1000.0))
 
     def _gap_changed(self, v):
         self.L.gap = v * 10
@@ -744,6 +773,10 @@ class PlotterPage(QWidget):
             warns.append(_tr("Расстояние между файлами меньше заданного."))
         if "dpi" in kinds:
             warns.append(_tr("Низкое разрешение (меньше 100 dpi)."))
+        if "marks" in kinds:
+            warns.append(_tr("Расстояние между файлами меньше места под метки реза (6 мм)."))
+        if self.sp_left.value() > 0 and L.length() > self.roll_left_mm():
+            warns.append(_tr("Не хватит рулона: нужно") + " %s, " % pl.fmt_len(L.length()) + _tr("осталось") + " %s." % pl.fmt_len(self.roll_left_mm()))
         if L.too_long():
             warns.append(_tr("Раскладка длиннее 3,27 м: драйвер не примет такую бумагу. Сократите раскладку."))
         self.l_warn.setText("\n".join(warns))

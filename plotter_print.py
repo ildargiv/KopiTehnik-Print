@@ -61,6 +61,9 @@ class BandRenderer:
             h = round(it.oh / 25.4 * ppi)
             self.items.append((it, x, y, w, h))
         self._cache = {}
+        lw = max(1, round(0.1 / 25.4 * ppi))                 # метки реза толщиной 0,1 мм (не тоньше пикселя)
+        self.marks = [(round((x1 + e) / 25.4 * ppi), round((y1 + e) / 25.4 * ppi), round((x2 + e) / 25.4 * ppi), round((y2 + e) / 25.4 * ppi), lw)
+                      for x1, y1, x2, y2 in layout.mark_segments()]
 
     def _img(self, key, it):
         im = self._cache.get(key)
@@ -81,6 +84,12 @@ class BandRenderer:
             band.paste(part, (x, y0 - a))
             if y + h <= b:
                 self._cache.pop(n, None)                    # файл закончился: освобождаем память
+        if self.marks:
+            from PIL import ImageDraw
+            d = ImageDraw.Draw(band)
+            for x1, y1, x2, y2, lw in self.marks:
+                if max(y1, y2) + lw >= a and min(y1, y2) - lw < b:
+                    d.line((x1, y1 - a, x2, y2 - a), fill=(0, 0, 0), width=lw)
         if self.mirror:
             band = band.transpose(Image.FLIP_LEFT_RIGHT)
         if self.negative:

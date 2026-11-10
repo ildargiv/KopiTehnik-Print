@@ -52,3 +52,27 @@ def test_length_limit():
     L = pl.Layout(roll_w=914)
     L.add(pl.Item("x", 100, 3300))
     assert L.too_long()
+
+
+def test_cut_marks_drawn(tmp_path):
+    a, _ = make(tmp_path)
+    L = pl.Layout(roll_w=300, edge=0, gap=10)
+    L.marks = True
+    L.add(pl.Item(a, 100, 50, 200, 100, x=20, y=20))
+    r = pp.BandRenderer(L, 254)                       # 10 px/мм
+    im = r.full()
+    assert im.getpixel((190, 200)) == (0, 0, 0) or im.getpixel((190, 201)) == (0, 0, 0)   # штрих слева от угла
+    r2 = pp.BandRenderer(L, 254)
+    out = Image.new("RGB", (r2.W, r2.H))
+    for y in range(0, r2.H, 37):
+        out.paste(r2.render(y, min(r2.H, y + 37)), (0, y))
+    assert ImageChops.difference(im, out).getbbox() is None
+
+
+def test_proof_sheet_fixed_size(tmp_path):
+    a, _ = make(tmp_path)
+    L = pl.Layout(roll_w=914, edge=5, gap=10)
+    L.add(pl.Item(a, 800, 400, 200, 100, x=0, y=0))
+    P = L.proof_layout()
+    r = pp.BandRenderer(P, 100)
+    assert (r.W, r.H) == (round(210 / 25.4 * 100), round(297 / 25.4 * 100))

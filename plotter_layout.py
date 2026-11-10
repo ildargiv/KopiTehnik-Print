@@ -123,6 +123,10 @@ class Layout:
     def __init__(self, roll_w=914.0, edge=DEFAULT_EDGE_MM, gap=DEFAULT_GAP_MM, bottom=DEFAULT_EDGE_MM):
         self.roll_w, self.edge, self.gap, self.bottom_margin = float(roll_w), float(edge), float(gap), float(bottom)
         self.items = []
+        self.marks = False                 # метки реза в углах каждого файла
+        self.mark_mm = 5.0                 # длина линии метки
+        self.mark_off = 1.0                # отступ метки от угла файла
+        self.fixed_length = None           # длина бумаги задана жёстко (пробный отпечаток на A4)
 
     # --- геометрия
     @property
@@ -144,7 +148,37 @@ class Layout:
 
     def paper_size_mm(self):
         """(ширина, длина) бумаги для драйвера: ширина рулона не меняется, длина — вся раскладка плюс верхняя кромка."""
+        if self.fixed_length:
+            return self.roll_w, float(self.fixed_length)
         return self.roll_w, self.length() + self.edge
+
+    def mark_segments(self):
+        """Линии меток реза (x1, y1, x2, y2) в мм раскладки: по два штриха в каждом углу каждого файла, снаружи рамки."""
+        if not self.marks:
+            return []
+        o, m = self.mark_off, self.mark_mm
+        out = []
+        for it in self.expand_copies():
+            for cx, sx in ((it.x, -1), (it.right, 1)):
+                for cy, sy in ((it.y, -1), (it.bottom, 1)):
+                    out.append((cx + sx * o, cy, cx + sx * (o + m), cy))
+                    out.append((cx, cy + sy * o, cx, cy + sy * (o + m)))
+        return out
+
+    def proof_layout(self, paper=(210.0, 297.0), edge=5.0):
+        """Уменьшенная копия раскладки для пробного отпечатка на листе paper (мм): всё сжато с сохранением пропорций."""
+        act = self.active()
+        W = max(self.printable_w, 1.0)
+        H = max(self.length(), 1.0)
+        k = min((paper[0] - 2 * edge) / W, (paper[1] - 2 * edge) / H, 1.0)
+        out = Layout(paper[0], edge, self.gap * k, edge)
+        out.marks, out.mark_mm, out.mark_off = self.marks, self.mark_mm * k, self.mark_off * k
+        for it in act:
+            c = Item.from_dict(it.to_dict())
+            c.w, c.h, c.x, c.y = it.w * k, it.h * k, it.x * k, it.y * k
+            out.items.append(c)
+        out.fixed_length = float(paper[1])
+        return out
 
     def too_long(self):
         return self.length() + self.edge > MAX_PAPER_LEN_MM
@@ -161,6 +195,8 @@ class Layout:
             d = i.dpi()
             if d and d < min_dpi:
                 out.append((n, "dpi"))
+        if self.marks and self.gap < self.mark_off + self.mark_mm - 0.05 and len(act) > 1:
+            out.append((act[0][0], "marks"))
         for a in range(len(act)):
             for b in range(a + 1, len(act)):
                 (na, ia), (nb, ib) = act[a], act[b]
@@ -332,6 +368,7 @@ class Layout:
     # --- сохранение
     def to_json(self):
         return json.dumps({"version": 1, "roll_w": self.roll_w, "edge": self.edge, "gap": self.gap, "bottom": self.bottom_margin,
+                           "marks": self.marks, "mark_mm": self.mark_mm,
                            "items": [i.to_dict() for i in self.items]}, ensure_ascii=False, indent=1)
 
     @classmethod
@@ -339,6 +376,7 @@ class Layout:
         d = json.loads(text)
         lay = cls(d.get("roll_w", 914), d.get("edge", DEFAULT_EDGE_MM), d.get("gap", DEFAULT_GAP_MM), d.get("bottom", DEFAULT_EDGE_MM))
         lay.items = [Item.from_dict(x) for x in d.get("items", [])]
+        lay.marks, lay.mark_mm = bool(d.get("marks", False)), float(d.get("mark_mm", 5.0))
         return lay
 
     def snapshot(self):
@@ -347,6 +385,7 @@ class Layout:
     def restore(self, snap):
         other = Layout.from_json(snap)
         self.roll_w, self.edge, self.gap, self.bottom_margin, self.items = other.roll_w, other.edge, other.gap, other.bottom_margin, other.items
+        self.marks, self.mark_mm = other.marks, other.mark_mm
 
 
 class History:
