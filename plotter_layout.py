@@ -268,8 +268,6 @@ class Layout:
         for it in order:
             rot = it.rot
             ow, oh = it.ow, it.oh
-            if rot_fit and ow > oh and ow <= W and oh <= W:
-                pass
             if rot_fit and oh > ow and oh <= W:
                 rot = (rot + 90) % 360
                 ow, oh = oh, ow                           # кладём широкой стороной поперёк рулона

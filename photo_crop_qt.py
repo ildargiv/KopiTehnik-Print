@@ -521,17 +521,21 @@ la.ANIM_ON = ANIM_ON
 class ModeSwitch(QWidget):
     """Переключатель режимов ФОТО / ДОКУМЕНТ: бегунок плавно переезжает с лёгким «пружинным» отскоком, значок подсвечивается."""
     changed = Signal(str)
-    ITEMS = (("photo", "Фото", "image"), ("doc", "Документ", "doc"))
+    ITEMS = (("photo", "Фото", "image"), ("doc", "Документ", "doc"), ("plot", "Плоттер", "printer_cfg"))
 
     def __init__(self, value="photo"):
         super().__init__()
-        self.value, self._x, self._hover = value, (0.0 if value == "photo" else 1.0), -1
-        self.setFixedSize(236, 40)
+        self.value, self._x, self._hover = value, float(self._pos(value)), -1
+        self.setFixedSize(340, 40)
         self.setMouseTracking(True)
         self.setCursor(Qt.PointingHandCursor)
         self._anim = QPropertyAnimation(self, b"knobx", self)
         self._anim.setDuration(380)
         self._anim.setEasingCurve(QEasingCurve.OutBack)
+
+    @classmethod
+    def _pos(cls, value):
+        return [k for k, _, _ in cls.ITEMS].index(value) if value in [k for k, _, _ in cls.ITEMS] else 0
 
     def getKx(self):
         return self._x
@@ -546,7 +550,7 @@ class ModeSwitch(QWidget):
         if value == self.value:
             return
         self.value = value
-        end = 0.0 if value == "photo" else 1.0
+        end = float(self._pos(value))
         if animate:
             self._anim.stop()
             self._anim.setStartValue(self._x)
@@ -557,7 +561,7 @@ class ModeSwitch(QWidget):
             self.update()
 
     def _idx(self, pos):
-        return 0 if pos.x() < self.width() / 2 else 1
+        return min(len(self.ITEMS) - 1, int(pos.x() / (self.width() / len(self.ITEMS))))
 
     def mouseMoveEvent(self, e):
         self._hover = self._idx(e.position())
@@ -582,7 +586,7 @@ class ModeSwitch(QWidget):
         p.setPen(QPen(QColor(T["border"]), 1))
         p.setBrush(QColor(T["raised"]))
         p.drawRoundedRect(track, H / 2, H / 2)
-        cw = (W - 2 * pad) / 2
+        cw = (W - 2 * pad) / len(self.ITEMS)
         x = pad + cw * self._x
         thumb = QRectF(x, pad, cw, H - 2 * pad)
         glow = QColor(T["accent"])                                   # мягкое свечение под бегунком
@@ -4792,6 +4796,108 @@ class DocMixin:
                 self.sig.printed.emit("error", 0, "%s: %s" % (ex.__class__.__name__, ex))
         threading.Thread(target=work, daemon=True).start()
 
+    def print_plotter(self):
+        """Печать раскладки на рулон: бумага = ширина рулона × вычисленная длина, лист рендерится полосами."""
+        if self.saving or self.printing:
+            return
+        pg, L = self.plot_page, self.plot_page.L
+        if not L.active():
+            info(self, "Добавьте файлы на поле плоттера.")
+            return
+        pr = self.pr
+        if not pr["printer"] or self.blob is None:
+            self.show_page(2)
+            info(self, "Принтер не выбран или недоступен. Выберите принтер на вкладке «Принтер».")
+            return
+        if L.too_long():
+            warn(self, "Раскладка длиннее 3,27 м: драйвер не примет такую бумагу. Сократите раскладку.")
+            return
+        kinds = {k for _, k in L.problems()}
+        ppi = int(pg.cb_dpi.currentData() or 150)
+        pw_mm, pl_mm = L.paper_size_mm()
+        try:
+            blob = pc.devmode_write(self.blob, {"paper_mm": [round(pw_mm, 1), round(pl_mm, 1)]})
+            blob = pc.prepare_blob(pr["printer"], blob, "portrait", {"paper": pc.PAPER_DRIVER, "icm_off": bool(pr["icm_off"])})
+            geom = pc.printer_geometry(pr["printer"], blob, "portrait")
+        except Exception as ex:
+            warn(self, tr("Не удалось подготовить печать") + ":\n%s" % ex)
+            return
+        text = "%s\n%s: %s\n%s: %g × %s мм (%s: %.2f м²)\n%s: %d, %s: %d dpi" % (
+            tr("Плоттер"), tr("Принтер"), pr["printer"], tr("Бумага"), pw_mm, ("%.0f" % pl_mm), tr("площадь"), L.area_m2(),
+            tr("Файлов"), len(L.expand_copies()), tr("Разрешение"), ppi)
+        if kinds & {"overlap", "out"}:
+            text += "\n" + tr("Внимание: файлы перекрываются или выходят за поле.")
+        if "dpi" in kinds:
+            text += "\n" + tr("Внимание: у части файлов низкое разрешение.")
+        if abs(geom["paper"][0] - pw_mm) > 3 or abs(geom["paper"][1] - pl_mm) > 3:
+            text += "\n" + tr("Внимание: драйвер вернул другой размер бумаги") + " (%.0f × %.0f мм)." % geom["paper"]
+        cm = None
+        if self.doc_cm_enabled():
+            try:
+                cm = pc.cm_build(self.d["icc"], self.s["intent"], self.s["bpc"], self.s["embed"])
+            except ValueError as ex:
+                warn(self, str(ex))
+                return
+        if not ask(self, text + "\n\n" + tr("Начать печать?")):
+            return
+        self.cancel.clear()
+        self.printing = True
+        self._print_files = []
+        self._busy(100, tr("Подготовка…"), [], "print")
+        self.b_print.set_progress(0.0)
+        self.b_cancel.show()
+        job = dict(printer=pr["printer"], blob=blob, ppi=ppi, layout=L, cm=cm, mirror=pg.cb_mirror.isChecked(), negative=pg.cb_neg.isChecked(),
+                   pcorr=pcr.norm(self.s["pcorr"]) if pcr.active(self.s["pcorr"]) else None, area=L.area_m2(),
+                   name="Плоттер %gмм x %.2fм" % (L.roll_w, L.length() / 1000))
+
+        def work():
+            try:
+                done = self._plotter_print_job(job)
+                self.sig.printed.emit("done" if done else "cancelled", 1 if done else 0, "")
+            except Exception as ex:
+                self.sig.printed.emit("error", 0, "%s: %s" % (ex.__class__.__name__, ex))
+        threading.Thread(target=work, daemon=True).start()
+
+    def doc_cm_enabled(self):
+        return bool(getattr(self, "d", {}).get("cm_on")) and bool(self.d.get("icc"))
+
+    def _plotter_print_job(self, j):
+        """В потоке: рулон рендерится полосами и уходит одним заданием."""
+        import plotter_print as pp
+        from PySide6.QtCore import QSize
+        from PySide6.QtPdf import QPdfDocument
+
+        def pdf_render(path, w, h):
+            doc = QPdfDocument()
+            if doc.load(path) != QPdfDocument.Error.None_:
+                raise OSError("PDF не открылся")
+            qi = doc.render(0, QSize(max(1, w), max(1, h))).convertToFormat(QImage.Format_RGBA8888)
+            return pc.Image.frombuffer("RGBA", (qi.width(), qi.height()), bytes(qi.constBits()), "raw", "RGBA", qi.bytesPerLine(), 1)
+
+        def transform(im):
+            if j["cm"]:
+                im = pc.apply_printer_profile(im, None, j["cm"])
+            if j.get("pcorr"):
+                im = pcr.apply(im, j["pcorr"])
+            return im
+        rend = pp.BandRenderer(j["layout"], j["ppi"], pdf_render, j["mirror"], j["negative"])
+
+        def prog(b, H):
+            self.sig.progress.emit(int(b * 100 / H), 100, "\x01" + tr("Отправляю в печать") + " %d%%" % int(b * 100 / H))
+        with pc.PrinterJob(j["printer"], j["blob"], j["name"]) as job:
+            ok = pp.print_plotter(job, rend, cancel=self.cancel, on_progress=prog, transform=transform)
+            if not ok:
+                job.abort()
+                return False
+            job.finish()
+        try:
+            import print_stats
+            print_stats.record(j["printer"], 0, "%gx%.0f" % (j["layout"].roll_w, j["layout"].length()), "plotter", "app", 1,
+                               [i.name for i in j["layout"].active()], kind="doc")
+        except Exception:
+            pass
+        return True
+
     def _doc_print_job(self, j):
         """В потоке: страницы рендерятся и одним заданием уходят на принтер. В журнал печати идёт только полностью отправленное задание."""
         from PySide6.QtCore import QSize
@@ -5061,6 +5167,10 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         self.center_stack.addWidget(self.sheet_view)
         self.doc_view = DocView(self)
         self.center_stack.addWidget(self.doc_view)
+        import plotter_ui
+        plotter_ui.translate[0] = tr
+        self.plot_page = plotter_ui.PlotterPage()
+        self.center_stack.addWidget(self.plot_page)      # страница 3: режим «Плоттер»
         self.overlay = SendOverlay(self.center_stack)
         outer = vbox(self._topbar(), spacing=0)
         if T.get("orn"):
@@ -6393,6 +6503,8 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         only — напечатать только это фото (остальные отметки не трогаются)."""
         if getattr(self, "app_mode", "photo") == "doc":
             return self.print_doc()
+        if getattr(self, "app_mode", "photo") == "plot":
+            return self.print_plotter()
         if self.saving or self.printing:
             return
         files = [only] if only is not None else self.checked_files()
@@ -7341,21 +7453,22 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         """ФОТО / ДОКУМЕНТ: в режиме документа слева скрыты миниатюры, справа вместо «Фото» и «Умной рамки» — страница «Документ»."""
         self.app_mode = mode
         doc = mode == "doc"
-        self.center_stack.setCurrentIndex(2 if doc else (1 if self.view == "sheet" else 0))
+        plot = mode == "plot"
+        self.center_stack.setCurrentIndex(3 if plot else 2 if doc else (1 if self.view == "sheet" else 0))
         if hasattr(self, "mode_switch"):
             self.mode_switch.set(mode)
         if hasattr(self, "left_w"):
-            self.left_w.setVisible(not doc)
+            self.left_w.setVisible(not (doc or plot))
             for i, b in enumerate(self.seg_page.group.buttons()):   # кнопки вкладок: Макет, Цвет, Умная рамка, Принтер, Документ
-                b.setVisible(bool(self.settings.get("chat_enabled", False)) if i == 5 else (i >= 3) if doc else (i < 4))
-            self.b_save.setVisible(not doc)
+                b.setVisible(bool(self.settings.get("chat_enabled", False)) if i == 5 else (i == 2) if plot else (i >= 3) if doc else (i < 4))
+            self.b_save.setVisible(not (doc or plot))
             for w in self._photo_only:
-                w.setVisible(not doc and not (self.compact and w in self._caps))
-            self.show_page(4 if doc else 0)
+                w.setVisible(not (doc or plot) and not (self.compact and w in self._caps))
+            self.show_page(2 if plot else 4 if doc else 0)
 
     def set_view(self, v):
         self.view = "sheet" if v == "sheet" else "crop"
-        self.center_stack.setCurrentIndex(2 if getattr(self, "app_mode", "photo") == "doc" else (1 if self.view == "sheet" else 0))
+        self.center_stack.setCurrentIndex({"plot": 3, "doc": 2}.get(getattr(self, "app_mode", "photo"), 1 if self.view == "sheet" else 0))
         self.seg_view.set(self.view)
         if self.view == "sheet":
             self.sheet_view.refresh()
@@ -7557,6 +7670,12 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
 
     def drop_paths(self, paths, sheet_pos=None):
         """Добавляет брошенные файлы и папки. Если бросили на лист — первое новое фото встаёт в точку, куда бросили."""
+        if getattr(self, "app_mode", "photo") == "plot":      # в режиме «Плоттер» всё брошенное идёт на поле рулона
+            import plotter_ui
+            fl = [str(q) for q in paths if Path(q).suffix.lower() in plotter_ui.IMG_EXTS and Path(q).is_file()]
+            if fl:
+                self.plot_page.add_files(fl)
+            return
         files = []
         docs = [Path(q) for q in paths if Path(q).suffix.lower() in DOC_EXTS and Path(q).is_file()]
         if docs and not any(Path(q).suffix.lower() in pc.EXTS or Path(q).is_dir() for q in paths):

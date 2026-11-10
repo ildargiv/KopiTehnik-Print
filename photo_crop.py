@@ -2139,6 +2139,25 @@ class PrinterJob:
             ImageWin.Dib(img.crop((0, a, W, b))).draw(int(self.dc), (x0, top, x0 + self.physw, bot))
         gd.EndPage(self.dc)
 
+    def page_banded(self, W, H, band_fn, band=512, cancel=None, on_progress=None):
+        """Лист, который не помещается в памяти целиком (рулон плоттера): band_fn(a, b) отдаёт строки [a, b) как PIL-картинку.
+        Возвращает False, если печать отменена."""
+        from PIL import ImageWin
+        wp, gd, wt = _win()
+        gd.StartPage(self.dc)
+        x0, y0 = -self.offx, -self.offy
+        for a in range(0, H, band):
+            if cancel is not None and cancel.is_set():
+                return False
+            b = min(H, a + band)
+            top = y0 + round(a * self.physh / H)
+            bot = y0 + round(b * self.physh / H)
+            ImageWin.Dib(band_fn(a, b)).draw(int(self.dc), (x0, top, x0 + self.physw, bot))
+            if on_progress:
+                on_progress(b, H)
+        gd.EndPage(self.dc)
+        return True
+
     def finish(self):
         if self.dc and self.started:
             _win()[1].EndDoc(self.dc)
