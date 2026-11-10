@@ -9871,7 +9871,8 @@ class SettingsDialog(QDialog):
                         lbl("Папка для присланных файлов", "muted"),
                         hbox(e_dir, btn("Выбрать…", choose), spacing=6),
                         hbox(btn("Подключить ПК…", pair, "primary", ico="plus"), None),
-                        lbl("Связь между ПК не шифруется: пользуйтесь доверенной сетью или Tailscale.", "muted", wrap=True))
+                        lbl("Связь между ПК не шифруется: пользуйтесь доверенной сетью или Tailscale.", "muted", wrap=True),
+                        lbl("Брандмауэр: порты TCP 47615 и UDP 47616 разрешайте только для частной сети; для публичной сети их не открывайте.", "muted", wrap=True))
             self.lw_net = QListWidget()
             self.lw_net.setMinimumHeight(220)
 
@@ -9884,6 +9885,8 @@ class SettingsDialog(QDialog):
                         bits.append("v" + p["version"])
                     if p["addr"]:
                         bits.append(p["addr"])
+                    if p.get("plain"):
+                        bits.append("⚠ " + tr("не шифруется"))
                     if p["hidden"]:
                         bits.append(tr("скрыт"))
                     if not p["trusted"]:
@@ -10354,6 +10357,13 @@ pc.EN.update({
     "Не удалось проверить обновления. Проверьте подключение к интернету.": "Could not check for updates. Check your internet connection.",
 })
 pc.EN_FMT.update({"Относится к профилю печати: {t}": "Belongs to the print profile: {t}", "Пресет {n}": "Preset {n}", "Название пресета {n}": "Name of preset {n}", "Вход {a} → выход {b}": "Input {a} → output {b}", "Пресет {n} пока пуст. Настройте ползунки и нажмите «Сохранить» под ним.": "Preset {n} is empty. Set the sliders and press Save under it.", "Заменить сохранённый пресет {n} текущими настройками?": "Replace saved preset {n} with the current settings?", "Применён пресет {n}": "Preset {n} applied", "Пресет {n} сохранён": "Preset {n} saved", "Страниц: {n}": "Pages: {n}", "Открыть документ «{name}»": "Open document “{name}”"})
+pc.EN.update({
+    "не шифруется": "not encrypted",
+    "Публичный адрес: данные подписаны, но не шифруются. Используйте Tailscale или домашнюю сеть.":
+        "Public address: data is signed but not encrypted. Use Tailscale or a home network.",
+    "Брандмауэр: порты TCP 47615 и UDP 47616 разрешайте только для частной сети; для публичной сети их не открывайте.":
+        "Firewall: allow TCP 47615 and UDP 47616 for private networks only; do not open them on public networks.",
+})
 pc.EN.update({"Бумага: фото, листов": "Paper: photos, sheets", "Бумага: документы, листов": "Paper: documents, sheets", "Тип": "Type"})
 pc.EN.update({
     "Документ": "Document", "PDF, Word, Excel, PowerPoint и другие офисные файлы": "PDF, Word, Excel, PowerPoint and other office files",

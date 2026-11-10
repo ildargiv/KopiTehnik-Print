@@ -293,3 +293,10 @@ def test_found_marks_public_address_as_unencrypted(app, tmp_path):
         assert set(dlg.rows) == {"pub", "lan"}
     finally:
         a.stop()
+
+
+def test_unencrypted_and_firewall_strings_have_english():
+    src = open(os.path.join(os.path.dirname(__file__), "..", "photo_crop_qt.py"), encoding="utf-8").read()
+    for ru, en in (("не шифруется", "not encrypted"), ("TCP 47615 и UDP 47616", "TCP 47615 and UDP 47616")):
+        assert ru in src and en in src
+    assert 'bits.append("⚠ " + tr("не шифруется"))' in src
