@@ -12,7 +12,7 @@ winspool = ctypes.windll.LoadLibrary("winspool.drv")
 PRINTER = "EPSON L8050 Series (копия 1)"
 DM_IN_PROMPT = 0x0008
 DM_OUT_BUFFER = 0x0002
-TREE = "C:\\Users\\User\\Desktop\\Программы\\KopiTehnik-Print\\epson_dlg_tree.txt"
+TREE = __import__("os").path.join(__import__("os").path.dirname(__import__("os").path.abspath(__file__)), "epson_dlg_tree.txt")
 
 
 def _open_printer():

@@ -1,0 +1,55 @@
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  tests:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    env:
+      QT_QPA_PLATFORM: offscreen
+      PYTHONUTF8: "1"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements-lock.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-lock.txt
+
+      - name: Unit tests
+        run: python -m pytest tests -q
+
+      - name: MCP launcher tests
+        working-directory: mcp
+        run: python -m pytest tests -q
+
+      - name: Qt self-test (builds the main window off-screen)
+        run: python photo_crop_qt.py --selftest
+
+      - name: Record the exact package versions of this run
+        if: always()
+        run: pip freeze > pip-freeze.txt
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: pip-freeze
+          path: pip-freeze.txt

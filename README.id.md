@@ -8,7 +8,7 @@ Program Windows untuk memangkas dan mencetak foto (10×15 cm dan format lain), d
 
 ## Screenshots
 
-<p align="center"><img src="docs/promo.gif" alt="PhotoCrop animated overview" width="760"></p>
+<p align="center"><img src="docs/promo.webp" alt="PhotoCrop animated overview" width="760"></p>
 
 ![PhotoCrop main window: crop frame on a demo photo](docs/screenshots/main-window.png)
 
@@ -69,3 +69,5 @@ Baris perintah: `python photo_crop.py agent set_format format=10x15`; `python ph
 ## Lisensi
 
 License: [KopiTehnik Print Licence](LICENSE)
+
+**Lisensi komersial** (lebih dari satu workstation, jaringan toko, penjualan kembali): belum ada daftar harga publik, ketentuannya disepakati secara individual. Untuk memintanya, [buka issue](https://github.com/ildargiv/KopiTehnik-Print/issues/new?title=Commercial%20licence) atau [diskusi](https://github.com/ildargiv/KopiTehnik-Print/discussions).

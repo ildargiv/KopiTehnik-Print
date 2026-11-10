@@ -8,7 +8,7 @@
 
 ## Screenshots
 
-<p align="center"><img src="docs/promo.gif" alt="PhotoCrop animated overview" width="760"></p>
+<p align="center"><img src="docs/promo.webp" alt="PhotoCrop animated overview" width="760"></p>
 
 ![PhotoCrop main window: crop frame on a demo photo](docs/screenshots/main-window.png)
 
@@ -69,3 +69,5 @@
 ## ใบอนุญาต
 
 License: [KopiTehnik Print Licence](LICENSE)
+
+**สัญญาอนุญาตเชิงพาณิชย์** (หลายเครื่อง หลายสาขา หรือจำหน่ายต่อ): ยังไม่มีรายการราคาสาธารณะ เงื่อนไขตกลงกันเป็นรายกรณี หากต้องการ โปรด[เปิด issue](https://github.com/ildargiv/KopiTehnik-Print/issues/new?title=Commercial%20licence) หรือ[การสนทนา](https://github.com/ildargiv/KopiTehnik-Print/discussions)
