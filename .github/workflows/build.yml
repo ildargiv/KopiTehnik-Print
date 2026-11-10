@@ -24,6 +24,14 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
+      - name: Unit tests (a failing test stops the release)
+        env:
+          QT_QPA_PLATFORM: offscreen
+          PYTHONUTF8: "1"
+        run: |
+          pip install pytest
+          python -m pytest tests -q
+
       - name: Build PhotoCropQt.exe
         run: pyinstaller --noconfirm PhotoCropQt.spec
 
