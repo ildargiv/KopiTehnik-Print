@@ -8,7 +8,7 @@ Program dla Windows do kadrowania i drukowania zdjęć (10×15 cm i inne formaty
 
 ## Screenshots
 
-<p align="center"><img src="docs/promo.gif" alt="PhotoCrop animated overview" width="760"></p>
+<p align="center"><img src="docs/promo.webp" alt="PhotoCrop animated overview" width="760"></p>
 
 ![PhotoCrop main window: crop frame on a demo photo](docs/screenshots/main-window.png)
 
@@ -69,3 +69,5 @@ Wiersz poleceń: `python photo_crop.py agent set_format format=10x15`; `python p
 ## Licencja
 
 License: [KopiTehnik Print Licence](LICENSE)
+
+**Licencja komercyjna** (więcej stanowisk, sieci, odsprzedaż): nie ma jeszcze publicznego cennika, warunki ustalane są indywidualnie. Aby o nią zapytać, [otwórz issue](https://github.com/ildargiv/KopiTehnik-Print/issues/new?title=Commercial%20licence) lub [dyskusję](https://github.com/ildargiv/KopiTehnik-Print/discussions).

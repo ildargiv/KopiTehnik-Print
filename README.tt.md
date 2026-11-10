@@ -8,7 +8,7 @@ Windows өчен программа: фотоларны кадрлау һәм б
 
 ## Screenshots
 
-<p align="center"><img src="docs/promo.gif" alt="PhotoCrop animated overview" width="760"></p>
+<p align="center"><img src="docs/promo.webp" alt="PhotoCrop animated overview" width="760"></p>
 
 ![PhotoCrop main window: crop frame on a demo photo](docs/screenshots/main-window.png)
 
@@ -69,3 +69,5 @@ YuNet / YOLOX модельләре (~36 МБ) репозиторийга кер�
 ## Лицензия
 
 License: [KopiTehnik Print Licence](LICENSE)
+
+**Коммерция лицензиясе** (берничә эш урыны, челтәрләр, яңадан сату): ачык прайс әлегә юк, шартлар аерым килешенә. Сорау өчен [issue ачыгыз](https://github.com/ildargiv/KopiTehnik-Print/issues/new?title=Commercial%20licence) яки [фикер алышу](https://github.com/ildargiv/KopiTehnik-Print/discussions) башлагыз.

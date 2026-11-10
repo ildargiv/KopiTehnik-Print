@@ -8,7 +8,7 @@ Ein Windows-Programm zum Zuschneiden und Drucken von Fotos (10×15 cm und weiter
 
 ## Screenshots
 
-<p align="center"><img src="docs/promo.gif" alt="PhotoCrop animated overview" width="760"></p>
+<p align="center"><img src="docs/promo.webp" alt="PhotoCrop animated overview" width="760"></p>
 
 ![PhotoCrop main window: crop frame on a demo photo](docs/screenshots/main-window.png)
 
@@ -69,3 +69,5 @@ Kommandozeile: `python photo_crop.py agent set_format format=10x15`; `python pho
 ## Lizenz
 
 License: [KopiTehnik Print Licence](LICENSE)
+
+**Kommerzielle Lizenz** (mehrere Arbeitsplätze, Ketten, Weiterverkauf): Es gibt noch keine öffentliche Preisliste, die Bedingungen werden individuell vereinbart. Für eine Anfrage [eröffnen Sie ein Issue](https://github.com/ildargiv/KopiTehnik-Print/issues/new?title=Commercial%20licence) oder eine [Diskussion](https://github.com/ildargiv/KopiTehnik-Print/discussions).

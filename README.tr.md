@@ -8,7 +8,7 @@ Fotoğrafları kırpmak ve yazdırmak (10×15 cm ve diğer boyutlar) için bir W
 
 ## Screenshots
 
-<p align="center"><img src="docs/promo.gif" alt="PhotoCrop animated overview" width="760"></p>
+<p align="center"><img src="docs/promo.webp" alt="PhotoCrop animated overview" width="760"></p>
 
 ![PhotoCrop main window: crop frame on a demo photo](docs/screenshots/main-window.png)
 
@@ -69,3 +69,5 @@ Komut satırı: `python photo_crop.py agent set_format format=10x15`; `python ph
 ## Lisans
 
 License: [KopiTehnik Print Licence](LICENSE)
+
+**Ticari lisans** (birden fazla iş istasyonu, zincirler, yeniden satış): henüz herkese açık bir fiyat listesi yok, koşullar ayrı ayrı kararlaştırılır. Talep etmek için [bir issue açın](https://github.com/ildargiv/KopiTehnik-Print/issues/new?title=Commercial%20licence) veya bir [tartışma](https://github.com/ildargiv/KopiTehnik-Print/discussions) başlatın.
