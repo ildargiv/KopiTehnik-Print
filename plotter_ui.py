@@ -2,7 +2,7 @@
 Логика — в plotter_layout.py (без Qt). Здесь только интерфейс (PySide6)."""
 import os
 
-from PySide6.QtCore import Qt, QRectF, QPointF, QLineF, Signal
+from PySide6.QtCore import Qt, QRectF, QPointF, QLineF, QItemSelectionModel, Signal
 from PySide6.QtGui import QColor, QFont, QImage, QKeySequence, QPainter, QPen, QPixmap, QShortcut, QTransform
 from PySide6.QtWidgets import (QAbstractItemView, QGridLayout, QCheckBox, QComboBox, QDoubleSpinBox, QFileDialog, QFormLayout, QGroupBox, QHBoxLayout,
                                QLabel, QPushButton, QScrollArea, QSizePolicy, QSpinBox, QSplitter, QTableWidget, QTableWidgetItem,
@@ -93,6 +93,8 @@ class PlotterCanvas(QWidget):
         self.k = 0.4              # пикселей на мм
         self.fit_mode = "width"   # «width» | «all» | None (вручную): по умолчанию рулон на всю ширину окна
         self.sel = None
+        self.extra = []           # остальные выделенные файлы (sel — главный, его свойства показаны справа)
+        self._band = None         # рамка выделения мышью (QRectF в пикселях) или None
         self.thumbs = {}          # id(item) -> QPixmap
         self.snap_on = True
         self._drag = None
@@ -162,6 +164,20 @@ class PlotterCanvas(QWidget):
     def set_thumb(self, it, qimage):
         self.thumbs[id(it)] = QPixmap.fromImage(qimage)
 
+    def selection(self):
+        """Все выделенные файлы в порядке раскладки (главный + остальные)."""
+        ids = {id(i) for i in self.extra}
+        if self.sel is not None:
+            ids.add(id(self.sel))
+        return [i for i in self.layout_.items if id(i) in ids]
+
+    def set_selection(self, items, primary=None):
+        items = list(items)
+        self.sel = primary if primary in items else (items[-1] if items else None)
+        self.extra = [i for i in items if i is not self.sel]
+        self.selected.emit(self.sel)
+        self.update()
+
     def item_at(self, pos):
         for it in reversed(self.layout_.items):
             if it.enabled and self.item_rect(it).contains(pos):
@@ -219,8 +235,8 @@ class PlotterCanvas(QWidget):
                 p.fillRect(r, QColor("#cfd8e3"))
             kinds = bad.get(n, set())
             col = _col("bad", "#d33") if kinds & {"overlap", "out"} else _col("warn", "#e90") if kinds & {"gap", "dpi"} else _col("ok", "#2a6")
-            if it is self.sel:
-                p.setPen(QPen(_col("select", "#1e6fe8"), 3))
+            if it is self.sel or any(it is x for x in self.extra):
+                p.setPen(QPen(_col("select", "#1e6fe8"), 3 if it is self.sel else 2))
             else:
                 p.setPen(QPen(col, 2 if kinds else 1))
             p.setBrush(Qt.NoBrush)
@@ -240,6 +256,10 @@ class PlotterCanvas(QWidget):
             it, r = self.sel, self.item_rect(self.sel)
             p.setPen(_col("select", "#1e6fe8"))
             p.drawText(QPointF(r.left() + 4, r.bottom() - 5), "x %s  y %s" % (self._n(it.x / 10), self._n(it.y / 10)))
+        if self._band is not None:                            # рамка выделения
+            p.setPen(QPen(_col("select", "#1e6fe8"), 1, Qt.DashLine))
+            p.setBrush(QColor(30, 111, 232, 40))
+            p.drawRect(self._band)
         # линейки
         self._rulers(p, o, W, H)
         p.end()
@@ -277,25 +297,52 @@ class PlotterCanvas(QWidget):
         if e.button() != Qt.LeftButton:
             return
         it = self.item_at(e.position())
-        self.set_selected(it)
-        if it:
-            self.hist.push()
-            x, y = self.to_mm(e.position())
-            self._drag = (it, x - it.x, y - it.y, False)
+        if e.modifiers() & (Qt.ControlModifier | Qt.ShiftModifier):          # Ctrl/Shift: добавить файл в выделение или убрать
+            cur = self.selection()
+            if it is not None:
+                cur = [i for i in cur if i is not it] if any(i is it for i in cur) else cur + [it]
+                self.set_selection(cur, it if any(i is it for i in cur) else None)
+            return
+        if it is None:
+            self.set_selected(None)
+            self._band_start = e.position()
+            self._band = QRectF(e.position(), e.position())
+            return
+        if not any(it is i for i in self.selection()):                       # щелчок по невыделенному — выделяем его одного
+            self.set_selected(it)
+        else:
+            self.sel = it                                                    # по выделенному — тянем всю группу
+            self.selected.emit(it)
+        self.hist.push()
+        x, y = self.to_mm(e.position())
+        self._drag = (it, x - it.x, y - it.y, False, [(i, i.x, i.y) for i in self.selection()], it.x, it.y)
 
     def mouseMoveEvent(self, e):
+        if self._band is not None:
+            r = QRectF(self._band_start, e.position()).normalized()
+            self._band = r
+            hit = [i for i in self.layout_.items if i.enabled and self.item_rect(i).intersects(r)]
+            self.set_selection(hit)
+            return
         if not self._drag:
             return
-        it, dx, dy, _ = self._drag
+        it, dx, dy, _, group, ox, oy = self._drag
         x, y = self.to_mm(e.position())
         it.x, it.y = x - dx, max(0.0, y - dy)
         if self.snap_on:
             self.layout_.snap(it, tol=6 / self.k)
-        self._drag = (it, dx, dy, True)
+        mx, my = it.x - ox, it.y - oy
+        for g, gx, gy in group:
+            if g is not it:
+                g.x, g.y = gx + mx, max(0.0, gy + my)
+        self._drag = (it, dx, dy, True, group, ox, oy)
         self.selected.emit(it)
         self.update_size()
 
     def mouseReleaseEvent(self, e):
+        if self._band is not None:
+            self._band = None
+            self.update()
         if self._drag:
             moved = self._drag[3]
             self._drag = None
@@ -311,23 +358,29 @@ class PlotterCanvas(QWidget):
             e.ignore()
 
     def keyPressEvent(self, e):
-        it = self.sel
-        if not it:
+        if e.key() == Qt.Key_A and e.modifiers() & Qt.ControlModifier:        # Ctrl+A: выделить все файлы
+            self.set_selection([i for i in self.layout_.items if i.enabled])
+            return
+        its = self.selection()
+        if not its:
             return super().keyPressEvent(e)
         step = 100.0 if e.modifiers() & Qt.ShiftModifier else 1.0
         d = {Qt.Key_Left: (-step, 0), Qt.Key_Right: (step, 0), Qt.Key_Up: (0, -step), Qt.Key_Down: (0, step)}.get(e.key())
         if d:
             self.hist.push()
-            it.x += d[0]
-            it.y = max(0.0, it.y + d[1])
+            for it in its:
+                it.x += d[0]
+                it.y = max(0.0, it.y + d[1])
             self.after_edit()
         elif e.key() == Qt.Key_R:
             self.hist.push()
-            it.rotate(90)
+            for it in its:
+                it.rotate(90)
             self.after_edit()
         elif e.key() in (Qt.Key_Delete, Qt.Key_Backspace):
             self.hist.push()
-            self.layout_.items.remove(it)
+            for it in its:
+                self.layout_.items.remove(it)
             self.set_selected(None)
             self.after_edit()
         else:
@@ -335,6 +388,7 @@ class PlotterCanvas(QWidget):
 
     def set_selected(self, it):
         self.sel = it
+        self.extra = []
         self.selected.emit(it)
         self.update()
 
@@ -485,6 +539,7 @@ class PlotterPage(QWidget):
         self.tbl.setHorizontalHeaderLabels([_tr("Файл"), _tr("Ширина, см"), _tr("Высота, см"), _tr("Поворот"), _tr("Копий"), "DPI"])
         self.tbl.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.tbl.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.tbl.setSelectionMode(QAbstractItemView.ExtendedSelection)      # Shift/Ctrl: несколько файлов, правки применяются ко всем
         self.tbl.horizontalHeader().setStretchLastSection(True)
         self.tbl.verticalHeader().setVisible(False)
         self.tbl.setMaximumHeight(170)
@@ -615,15 +670,19 @@ class PlotterPage(QWidget):
         self.l_note.setText("%s: %s → %s" % (_tr("Расстановка"), pl.fmt_len(before), pl.fmt_len(after)))
 
     def _rotate_sel(self):
-        if self.sel:
+        its = self.canvas.selection()
+        if its:
             self.hist.push()
-            self.sel.rotate(90)
+            for it in its:
+                it.rotate(90)
             self.canvas.after_edit()
 
     def _delete_sel(self):
-        if self.sel:
+        its = self.canvas.selection()
+        if its:
             self.hist.push()
-            self.L.items.remove(self.sel)
+            for it in its:
+                self.L.items.remove(it)
             self.canvas.set_selected(None)
             self.canvas.after_edit()
 
@@ -743,10 +802,13 @@ class PlotterPage(QWidget):
         self._sync_table_sel()
 
     def _edit(self, fn):
-        if not self.sel:
+        """Применить правку ко всем выделенным файлам (выделить несколько: рамкой на поле, Ctrl/Shift или в таблице)."""
+        its = self.canvas.selection()
+        if not its:
             return
         self.hist.push()
-        fn(self.sel)
+        for it in its:
+            fn(it)
         self.canvas.after_edit()
         self.refresh()
         self.sync_props(self.sel)
@@ -761,11 +823,15 @@ class PlotterPage(QWidget):
 
     def _set_x(self):
         v = self._mm(self.sp_x.value())
-        self._edit(lambda i: setattr(i, "x", v))
+        s = self.sel
+        d = v - s.x if s is not None else 0.0                # группа сдвигается так, чтобы главный файл встал в X
+        self._edit(lambda i: setattr(i, "x", max(0.0, i.x + d)))
 
     def _set_y(self):
         v = self._mm(self.sp_y.value())
-        self._edit(lambda i: setattr(i, "y", v))
+        s = self.sel
+        d = v - s.y if s is not None else 0.0
+        self._edit(lambda i: setattr(i, "y", max(0.0, i.y + d)))
 
     def _set_pct(self):
         v = self.sp_pct.value()
@@ -795,15 +861,27 @@ class PlotterPage(QWidget):
     def _table_selected(self):
         if self._busy:
             return
-        r = self.tbl.currentRow()
-        if 0 <= r < len(self.L.items):
-            self.canvas.set_selected(self.L.items[r])
+        rows = sorted({i.row() for i in self.tbl.selectedIndexes() if 0 <= i.row() < len(self.L.items)})
+        cur = self.tbl.currentRow()
+        items = [self.L.items[r] for r in rows]
+        self._from_table = True
+        try:
+            self.canvas.set_selection(items, self.L.items[cur] if cur in rows else None)
+        finally:
+            self._from_table = False
 
     def _sync_table_sel(self):
-        if self.sel in self.L.items:
-            self._busy = True
-            self.tbl.selectRow(self.L.items.index(self.sel))
-            self._busy = False
+        if getattr(self, "_from_table", False):
+            return
+        its = self.canvas.selection()
+        self._busy = True
+        self.tbl.clearSelection()
+        sm = self.tbl.selectionModel()
+        for it in its:
+            if it in self.L.items:
+                idx = self.tbl.model().index(self.L.items.index(it), 0)
+                sm.select(idx, QItemSelectionModel.Select | QItemSelectionModel.Rows)
+        self._busy = False
 
     def refresh(self):
         self._thumb_by_path = {i.path: self.canvas.thumbs[id(i)].toImage() for i in self.L.items if id(i) in self.canvas.thumbs}
