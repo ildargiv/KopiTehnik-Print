@@ -309,19 +309,72 @@ class Layout:
             "min_length": [lambda i: -i.oh, lambda i: -i.ow, lambda i: -(i.ow * i.oh), lambda i: -max(i.ow, i.oh)],
         }[mode]
         rotate_opts = (False, True) if (allow_rotate and mode == "min_length") else (False,)
+        def rotated(placed):
+            return sum(1 for it, p in placed.items() if p[2] != it.rot)
+
+        def consider(placed):
+            nonlocal best
+            if placed is None:
+                return
+            length = max(p[1] + p[3] for p in placed.values())
+            score = (round(length, 1), rotated(placed))              # при равной длине — меньше поворотов
+            if best is None or score < best[0]:
+                best = (score, placed)
         for key in orders:
             for rot_fit in rotate_opts:
                 placed = self._shelf_pack(act, key, rot_fit, W, column=(mode == "column"))
-                if placed is None:
-                    continue
-                length = max(p[2] + p[3] for p in placed.values())
-                if best is None or length < best[0]:
-                    best = (length, placed)
+                if placed is not None:                               # у полочной упаковки в p[1] лежит y, в p[3] высота
+                    consider({it: (p[0], p[1], p[2], p[3]) for it, p in placed.items()})
+        if mode == "min_length":                                     # свободная упаковка: каждый файл поворачивается отдельно, если это короче
+            keys = [lambda i: -(i.ow * i.oh), lambda i: -max(i.ow, i.oh), lambda i: -i.oh, lambda i: -i.ow, lambda i: -(i.ow + i.oh)]
+            for key in keys:
+                for heur in ("bl", "bw"):
+                    for allow in ((False, True) if allow_rotate else (False,)):
+                        consider(self._maxrects_pack(act, key, heur, W, allow))
         if best is None:
             return before, before
         for it, (x, y, rot, _) in best[1].items():
             it.x, it.y, it.rot = x, y, rot
         return before, self.length()
+
+    def _maxrects_pack(self, act, key, heur, W, allow_rot):
+        """Упаковка по свободным прямоугольникам (MaxRects) в полосу шириной W: файл ставится туда, где ниже всего,
+        при allow_rot для каждого файла выбирается лучшая из двух ориентаций. Возвращает {item: (x, y, rot, oh)} или None."""
+        gap, BIG = self.gap, 1e9
+        free = [(0.0, 0.0, W + gap, BIG)]                            # ширина на gap больше: каждому файлу прибавляем gap справа и снизу
+        out = {}
+        for it in sorted(act, key=key):
+            best = None
+            for w, h, r in [(it.ow, it.oh, False)] + ([(it.oh, it.ow, True)] if allow_rot else []):
+                if w > W + 0.05:
+                    continue
+                ww, hh = w + gap, h + gap
+                for fx, fy, fw, fh in free:
+                    if ww <= fw + 0.05 and hh <= fh:
+                        sc = (fy + hh, fx, r) if heur == "bl" else (fw - ww, fy + hh, fx, r)
+                        if best is None or sc < best[0]:
+                            best = (sc, fx, fy, ww, hh, w, h, r)
+            if best is None:
+                return None
+            _, px, py, ww, hh, w, h, r = best
+            out[it] = (px, py, (it.rot + 90) % 360 if r else it.rot, h)
+            nxt = []
+            for fx, fy, fw, fh in free:
+                if px >= fx + fw or px + ww <= fx or py >= fy + fh or py + hh <= fy:
+                    nxt.append((fx, fy, fw, fh))
+                    continue
+                if px > fx:
+                    nxt.append((fx, fy, px - fx, fh))
+                if px + ww < fx + fw:
+                    nxt.append((px + ww, fy, fx + fw - px - ww, fh))
+                if py > fy:
+                    nxt.append((fx, fy, fw, py - fy))
+                if py + hh < fy + fh:
+                    nxt.append((fx, py + hh, fw, fy + fh - py - hh))
+            free = [a for n, a in enumerate(nxt)
+                    if not any(n != m and b[0] <= a[0] + 1e-6 and b[1] <= a[1] + 1e-6 and b[0] + b[2] >= a[0] + a[2] - 1e-6 and b[1] + b[3] >= a[1] + a[3] - 1e-6
+                               and (b != a or m < n) for m, b in enumerate(nxt))]
+        return out
 
     def _shelf_pack(self, act, key, rot_fit, W, column=False):
         """Полочная упаковка. rot_fit: поворачивать файл так, чтобы длинная сторона шла вдоль рулона (меньше расход по длине)."""

@@ -105,3 +105,16 @@ def test_marks_proof_and_json():
     assert P.paper_size_mm() == (210.0, 297.0)
     assert P.items[0].w < L.items[0].w and abs(P.items[0].w / P.items[0].h - 2.0) < 1e-9
     assert pl.Layout.from_json(L.to_json()).marks is True
+
+
+def test_autopack_free_rotation_and_no_overlap():
+    L = pl.Layout(roll_w=610, edge=5, gap=10)
+    for n, (w, h) in enumerate([(295, 590), (295, 590), (900, 300), (420, 297), (210, 297), (594, 841)]):
+        L.add(pl.Item("f%d" % n, w, h))
+    before, after = L.autopack()
+    assert not ({k for _, k in L.problems()} & {"overlap", "out"})
+    two = pl.Layout(roll_w=610, edge=5, gap=10)
+    two.add(pl.Item("a", 295, 590))
+    two.add(pl.Item("b", 295, 590))
+    two.autopack()
+    assert max(i.bottom for i in two.items) == 590 and sorted(round(i.x) for i in two.items) == [0, 305]   # рядом, без поворота
