@@ -1245,8 +1245,11 @@ class PairDialog(QDialog):
             n = QLabel("🖥  " + f["name"])
             n.setTextFormat(Qt.PlainText)
             n.setStyleSheet("font-weight: 700;")
-            a = QLabel(f["addr"] + ("  ·  Tailscale" if f.get("via") == "tailscale" else ""))
+            a = QLabel(f["addr"] + ("  ·  Tailscale" if f.get("via") == "tailscale" else "")
+                       + ("  ·  ⚠ " + self.tr("не шифруется") if f.get("plain") else ""))
             a.setObjectName("hint")
+            if f.get("plain"):
+                a.setToolTip(self.tr("Публичный адрес: данные подписаны, но не шифруются. Используйте Tailscale или домашнюю сеть."))
             col.addWidget(n)
             col.addWidget(a)
             b = QPushButton(self.tr("Подключить"))
