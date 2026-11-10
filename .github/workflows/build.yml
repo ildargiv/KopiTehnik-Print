@@ -18,11 +18,19 @@ jobs:
         with:
           python-version: "3.12"
           cache: pip
+          cache-dependency-path: requirements-lock.txt
 
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          pip install -r requirements-lock.txt
+
+      - name: Unit tests (a failing test stops the release)
+        env:
+          QT_QPA_PLATFORM: offscreen
+          PYTHONUTF8: "1"
+        run: |
+          python -m pytest tests -q
 
       - name: Build PhotoCropQt.exe
         run: pyinstaller --noconfirm PhotoCropQt.spec

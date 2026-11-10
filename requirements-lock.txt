@@ -1,0 +1,12 @@
+# Exact versions for CI and release builds (Windows, Python 3.12).
+# Taken from a green run of the tests workflow: unit tests and the Qt self-test passed with them.
+# requirements.txt stays unpinned for running from source on other Python versions.
+# To update: raise the versions here, push, and let the tests workflow confirm them.
+Pillow==13.0.0
+pillow-heif==1.8.1
+numpy==2.5.4
+opencv-python==5.0.0.93
+onnxruntime==1.31.1
+PySide6==6.12.0
+pyinstaller==6.22.3
+pytest==9.2.0
