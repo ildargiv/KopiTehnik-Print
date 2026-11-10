@@ -8,7 +8,7 @@ Chương trình Windows để cắt và in ảnh (10×15 cm và các khổ khác
 
 ## Screenshots
 
-<p align="center"><img src="docs/promo.gif" alt="PhotoCrop animated overview" width="760"></p>
+<p align="center"><img src="docs/promo.webp" alt="PhotoCrop animated overview" width="760"></p>
 
 ![PhotoCrop main window: crop frame on a demo photo](docs/screenshots/main-window.png)
 
@@ -69,3 +69,5 @@ Dòng lệnh: `python photo_crop.py agent set_format format=10x15`; `python phot
 ## Giấy phép
 
 License: [KopiTehnik Print Licence](LICENSE)
+
+**Giấy phép thương mại** (nhiều máy trạm, chuỗi cửa hàng, bán lại): hiện chưa có bảng giá công khai, điều khoản được thỏa thuận riêng. Để yêu cầu, hãy [mở issue](https://github.com/ildargiv/KopiTehnik-Print/issues/new?title=Commercial%20licence) hoặc một [thảo luận](https://github.com/ildargiv/KopiTehnik-Print/discussions).

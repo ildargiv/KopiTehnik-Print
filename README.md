@@ -36,7 +36,7 @@ License: free for personal use and for a business with one workstation at one lo
 
 ## Screenshots
 
-<p align="center"><img src="docs/promo.gif" alt="KopiTehnik Print animated overview" width="760"></p>
+<p align="center"><img src="docs/promo.webp" alt="KopiTehnik Print animated overview" width="760"></p>
 
 ![Colour adjustments page](docs/screenshots/color-adjustments.png)
 
@@ -113,3 +113,5 @@ Command line: `python photo_crop.py agent set_format format=10x15`; `python phot
 ## License
 
 License: [KopiTehnik Print Licence](LICENSE): free for personal use and for a business with one workstation at one location; more workstations, chains and resale need a commercial licence.
+
+**Commercial licence** (more workstations, chains, resale): there is no public price list yet, terms are agreed individually. To ask for one, [open an issue](https://github.com/ildargiv/KopiTehnik-Print/issues/new?title=Commercial%20licence) or a [discussion](https://github.com/ildargiv/KopiTehnik-Print/discussions).

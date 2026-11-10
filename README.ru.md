@@ -34,7 +34,7 @@ Python для самой программы не нужен — это гото�
 
 ## Скриншоты
 
-<p align="center"><img src="docs/promo-ru.gif" alt="KopiTehnik Print: анимированный обзор" width="760"></p>
+<p align="center"><img src="docs/promo-ru.webp" alt="KopiTehnik Print: анимированный обзор" width="760"></p>
 
 ![Настройка цвета](docs/screenshots/color-adjustments.png)
 
@@ -98,3 +98,5 @@ Python для самой программы не нужен — это гото�
 ## Лицензия
 
 Лицензия: [KopiTehnik Print Licence](LICENSE): бесплатно для личного использования и для одного рабочего места на одной точке; несколько рабочих мест, сети и перепродажа требуют коммерческой лицензии.
+
+**Коммерческая лицензия** (несколько рабочих мест, сети, перепродажа): публичного прайса пока нет, условия согласуются индивидуально. Чтобы запросить её, [откройте issue](https://github.com/ildargiv/KopiTehnik-Print/issues/new?title=Commercial%20licence) или [обсуждение](https://github.com/ildargiv/KopiTehnik-Print/discussions).

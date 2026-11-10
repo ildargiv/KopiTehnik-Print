@@ -8,3 +8,6 @@ __pycache__/
 venv/
 env/
 install.log
+
+# local dump written by epson_gui.py tree
+epson_dlg_tree.txt

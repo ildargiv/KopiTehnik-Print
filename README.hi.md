@@ -8,7 +8,7 @@
 
 ## Screenshots
 
-<p align="center"><img src="docs/promo.gif" alt="PhotoCrop animated overview" width="760"></p>
+<p align="center"><img src="docs/promo.webp" alt="PhotoCrop animated overview" width="760"></p>
 
 ![PhotoCrop main window: crop frame on a demo photo](docs/screenshots/main-window.png)
 
@@ -69,3 +69,5 @@ YuNet / YOLOX मॉडल (~36 MB) रिपॉज़िटरी में श
 ## लाइसेंस
 
 License: [KopiTehnik Print Licence](LICENSE)
+
+**व्यावसायिक लाइसेंस** (एक से अधिक वर्कस्टेशन, चेन, पुनर्विक्रय): अभी कोई सार्वजनिक मूल्य सूची नहीं है, शर्तें अलग-अलग तय की जाती हैं। इसके लिए [issue खोलें](https://github.com/ildargiv/KopiTehnik-Print/issues/new?title=Commercial%20licence) या [चर्चा](https://github.com/ildargiv/KopiTehnik-Print/discussions) शुरू करें।

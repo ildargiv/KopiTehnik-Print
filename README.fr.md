@@ -8,7 +8,7 @@ Programme Windows pour recadrer et imprimer des photos (10×15 cm et autres form
 
 ## Screenshots
 
-<p align="center"><img src="docs/promo.gif" alt="PhotoCrop animated overview" width="760"></p>
+<p align="center"><img src="docs/promo.webp" alt="PhotoCrop animated overview" width="760"></p>
 
 ![PhotoCrop main window: crop frame on a demo photo](docs/screenshots/main-window.png)
 
@@ -69,3 +69,5 @@ En ligne de commande : `python photo_crop.py agent set_format format=10x15` ; `p
 ## Licence
 
 License: [KopiTehnik Print Licence](LICENSE)
+
+**Licence commerciale** (plusieurs postes, chaînes, revente) : il n'y a pas encore de tarif public, les conditions sont convenues individuellement. Pour en faire la demande, [ouvrez une issue](https://github.com/ildargiv/KopiTehnik-Print/issues/new?title=Commercial%20licence) ou une [discussion](https://github.com/ildargiv/KopiTehnik-Print/discussions).

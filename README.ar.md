@@ -10,7 +10,7 @@
 
 ## Screenshots
 
-<p align="center"><img src="docs/promo.gif" alt="PhotoCrop animated overview" width="760"></p>
+<p align="center"><img src="docs/promo.webp" alt="PhotoCrop animated overview" width="760"></p>
 
 ![PhotoCrop main window: crop frame on a demo photo](docs/screenshots/main-window.png)
 
@@ -71,5 +71,7 @@
 ## الترخيص
 
 License: [KopiTehnik Print Licence](LICENSE)
+
+**الترخيص التجاري** (أكثر من محطة عمل، السلاسل، إعادة البيع): لا توجد قائمة أسعار معلنة حتى الآن، ويُتفق على الشروط بشكل فردي. لطلبه [افتح issue](https://github.com/ildargiv/KopiTehnik-Print/issues/new?title=Commercial%20licence) أو [نقاشًا](https://github.com/ildargiv/KopiTehnik-Print/discussions).
 
 </div>
