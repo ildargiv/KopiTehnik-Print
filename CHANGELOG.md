@@ -4,7 +4,7 @@ Short history of releases. Full notes for each version are on the [Releases page
 
 Versions released on or after 2026-10-22 are under the KopiTehnik Print Licence; section 12 of [LICENSE](LICENSE) covers earlier ones.
 
-## Unreleased
+## [1.9.0](https://github.com/ildargiv/KopiTehnik-Print/releases/tag/v1.9.0) - 2026-11-10
 
 - Built-in AI agent “Print Assistant” (beta, off by default): a chat tab and a two-line input under the tabs, quick buttons Improve, Crop, Prepare, Print. Works with any OpenAI-compatible model (local llama.cpp, Ollama, vLLM or a cloud service); nothing is sent until you enable it and set the model address.
 - The agent sees only its work folder (default `Desktop\Печать ИИ`) and folders you type in the chat; printing asks first, runs the pre-print check and is limited to 20 sheets per print by default.

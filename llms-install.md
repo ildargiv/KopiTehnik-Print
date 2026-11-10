@@ -6,8 +6,8 @@ You (the coding agent) can set it up on a Windows 10/11 machine in two ways.
 ## Option A - installed app (recommended for end users)
 
 1. Download the installer from <https://github.com/ildargiv/KopiTehnik-Print/releases/latest>
-   (`KopiTehnikPrint-Setup-1.8.0.exe`, Inno Setup, per-user install, no admin needed).
-2. Silent install: `KopiTehnikPrint-Setup-1.8.0.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP-`
+   (`KopiTehnikPrint-Setup-1.9.0.exe`, Inno Setup, per-user install, no admin needed).
+2. Silent install: `KopiTehnikPrint-Setup-1.9.0.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP-`
 3. The agent binary is installed as `PhotoCropAgent.exe` next to the app. Add to the MCP client config:
 
 ```json
