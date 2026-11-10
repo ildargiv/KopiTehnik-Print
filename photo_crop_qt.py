@@ -7464,7 +7464,7 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         if hasattr(self, "left_w"):
             self.left_w.setVisible(not (doc or plot))
             for i, b in enumerate(self.seg_page.group.buttons()):   # кнопки вкладок: Макет, Цвет, Умная рамка, Принтер, Документ
-                b.setVisible(bool(self.settings.get("chat_enabled", False)) if i == 5 else (i in (2, 6)) if plot else False if i == 6 else (i >= 3) if doc else (i < 4))
+                b.setVisible(bool(self.settings.get("chat_enabled", False)) if i == 5 else (i in (3, 6)) if plot else False if i == 6 else (i >= 3) if doc else (i < 4))
             self.b_save.setVisible(not (doc or plot))
             for w in self._photo_only:
                 w.setVisible(not (doc or plot) and not (self.compact and w in self._caps))

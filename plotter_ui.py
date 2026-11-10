@@ -4,7 +4,7 @@ import os
 
 from PySide6.QtCore import Qt, QRectF, QPointF, Signal
 from PySide6.QtGui import QColor, QFont, QImage, QKeySequence, QPainter, QPen, QPixmap, QShortcut, QTransform
-from PySide6.QtWidgets import (QAbstractItemView, QCheckBox, QComboBox, QDoubleSpinBox, QFileDialog, QFormLayout, QGroupBox, QHBoxLayout,
+from PySide6.QtWidgets import (QAbstractItemView, QGridLayout, QCheckBox, QComboBox, QDoubleSpinBox, QFileDialog, QFormLayout, QGroupBox, QHBoxLayout,
                                QLabel, QPushButton, QScrollArea, QSizePolicy, QSpinBox, QSplitter, QTableWidget, QTableWidgetItem,
                                QVBoxLayout, QWidget)
 
@@ -63,7 +63,8 @@ def load_file(path):
             dx, dy = float(dpi[0]), float(dpi[1])
         except Exception:
             dx = dy = DEFAULT_DPI
-        dpi = (dx if dx >= 10 else DEFAULT_DPI, dy if dy >= 10 else DEFAULT_DPI)
+        # 72 и 96 dpi в метаданных — «экранные» значения по умолчанию, а не настоящий размер: берём 150 dpi
+        dpi = (dx if dx >= 10 and dx not in (72.0, 96.0) else DEFAULT_DPI, dy if dy >= 10 and dy not in (72.0, 96.0) else DEFAULT_DPI)
     pw, ph = im.size
     w, h = pw / dpi[0] * 25.4, ph / dpi[1] * 25.4
     sp = pl.standard_paper(w, h, pw, ph)           # файл формата А3 и т.п. ложится на рулон точно этим форматом
@@ -367,6 +368,8 @@ class PlotterPage(QWidget):
         self.l_total = QLabel()
         self.l_total.setWordWrap(True)
         self.l_total.setObjectName("plotTotal")
+        self.l_note = QLabel()
+        self.l_note.setWordWrap(True)
         self.l_warn = QLabel()
         self.l_warn.setWordWrap(True)
         self.l_warn.setStyleSheet("color:%s" % T.get("bad", "#d33"))
@@ -398,7 +401,7 @@ class PlotterPage(QWidget):
         self._size_rows = [(_tr("Единицы"), self.cb_unit), (_tr("Ширина"), self.sp_w), (_tr("Высота"), self.sp_h), (None, self.cb_lock),
                            (_tr("Масштаб"), self.sp_pct), ("X", self.sp_x), ("Y", self.sp_y), (_tr("Поворот"), self.cb_rotv),
                            (_tr("Копий"), self.sp_copies), ("DPI", self.l_dpi), (_tr("Исходный размер"), self.l_src), (None, self.cb_on)]
-        self._size_btns = [(_tr("По ширине рулона"), self._fit_width), (_tr("Исходный размер"), self._orig_size),
+        self._size_btns = [(_tr("По ширине"), self._fit_width), (_tr("Как в файле"), self._orig_size),
                            ("150 dpi", lambda: self._dpi(150)), ("300 dpi", lambda: self._dpi(300))]
         self.g2 = None
 
@@ -417,6 +420,7 @@ class PlotterPage(QWidget):
         self.tbl.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.tbl.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.tbl.horizontalHeader().setStretchLastSection(True)
+        self.tbl.verticalHeader().setVisible(False)
         self.tbl.setMaximumHeight(170)
         self.tbl.itemSelectionChanged.connect(self._table_selected)
 
@@ -427,7 +431,26 @@ class PlotterPage(QWidget):
         lay.addWidget(self.tbl)
         for keys, fn in ((QKeySequence.Undo, self.undo), (QKeySequence.Redo, self.redo)):
             QShortcut(keys, self, activated=fn)
+        self.restyle()
         self.refresh()
+
+    def restyle(self):
+        """Поля ввода и таблица в цветах текущей темы программы (иначе Qt рисует их белыми)."""
+        t = lambda k, d: T.get(k, d)
+        spin = ("QDoubleSpinBox, QSpinBox {background:%s;color:%s;border:1px solid %s;border-radius:8px;padding:4px 8px;min-width:96px;}"
+                "QDoubleSpinBox:disabled, QSpinBox:disabled {color:%s;}" % (t("raised", "#333"), t("text", "#eee"), t("border", "#444"), t("muted", "#888")))
+        for w in (self.sp_roll, self.sp_gap, self.sp_edge, self.sp_w, self.sp_h, self.sp_x, self.sp_y, self.sp_pct, self.sp_copies):
+            w.setStyleSheet(spin)
+        self.tbl.setStyleSheet("QTableWidget{background:%s;color:%s;gridline-color:%s;border:0;selection-background-color:%s;selection-color:%s;}"
+                               "QHeaderView::section{background:%s;color:%s;border:0;padding:6px;}"
+                               "QTableCornerButton::section{background:%s;border:0;}"
+                               % (t("surface", "#222"), t("text", "#eee"), t("border", "#444"), t("accent", "#f80"), t("accent_text", "#111"),
+                                  t("raised", "#333"), t("muted", "#999"), t("raised", "#333")))
+        self.l_warn.setStyleSheet("color:%s" % t("bad", "#d33"))
+
+    def showEvent(self, e):
+        self.restyle()
+        super().showEvent(e)
 
     def _button(self, text, fn, ico=None):
         if make_button[0]:
@@ -445,12 +468,12 @@ class PlotterPage(QWidget):
             return out
         c_roll = card(_tr("Рулон"), *rows(self._roll_rows))
         c_print = card(_tr("Печать"), *rows(self._print_rows))
-        c_tot = card(_tr("Итог"), self.l_total, self.l_warn)
+        c_tot = card(_tr("Итог"), self.l_total, self.l_note, self.l_warn)
         btns = QWidget()
-        bl = QHBoxLayout(btns)
+        bl = QGridLayout(btns)
         bl.setContentsMargins(0, 0, 0, 0)
-        for text, fn in self._size_btns:
-            bl.addWidget(self._button(text, fn))
+        for n, (text, fn) in enumerate(self._size_btns):
+            bl.addWidget(self._button(text, fn), n // 2, n % 2)
         c_size = card(_tr("Размеры выбранного файла"), *rows(self._size_rows), btns)
         self.g2 = c_size
         self.sync_props(self.sel)
@@ -510,7 +533,7 @@ class PlotterPage(QWidget):
         self.refresh()
         self.canvas.set_selected(self.canvas.sel)
         if errors:
-            self.l_warn.setText(self.l_warn.text() + "\n" + "\n".join(errors))
+            self.l_note.setText("\n".join(errors))
         self.changed.emit()
 
     # --- действия
@@ -518,7 +541,7 @@ class PlotterPage(QWidget):
         self.hist.push()
         before, after = self.L.autopack(self.cb_rot.isChecked())
         self.refresh()
-        self.l_warn.setText(self.l_warn.text() + "\n" + "%s: %s → %s" % (_tr("Расстановка"), pl.fmt_len(before), pl.fmt_len(after)))
+        self.l_note.setText("%s: %s → %s" % (_tr("Расстановка"), pl.fmt_len(before), pl.fmt_len(after)))
 
     def _rotate_sel(self):
         if self.sel:
