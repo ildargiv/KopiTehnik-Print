@@ -5169,6 +5169,8 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         self.center_stack.addWidget(self.doc_view)
         import plotter_ui
         plotter_ui.translate[0] = tr
+        plotter_ui.T = T                                  # тема программы
+        plotter_ui.make_button[0] = lambda text, fn, ico=None: btn(text, fn, ico=ico)
         self.plot_page = plotter_ui.PlotterPage()
         self.center_stack.addWidget(self.plot_page)      # страница 3: режим «Плоттер»
         self.overlay = SendOverlay(self.center_stack)
@@ -5546,8 +5548,10 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         import agent_chat_ui as acu
         self.chat_dock = acu.ChatDock(self)                  # вкладка «Агент» (эксперимент): видна, только если агент включён в настройках
         self.pages.addWidget(self.chat_dock)
-        self.seg_page = Segmented([("Макет", 0), ("Цвет", 1), ("Умная рамка", 3), ("Принтер", 2), ("Документ", 4), ("Агент", 5)], 0)
-        self.seg_page.group.button(4).hide()                 # вкладка «Документ» видна только в режиме документа
+        self.pages.addWidget(self._scroll(*self.plot_page.panel_cards(card, row, lbl)))      # страница 6: управление плоттером
+        self.seg_page = Segmented([("Макет", 0), ("Цвет", 1), ("Умная рамка", 3), ("Принтер", 2), ("Документ", 4), ("Агент", 5), ("Плоттер", 6)], 0)
+        self.seg_page.group.button(4).hide()
+        self.seg_page.group.button(6).hide()                 # вкладка «Плоттер» видна только в режиме плоттера                 # вкладка «Документ» видна только в режиме документа
         self.chat_dock.sync()                                # вкладка «Агент» видна только при включённом агенте
         self.seg_page.setStyleSheet('QPushButton[kind="seg"]{padding:6px 5px;}')       # пять вкладок должны уместиться в панели
         for b in self.seg_page.group.buttons():                 # вкладки делят ширину панели поровну: край в край с карточками
@@ -7460,11 +7464,11 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         if hasattr(self, "left_w"):
             self.left_w.setVisible(not (doc or plot))
             for i, b in enumerate(self.seg_page.group.buttons()):   # кнопки вкладок: Макет, Цвет, Умная рамка, Принтер, Документ
-                b.setVisible(bool(self.settings.get("chat_enabled", False)) if i == 5 else (i == 2) if plot else (i >= 3) if doc else (i < 4))
+                b.setVisible(bool(self.settings.get("chat_enabled", False)) if i == 5 else (i in (2, 6)) if plot else False if i == 6 else (i >= 3) if doc else (i < 4))
             self.b_save.setVisible(not (doc or plot))
             for w in self._photo_only:
                 w.setVisible(not (doc or plot) and not (self.compact and w in self._caps))
-            self.show_page(2 if plot else 4 if doc else 0)
+            self.show_page(6 if plot else 4 if doc else 0)
 
     def set_view(self, v):
         self.view = "sheet" if v == "sheet" else "crop"

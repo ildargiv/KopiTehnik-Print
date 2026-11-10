@@ -15,6 +15,14 @@ THUMB = 512
 DEFAULT_DPI = 150.0          # если в файле нет физического размера
 
 
+T = {}                           # тема программы (тот же словарь, что у окна), подставляется из photo_crop_qt
+make_button = [None]             # фабрика кнопок в стиле программы: (текст, slot, ico) -> QPushButton
+
+
+def _col(key, default):
+    return QColor(T.get(key, default))
+
+
 translate = [lambda s: s]       # photo_crop_qt подставляет сюда tr (прямой импорт дал бы цикл)
 
 
@@ -123,7 +131,7 @@ class PlotterCanvas(QWidget):
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
         pal = self.palette()
-        p.fillRect(self.rect(), pal.window())
+        p.fillRect(self.rect(), _col("canvas", "#303030"))
         o = self.origin()
         W = L.printable_w * self.k
         H = max(L.length(), 300) * self.k
@@ -167,9 +175,9 @@ class PlotterCanvas(QWidget):
             else:
                 p.fillRect(r, QColor("#cfd8e3"))
             kinds = bad.get(n, set())
-            col = QColor("#d33") if kinds & {"overlap", "out"} else QColor("#e90") if kinds & {"gap", "dpi"} else QColor("#2a6")
+            col = _col("bad", "#d33") if kinds & {"overlap", "out"} else _col("warn", "#e90") if kinds & {"gap", "dpi"} else _col("ok", "#2a6")
             if it is self.sel:
-                p.setPen(QPen(QColor("#1e6fe8"), 3))
+                p.setPen(QPen(_col("select", "#1e6fe8"), 3))
             else:
                 p.setPen(QPen(col, 2 if kinds else 1))
             p.setBrush(Qt.NoBrush)
@@ -183,7 +191,7 @@ class PlotterCanvas(QWidget):
         # выбранный: размеры до краёв
         if self.sel and self.sel.enabled:
             it, r = self.sel, self.item_rect(self.sel)
-            p.setPen(QColor("#1e6fe8"))
+            p.setPen(_col("select", "#1e6fe8"))
             p.drawText(QPointF(r.left() + 4, r.bottom() - 5), "x %s  y %s" % (self._n(it.x / 10), self._n(it.y / 10)))
         # линейки
         self._rulers(p, o, W, H)
@@ -195,9 +203,9 @@ class PlotterCanvas(QWidget):
 
     def _rulers(self, p, o, W, H):
         R = self.RULER
-        p.fillRect(QRectF(0, 0, self.width(), R), self.palette().alternateBase())
-        p.fillRect(QRectF(0, 0, R, self.height()), self.palette().alternateBase())
-        p.setPen(self.palette().text().color())
+        p.fillRect(QRectF(0, 0, self.width(), R), _col("surface", "#222"))
+        p.fillRect(QRectF(0, 0, R, self.height()), _col("surface", "#222"))
+        p.setPen(_col("text", "#ddd"))
         step = 100 if self.k > 0.15 else 500 if self.k > 0.04 else 1000
         mm = 0
         while mm <= self.layout_.printable_w:
@@ -338,14 +346,8 @@ class PlotterPage(QWidget):
         self.cb_snap.toggled.connect(lambda v: setattr(self.canvas, "snap_on", v))
         self.cb_rot = QCheckBox(_tr("Разрешить поворот при расстановке"))
         self.cb_rot.setChecked(True)
-        g1 = QGroupBox(_tr("Рулон"))
-        f1 = QFormLayout(g1)
-        f1.addRow(_tr("Ширина рулона"), self.cb_roll)
-        f1.addRow("", self.sp_roll)
-        f1.addRow(_tr("Расстояние между файлами"), self.sp_gap)
-        f1.addRow(_tr("Кромка рулона"), self.sp_edge)
-        f1.addRow(self.cb_snap)
-        f1.addRow(self.cb_rot)
+        self._roll_rows = [(_tr("Ширина рулона"), self.cb_roll), (None, self.sp_roll), (_tr("Расстояние между файлами"), self.sp_gap),
+                           (_tr("Кромка рулона"), self.sp_edge), (None, self.cb_snap), (None, self.cb_rot)]
 
         self.cb_dpi = QComboBox()
         for d in (100, 150, 200, 300):
@@ -353,19 +355,15 @@ class PlotterPage(QWidget):
         self.cb_dpi.setCurrentIndex(1)
         self.cb_mirror = QCheckBox(_tr("Зеркально (для переноса)"))
         self.cb_neg = QCheckBox(_tr("Негатив"))
-        g0 = QGroupBox(_tr("Печать"))
-        f0 = QFormLayout(g0)
-        f0.addRow(_tr("Разрешение печати"), self.cb_dpi)
-        f0.addRow(self.cb_mirror)
-        f0.addRow(self.cb_neg)
+        self._print_rows = [(_tr("Разрешение печати"), self.cb_dpi), (None, self.cb_mirror), (None, self.cb_neg)]
 
         # --- итог
         self.l_total = QLabel()
         self.l_total.setWordWrap(True)
-        self.l_total.setStyleSheet("font-weight:600")
+        self.l_total.setObjectName("plotTotal")
         self.l_warn = QLabel()
         self.l_warn.setWordWrap(True)
-        self.l_warn.setStyleSheet("color:#d33")
+        self.l_warn.setStyleSheet("color:%s" % T.get("bad", "#d33"))
 
         # --- свойства файла
         self.cb_unit = QComboBox()
@@ -391,39 +389,20 @@ class PlotterPage(QWidget):
         self.cb_rotv.activated.connect(self._set_rot)
         self.sp_copies.editingFinished.connect(self._set_copies)
         self.cb_on.toggled.connect(self._set_on)
-        g2 = QGroupBox(_tr("Размеры выбранного файла"))
-        f2 = QFormLayout(g2)
-        f2.addRow(_tr("Единицы"), self.cb_unit)
-        f2.addRow(_tr("Ширина"), self.sp_w)
-        f2.addRow(_tr("Высота"), self.sp_h)
-        f2.addRow("", self.cb_lock)
-        f2.addRow(_tr("Масштаб"), self.sp_pct)
-        f2.addRow("X", self.sp_x)
-        f2.addRow("Y", self.sp_y)
-        f2.addRow(_tr("Поворот"), self.cb_rotv)
-        f2.addRow(_tr("Копий"), self.sp_copies)
-        f2.addRow("DPI", self.l_dpi)
-        f2.addRow(_tr("Исходный размер"), self.l_src)
-        f2.addRow(self.cb_on)
-        self.g2 = g2
-        row = QHBoxLayout()
-        for text, fn in ((_tr("По ширине рулона"), self._fit_width), (_tr("Исходный размер"), self._orig_size), ("150 dpi", lambda: self._dpi(150)),
-                         ("300 dpi", lambda: self._dpi(300))):
-            b = QPushButton(text)
-            b.clicked.connect(fn)
-            row.addWidget(b)
-        f2.addRow(row)
+        self._size_rows = [(_tr("Единицы"), self.cb_unit), (_tr("Ширина"), self.sp_w), (_tr("Высота"), self.sp_h), (None, self.cb_lock),
+                           (_tr("Масштаб"), self.sp_pct), ("X", self.sp_x), ("Y", self.sp_y), (_tr("Поворот"), self.cb_rotv),
+                           (_tr("Копий"), self.sp_copies), ("DPI", self.l_dpi), (_tr("Исходный размер"), self.l_src), (None, self.cb_on)]
+        self._size_btns = [(_tr("По ширине рулона"), self._fit_width), (_tr("Исходный размер"), self._orig_size),
+                           ("150 dpi", lambda: self._dpi(150)), ("300 dpi", lambda: self._dpi(300))]
+        self.g2 = None
 
         # --- кнопки
-        def btn(text, fn):
-            b = QPushButton(text)
-            b.clicked.connect(fn)
-            return b
         bar = QHBoxLayout()
-        for b in (btn(_tr("Добавить файлы…"), self.pick_files), btn(_tr("Расставить"), self.autopack), btn(_tr("Повернуть"), self._rotate_sel),
-                  btn(_tr("Удалить"), self._delete_sel), btn("↶", self.undo), btn("↷", self.redo), btn(_tr("Сохранить…"), self.save_layout),
-                  btn(_tr("Открыть…"), self.open_layout)):
-            bar.addWidget(b)
+        for text, fn, ico in ((_tr("Добавить файлы…"), self.pick_files, "open"), (_tr("Расставить"), self.autopack, "sparkle"),
+                              (_tr("Повернуть"), self._rotate_sel, "rot_r"), (_tr("Удалить"), self._delete_sel, None),
+                              ("", self.undo, "undo"), ("", self.redo, "redo"), (_tr("Сохранить…"), self.save_layout, "save"),
+                              (_tr("Открыть…"), self.open_layout, None)):
+            bar.addWidget(self._button(text, fn, ico))
         bar.addStretch(1)
 
         # --- таблица
@@ -435,32 +414,41 @@ class PlotterPage(QWidget):
         self.tbl.setMaximumHeight(170)
         self.tbl.itemSelectionChanged.connect(self._table_selected)
 
-        right = QWidget()
-        rv = QVBoxLayout(right)
-        rv.addWidget(g1)
-        rv.addWidget(g0)
-        rv.addWidget(self.l_total)
-        rv.addWidget(self.l_warn)
-        rv.addWidget(g2)
-        rv.addStretch(1)
-        rs = QScrollArea()
-        rs.setWidgetResizable(True)
-        rs.setWidget(right)
-        rs.setMinimumWidth(320)
-        left = QWidget()
-        lv = QVBoxLayout(left)
-        lv.addLayout(bar)
-        lv.addWidget(self.scroll, 1)
-        lv.addWidget(self.tbl)
-        sp = QSplitter()
-        sp.addWidget(left)
-        sp.addWidget(rs)
-        sp.setStretchFactor(0, 1)
         lay = QVBoxLayout(self)
-        lay.addWidget(sp)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.addLayout(bar)
+        lay.addWidget(self.scroll, 1)
+        lay.addWidget(self.tbl)
         for keys, fn in ((QKeySequence.Undo, self.undo), (QKeySequence.Redo, self.redo)):
             QShortcut(keys, self, activated=fn)
         self.refresh()
+
+    def _button(self, text, fn, ico=None):
+        if make_button[0]:
+            return make_button[0](text, fn, ico)
+        b = QPushButton(text)
+        b.clicked.connect(lambda _=False: fn())
+        return b
+
+    def panel_cards(self, card, row, lbl):
+        """Карточки правой панели (оформление программы: card/row/lbl передаёт окно). Возвращает список виджетов."""
+        def rows(lst):
+            out = []
+            for label, w in lst:
+                out.append(row(label, w) if label else w)
+            return out
+        c_roll = card(_tr("Рулон"), *rows(self._roll_rows))
+        c_print = card(_tr("Печать"), *rows(self._print_rows))
+        c_tot = card(_tr("Итог"), self.l_total, self.l_warn)
+        btns = QWidget()
+        bl = QHBoxLayout(btns)
+        bl.setContentsMargins(0, 0, 0, 0)
+        for text, fn in self._size_btns:
+            bl.addWidget(self._button(text, fn))
+        c_size = card(_tr("Размеры выбранного файла"), *rows(self._size_rows), btns)
+        self.g2 = c_size
+        self.sync_props(self.sel)
+        return [c_tot, c_size, c_roll, c_print]
 
     # --- вспомогательное
     def _spin(self, lo, hi, val, suffix=""):
@@ -610,7 +598,8 @@ class PlotterPage(QWidget):
         self.sync_props(self.sel)
 
     def sync_props(self, it):
-        self.g2.setEnabled(it is not None)
+        if self.g2 is not None:
+            self.g2.setEnabled(it is not None)
         widgets = (self.sp_w, self.sp_h, self.sp_x, self.sp_y, self.sp_pct, self.cb_rotv, self.sp_copies, self.cb_on, self.cb_lock)
         for w in widgets:
             w.blockSignals(True)
@@ -626,7 +615,7 @@ class PlotterPage(QWidget):
             self.cb_on.setChecked(it.enabled)
             d = it.dpi()
             self.l_dpi.setText("%.0f" % d if d else "—")
-            self.l_dpi.setStyleSheet("color:#d33" if d and d < 100 else "")
+            self.l_dpi.setStyleSheet("color:%s" % T.get("bad", "#d33") if d and d < 100 else "")
             self.l_src.setText("%d × %d px" % (it.px_w, it.px_h) if it.px_w else "—")
             u = {"cm": " см", "mm": " мм", "in": " ″"}[self.unit]
             for w in (self.sp_w, self.sp_h, self.sp_x, self.sp_y):
