@@ -5607,10 +5607,13 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         self.b_save.setFixedHeight(side)
         bottom = hbox(self.b_save, self.b_print, self.b_remote, self.b_multi, spacing=8)
         bottom.setStretch(1, 1)
+        self.bottom_row = bottom                                # порядок кнопок может менять администратор (ui_layout)
         lay = vbox(hbox(self.seg_page, margins=(0, 0, 16, 0)), self.pages, self.progress, self.l_prog, self.l_multi, self.b_cancel, self.b_resume,
                    self.quick_chat, bottom, spacing=10, margins=(4, 12, 14, 12))
         lay.setStretch(1, 1)
         w.setLayout(lay)
+        import ui_layout
+        ui_layout.apply(self)                                   # порядок и скрытие кнопок, заданные администратором
         QTimer.singleShot(0, self.reload_printers)
         return w
 
@@ -7483,6 +7486,8 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
             for w in self._photo_only:
                 w.setVisible(not (doc or plot) and not (self.compact and w in self._caps))
             self.show_page(6 if plot else 4 if doc else 0)
+            import ui_layout
+            ui_layout.hide_tabs(self)                           # вкладки, скрытые администратором
 
     def set_view(self, v):
         self.view = "sheet" if v == "sheet" else "crop"
@@ -9001,7 +9006,7 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         s = self.s
         self._bleed_flush()
         fresh = pc.load_settings()                    # окно печати пишет свои разделы в тот же файл — не затираем их
-        for k in ("last_dir", "start_dir_mode", "snap_px", "anim", "icc_dir", "check_updates", "skip_update", "doc_paper", "doc_fit", "doc_margin", "doc_cm_on", "doc_icc", "converter_path", "adj_presets", "adj_preset_names", "confirm_actions", "agent_enabled", "agent_badge", "agent_lock", "agent_token", "agent_port", "agent_allow_print", "agent_max_sheets", "agent_confirm_print", "multi_enabled", "multi_printers", "multi_modes", "multi_on", "multi_serialize", "multi_blocks", "qs_visible", "qs_enabled", "qs_highlight", "chat_enabled", "chat_url", "chat_model", "chat_key", "chat_dry", "chat_print_mode", "chat_folder", "chat_roots", "chat_confirmed", "chat_auto_offered", "chat_vision", "chat_max_sheets"):
+        for k in ("last_dir", "start_dir_mode", "snap_px", "anim", "icc_dir", "check_updates", "skip_update", "doc_paper", "doc_fit", "doc_margin", "doc_cm_on", "doc_icc", "converter_path", "adj_presets", "adj_preset_names", "confirm_actions", "agent_enabled", "agent_badge", "agent_lock", "agent_token", "agent_port", "agent_allow_print", "agent_max_sheets", "agent_confirm_print", "multi_enabled", "multi_printers", "multi_modes", "multi_on", "multi_serialize", "multi_blocks", "qs_visible", "qs_enabled", "qs_highlight", "chat_enabled", "chat_url", "chat_model", "chat_key", "chat_dry", "chat_print_mode", "chat_folder", "chat_roots", "chat_confirmed", "chat_auto_offered", "chat_vision", "chat_max_sheets", "ui_layout"):
             if k in self.settings:
                 fresh[k] = self.settings[k]
         fresh.update(format=s["format"], orient=s["orient"], mode=s["mode"], recursive=s["recursive"], subfolder=s["subfolder"],

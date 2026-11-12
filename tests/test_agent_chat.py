@@ -315,6 +315,85 @@ class ReviewFixesTest(unittest.TestCase):
         self.assertEqual(w["gamma"], 5)
 
 
+class AdminAndColourTest(unittest.TestCase):
+    """Режим администратора (кнопки, шаблоны), запись уровней по каналам, длинная история."""
+
+    def test_layout_norm_adds_new_items(self):
+        import ui_layout as ul
+        order, hidden = ul.norm({"tabs": {"order": ["printer", "zzz", "color"], "hidden": ["smart", "zzz"]}}, "tabs")
+        self.assertEqual(sorted(order), sorted(ul.ZONES["tabs"]["items"]))
+        self.assertEqual(order.index("printer") < order.index("color"), True)
+        self.assertEqual(hidden, ["smart"])
+
+    def test_layout_change_rules(self):
+        import ui_layout as ul
+        cfg = ul.change({}, "bottom", order=["print", "save"])
+        self.assertEqual(ul.norm(cfg, "bottom")[0][:2], ["print", "save"])
+        with self.assertRaises(ValueError):
+            ul.change({}, "bottom", hide=["save"])
+        with self.assertRaises(ValueError):
+            ul.change({}, "tabs", hide=["layout", "color", "smart", "printer"])
+        with self.assertRaises(ValueError):
+            ul.change({}, "nowhere", order=[])
+        cfg = ul.change(ul.change({}, "quick", hide=["prepare"]), "quick", show=["prepare"])
+        self.assertEqual(ul.norm(cfg, "quick")[1], [])
+
+    def gate(self, admin):
+        local = {"ui_layout_get": ("d", [], [], lambda a: {"ok": True, "got": 1})}
+        return ac.ToolGate(SPEC, roots=[], local=local, admin=admin)
+
+    def test_admin_tools_only_for_admin(self):
+        g = self.gate(False)
+        g.route("поменяй местами кнопки")
+        self.assertNotIn("ui_layout_get", g.names)
+        self.assertFalse(g.add_group("admin"))
+        g = self.gate(True)
+        g.route("поменяй местами кнопки")
+        self.assertIn("ui_layout_get", g.names)
+        g.route("открой папку")
+        self.assertNotIn("ui_layout_get", g.names)
+
+    def test_local_tool_runs_without_engine(self):
+        ran = []
+        g = self.gate(True)
+        g.set_groups(["admin"])
+        a = ac.Agent(Stub([("ui_layout_get", {}), "done"]), g, lambda r: ran.append(r) or {"ok": True}, route=False)
+        a.say("x")
+        self.assertEqual(ran, [])
+        self.assertIn('"got": 1', [m for m in a.messages if m.get("role") == "tool"][0]["content"])
+
+    def test_levels_by_channel_name(self):
+        out = ac.friendly_args("set_adjust", {"levels": {"all": [8, 1.1, 245], "blue": [0, 0.9, 255]}, "selcol": {"red": [0, -10, 0]}})
+        self.assertEqual(out["levels"][0], [8, 1.1, 245, 0, 255])
+        self.assertEqual(out["levels"][3], [0, 0.9, 255, 0, 255])
+        self.assertEqual(out["selcol"][0], [0, -10, 0])
+        with self.assertRaises(ValueError):
+            ac.friendly_args("set_adjust", {"levels": {"purple": [0, 1, 255]}})
+
+    def test_set_adjust_schema_has_channels(self):
+        spec = dict(SPEC, set_adjust=("d", [("photo", "any", ""), ("bright", "number", "")]))
+        g = ac.ToolGate(spec, groups=["color"], roots=[])
+        props = [t for t in g.tools() if t["function"]["name"] == "set_adjust"][0]["function"]["parameters"]["properties"]
+        for k in ("levels", "curves", "selcol"):
+            self.assertIn(k, props)
+
+    def test_long_history_trimmed_at_user_turn(self):
+        a = ac.Agent(Stub(["ok"] * 100), ac.ToolGate(SPEC, roots=[]), lambda r: {"ok": True}, system="sys", route=False)
+        for i in range(80):
+            a.say("q%d" % i)
+        self.assertLessEqual(len(a.messages), ac.HISTORY_LIMIT + 3)
+        self.assertEqual(a.messages[0]["role"], "system")
+        self.assertEqual(a.messages[1]["role"], "user")
+
+    def test_export_dir_checked(self):
+        spec = dict(SPEC, export_sheets=("d", [("dir", "string", "")]))
+        ran = []
+        g = ac.ToolGate(spec, groups=["save"], roots=[])
+        a = ac.Agent(Stub([("export_sheets", {"dir": "/etc"}), "done"]), g, lambda r: ran.append(r) or {"ok": True}, route=False)
+        a.say("x")
+        self.assertEqual(ran, [])
+
+
 if __name__ == "__main__":
     unittest.main()
 

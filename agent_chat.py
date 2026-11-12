@@ -17,14 +17,18 @@ RESULT_LIMIT = 3000                                              # знаков 
 
 # Группы инструментов: модели отдаём только набор под текущую задачу (малой локальной модели 100 команд много).
 GROUPS = {
-    "prepare": ["app_state", "prepare_series", "find_problem_photos", "check_photos", "select_photo", "open_folder", "open_files", "list_photos", "photo_info", "set_format", "set_orientation", "set_layout", "set_copies", "doc_open", "doc_info", "doc_set"],
-    "color": ["preview_photo", "analyze_photo", "analyze_photos", "set_crop", "move_crop", "rotate_photo", "flip_photo", "set_adjust", "white_balance",
+    "prepare": ["app_state", "prepare_series", "find_problem_photos", "check_photos", "select_photo", "open_folder", "open_files", "list_photos", "photo_info",
+                "set_format", "list_formats", "set_orientation", "set_mode", "set_layout", "set_copies", "remove_unchecked", "set_app_mode",
+                "doc_open", "doc_info", "doc_set", "doc_convert"],
+    "color": ["preview_photo", "analyze_photo", "analyze_photos", "set_crop", "move_crop", "reset_crop", "set_view", "zoom_photo", "rotate_photo", "flip_photo", "set_adjust", "white_balance",
               "color_presets", "color_preset_apply", "copy_adjust", "paste_adjust", "compare_photo", "contact_sheet", "fix_print", "undo", "redo"],
     "profiles": ["list_icc_profiles", "set_color_profile", "get_color_profile", "printer_correction", "list_printers", "select_printer",
-                 "driver_capabilities", "set_print_options", "get_print_options", "add_edge_test"],
+                 "driver_capabilities", "set_print_options", "get_print_options", "add_edge_test", "list_presets", "load_preset"],
     "print": ["plan_print", "render_sheet", "preflight", "print_photos", "doc_print", "print_status", "print_stats"],
+    "save": ["set_save_options", "save_files", "export_sheets"],   # сохранить готовые файлы или листы в папку
     "auto": ["auto_crop", "auto_adjust", "auto_levels", "enhance"],          # автоматика: только по кнопкам «Улучшить», «Кадрировать» и по просьбе
     "queue": ["printer_status", "queue", "jobs", "job_status", "wait_queue", "cancel_job"],
+    "admin": [],                                                 # инструменты администратора: их даёт окно (ToolGate.local), только после входа
 }
 CONTROL = ["ask_user", "need_tools"]                             # всегда доступно
 
@@ -35,11 +39,65 @@ ROUTES = {
               "pink", "green", "yellow", "pale", "black and white", "b/w"),
     "profiles": ("профил", "icc", "принтер", "бумаг", "поле", "края", "драйвер", "printer", "paper", "profile", "border"),
     "print": ("печат", "распечат", "print", "лист", "sheet"),
+    "save": ("сохран", "экспорт", "запиши", "save", "export"),
+    "admin": ("кнопк", "вкладк", "интерфейс", "местами", "перестав", "шаблон", "скрой", "спрячь", "button", "tab", "interface", "template", "hide"),
     "queue": ("очеред", "задани", "отмен", "застр", "queue", "job", "cancel"),
 }
 DEFAULT_GROUPS = ("prepare",)
 
 PRINT_TOOLS = {"print_photos", "doc_print", "print"}
+HISTORY_LIMIT = 60                                               # сообщений диалога, которые уходят модели (старое отбрасывается)
+
+# Параметры, которых нет в общем описании команд, но которые нужны модели: уровни, кривые, выборочный цвет (по каналам).
+EXTRA_PARAMS = {
+    "set_adjust": [
+        ("levels", "object", "Levels per channel: keys all, r, g, b; each [black 0..254, gamma 0.1..10 (1 = none), white 1..255], "
+                             "e.g. {\"all\": [8, 1.1, 245], \"b\": [0, 0.92, 255]}. Replaces earlier levels."),
+        ("curves", "object", "Tone curves per channel: keys all, r, g, b; each a list of [input, output] points 0..255, "
+                             "e.g. {\"all\": [[0, 0], [64, 56], [192, 200], [255, 255]]}. Replaces earlier curves."),
+        ("selcol", "object", "Selective colour: keys red, yellow, green, cyan, blue, magenta; each [hue, saturation, lightness] -100..100, "
+                             "e.g. {\"red\": [0, -10, 0], \"green\": [5, 10, 0]}. Replaces earlier values."),
+        ("relative", "boolean", "Add the numbers to the current values instead of replacing them."),
+    ],
+}
+_CH = ("all", "r", "g", "b")
+_CH_ALIAS = {"rgb": "all", "common": "all", "master": "all", "red": "r", "green": "g", "blue": "b"}
+_SEL = ("red", "yellow", "green", "cyan", "blue", "magenta")
+_SEL_ALIAS = {"r": "red", "y": "yellow", "g": "green", "c": "cyan", "b": "blue", "m": "magenta"}
+
+
+def channel_rows(v, neutral):
+    """{"all": …, "r": …} -> четыре строки (общий, R, G, B) для движка. Готовый список не трогаем."""
+    if not isinstance(v, dict):
+        return v
+    d = {_CH_ALIAS.get(str(k).lower(), str(k).lower()): x for k, x in v.items()}
+    bad = [k for k in d if k not in _CH]
+    if bad:
+        raise ValueError("unknown channel '%s'; use all, r, g, b" % bad[0])
+    return [d.get(c, neutral) for c in _CH]
+
+
+def selcol_rows(v):
+    if not isinstance(v, dict):
+        return v
+    d = {_SEL_ALIAS.get(str(k).lower(), str(k).lower()): x for k, x in v.items()}
+    bad = [k for k in d if k not in _SEL]
+    if bad:
+        raise ValueError("unknown colour '%s'; use %s" % (bad[0], ", ".join(_SEL)))
+    return [d.get(c, [0, 0, 0]) for c in _SEL]
+
+
+def friendly_args(name, args):
+    """Удобную для модели запись (по именам каналов) переводит в формат движка."""
+    if name == "set_adjust":
+        if "levels" in args:
+            rows = channel_rows(args["levels"], [0, 1, 255])
+            args["levels"] = [list(r)[:3] + [0, 255] if isinstance(r, (list, tuple)) and len(r) == 3 else r for r in rows] if isinstance(rows, list) else rows
+        if "curves" in args:
+            args["curves"] = channel_rows(args["curves"], [[0, 0], [255, 255]])
+        if "selcol" in args:
+            args["selcol"] = selcol_rows(args["selcol"])
+    return args
 # Макро-инструменты: один вызов вместо пяти (малой модели так проще). Выполняются через тот же execute, печать не запускают.
 MACRO_SPEC = {
     "prepare_series": ("Open a folder of photos, set the print format and copies per photo, then run the pre-print check. Does NOT print. "
@@ -94,8 +152,10 @@ def parse_complaint(text):
 class ToolGate:
     """Белый список + проверка папок + режим печати. policy: print_mode 'ask'|'auto'|'off', allow_print, max_sheets."""
 
-    def __init__(self, spec, groups=None, roots=(), policy=None, required=None):
+    def __init__(self, spec, groups=None, roots=(), policy=None, required=None, local=None, admin=False):
         self.spec = spec
+        self.local = dict(local or {})                            # инструменты окна: {имя: (описание, параметры, обязательные, функция)}
+        self.admin = bool(admin)                                  # вошёл администратор: доступна группа «admin»
         self.required = required or {}
         self.groups = []
         self.names = set()
@@ -105,19 +165,22 @@ class ToolGate:
         self.policy = {"print_mode": "ask", "allow_print": True, "max_sheets": 0, **(policy or {})}
 
     def set_groups(self, groups):
-        self.groups = [g for g in groups if g in GROUPS]
+        self.groups = [g for g in groups if g in GROUPS and (g != "admin" or (self.admin and self.local))]
         names = set(CONTROL)
         for g in self.groups:
-            names.update(GROUPS[g])
-        self.names = {n for n in names if n not in NEVER and (n in self.spec or n in CONTROL or n in MACROS)}
+            names.update(self.local if g == "admin" else GROUPS[g])
+        self.names = {n for n in names if n not in NEVER and (n in self.spec or n in CONTROL or n in MACROS or n in self.local)}
         if self.block_print:
             self.names -= PRINT_TOOLS
 
     def add_group(self, g):
         if g in GROUPS and g not in self.groups:
             self.set_groups(self.groups + [g])
-            return True
+            return g in self.groups
         return False
+
+    def group_names(self):
+        return [g for g in GROUPS if g != "admin" or (self.admin and self.local)]
 
     def route(self, text):
         """Выбирает группы по словам запроса (всегда есть «prepare»)."""
@@ -137,14 +200,20 @@ class ToolGate:
                                [("question", "string", "The question."), ("options", "array", "Optional answer choices.")], ["question"]))
                 continue
             if n == "need_tools":
-                out.append(_fn(n, "Get more tools when the ones you have are not enough. Groups: %s." % ", ".join(GROUPS),
+                out.append(_fn(n, "Get more tools when the ones you have are not enough. Groups: %s." % ", ".join(self.group_names()),
                                [("group", "string", "Group name.")], ["group"]))
                 continue
             if n in MACROS:
                 desc, params = MACRO_SPEC[n]
                 out.append(_fn(n, desc, params, ["folder", "format"] if n == "prepare_series" else []))
                 continue
+            if n in self.local:
+                desc, params, req = self.local[n][:3]
+                out.append(_fn(n, desc, params, req))
+                continue
             desc, params = self.spec[n]
+            have = {p[0] for p in params}
+            params = list(params) + [p for p in EXTRA_PARAMS.get(n, []) if p[0] not in have]
             out.append(_fn(n, desc, params, self.required.get(n, [])))
         return out
 
@@ -155,7 +224,10 @@ class ToolGate:
         if name in PRINT_TOOLS:
             if self.block_print:
                 return "printing is not part of this task"
-            if not self.policy["allow_print"] or self.policy["print_mode"] == "off":
+            if not self.policy["allow_print"]:
+                return ("trial mode is on, so nothing is printed; tell the person to switch off 'Trial mode: do not print' "
+                        "in Settings -> AI agent if they want real printing")
+            if self.policy["print_mode"] == "off":
                 return "printing by the agent is disabled in settings"
         bad = self.path_violation(args)
         if bad:
@@ -165,7 +237,7 @@ class ToolGate:
     def path_violation(self, args):
         """Пути из аргументов, которые лежат вне разрешённых папок."""
         out = []
-        for k in ("path", "paths", "folder", "outdir", "icc", "icc_path"):
+        for k in ("path", "paths", "folder", "outdir", "dir", "file", "files", "icc", "icc_path"):
             v = args.get(k)
             for p in ([v] if isinstance(v, str) else v if isinstance(v, list) else []):
                 if isinstance(p, str) and (k not in ("icc", "icc_path") or "/" in p or "\\" in p) and not self.in_roots(p):
@@ -310,6 +382,13 @@ class Agent:
         for m in tools[:-keep]:
             if len(m["content"]) > limit:
                 m["content"] = m["content"][:limit] + "…"
+        if len(self.messages) > HISTORY_LIMIT:                   # длинный диалог: старое отбрасываем по границе реплики человека
+            head = self.messages[:1] if self.messages[0].get("role") == "system" else []
+            cut = len(self.messages) - HISTORY_LIMIT
+            while cut < len(self.messages) and not (self.messages[cut].get("role") == "user" and isinstance(self.messages[cut].get("content"), str)):
+                cut += 1
+            if cut < len(self.messages):
+                self.messages = head + self.messages[cut:]
         pics = [m for m in self.messages if isinstance(m.get("content"), list)]
         for m in pics[:-2]:                                      # в истории держим только две последние картинки
             m["content"] = "(earlier picture removed)"
@@ -349,6 +428,17 @@ class Agent:
         if denied:
             self._log(name, args, "denied: " + denied)
             return json.dumps({"ok": False, "error": denied})
+        if name in self.gate.local:
+            self._log(name, args, "run")
+            try:
+                res = self.gate.local[name][3](args)
+            except Exception as ex:                              # noqa: BLE001: текст ошибки нужен модели
+                res = {"ok": False, "error": str(ex)}
+            return json.dumps(res, ensure_ascii=False, default=str)[:RESULT_LIMIT]
+        try:
+            args = friendly_args(name, args)
+        except ValueError as ex:
+            return json.dumps({"ok": False, "error": str(ex)})
         if name in MACROS:
             self._log(name, args, "run")
             return json.dumps(_slim(self._macro(name, args)), ensure_ascii=False, default=str)[:RESULT_LIMIT]
