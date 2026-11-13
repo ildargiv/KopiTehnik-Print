@@ -643,7 +643,9 @@ class FitButton(QPushButton):
         sheet = self.styleSheet()
         if not txt or w < 20 or (sheet and "/*fit*/" not in sheet):      # у кнопки свой стиль (например, зелёная): не трогаем
             return
-        if not self._fit_base:                                        # первое измерение: стиль ещё не менялся
+        if not (self._fit_cur and self._fit_cur[1]):                  # свой стиль не наложен: шрифт мог смениться (тема, язык) — меряем заново
+            self._fit_base = 0
+        if not self._fit_base:
             self._fit_base = QFontInfo(self.font()).pixelSize()
             if self._fit_base <= 0:                                   # шрифт задан в пунктах
                 self._fit_base = max(self.fit_min + 1, round(self.font().pointSizeF() * 96 / 72))
