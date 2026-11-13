@@ -6,6 +6,12 @@ Versions released on or after 2026-10-22 are under the KopiTehnik Print Licence;
 
 ## Unreleased
 
+- Agent, administrator mode (the print counter password): on request the agent rearranges and hides tabs of the right panel, the bottom row of buttons and its own quick buttons; “Put buttons back” in Settings. The agent changes settings only, never the programme code.
+- Agent: tools to add and improve print templates (active when the Templates section is present).
+- Agent: colour by channel now works (levels, curves, selective colour per channel), saving files and sheets to a folder, long conversations no longer overflow the model, service messages in the programme language.
+
+## [1.9.0](https://github.com/ildargiv/KopiTehnik-Print/releases/tag/v1.9.0) - 2026-11-10
+
 - Built-in AI agent “Print Assistant” (beta, off by default): a chat tab and a two-line input under the tabs, quick buttons Improve, Crop, Prepare, Print. Works with any OpenAI-compatible model (local llama.cpp, Ollama, vLLM or a cloud service); nothing is sent until you enable it and set the model address.
 - The agent sees only its work folder (default `Desktop\Печать ИИ`) and folders you type in the chat; printing asks first, runs the pre-print check and is limited to 20 sheets per print by default.
 - With “Agent sees photos” on, the agent looks at each photo to crop it and fix its colour by itself.

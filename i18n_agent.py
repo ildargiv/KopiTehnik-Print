@@ -68,8 +68,27 @@ PAIRS = [
     ("⚠ Адрес не в вашей сети: запросы (и превью фото, если агент видит фото) уходят в интернет.",
      "⚠ This address is outside your network: requests (and photo previews, if the agent sees photos) go over the internet."),
 ]
-EN = dict(PAIRS)
 KEYS = [en for _ru, en in PAIRS]
+# Строки, добавленные позже: пока только по-английски (в остальных языках показывается английский текст).
+PAIRS_EN_ONLY = [
+    ("Менять кнопки и шаблоны агент может только в режиме администратора. Войти?",
+     "The agent can change buttons and templates only in administrator mode. Log in?"),
+    ("Выйти из режима администратора", "Leave administrator mode"),
+    ("Войти как администратор", "Log in as administrator"),
+    ("Режим администратора включён: агент может менять местами и скрывать кнопки и вкладки, добавлять и улучшать шаблоны.",
+     "Administrator mode is on: the agent can rearrange and hide buttons and tabs, add and improve templates."),
+    ("В режиме администратора агент может менять местами и скрывать кнопки и вкладки, добавлять и улучшать шаблоны. "
+     "Пароль тот же, что у счётчика печати. Код программы агент не меняет.",
+     "In administrator mode the agent can rearrange and hide buttons and tabs, add and improve templates. "
+     "The password is the same as for the print counter. The agent does not change the programme code."),
+    ("Вернуть кнопки на место", "Put buttons back"),
+    ("Остановлено.", "Stopped."),
+    ("Слишком много шагов, задание остановлено. Разбейте его на части.", "Too many steps, the task was stopped. Split it into parts."),
+    ("Агент повторял одни и те же шаги и остановлен. Переформулируйте задание.", "The agent kept repeating the same steps and was stopped. Rephrase the task."),
+    ("Задание шло слишком долго и остановлено. Разбейте его на части.", "The task took too long and was stopped. Split it into parts."),
+    ("Кнопки и вкладки возвращены на свои места.", "Buttons and tabs are back in their places."),
+]
+EN = dict(PAIRS + PAIRS_EN_ONLY)
 
 _RAW = {
     "uk": ["Друкар", "ШІ-агент «Друкар»", "Агент", "Модель, папки, друк", "Покращити", "Кадрувати", "Підготувати", "Заново",
