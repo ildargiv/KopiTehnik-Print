@@ -254,6 +254,8 @@ def test_pair_request_three_wrong_and_deny(nodes):
     t.join(10)
     assert errs and "неверных" in errs[0]
     assert not a.peers_paired and not b.peers_paired
+    assert b._pair_pause                                    # после неверных кодов включилась пауза
+    b._pair_pause.clear()
     # отклонение
     errs.clear()
     shown.clear()
@@ -263,6 +265,13 @@ def test_pair_request_three_wrong_and_deny(nodes):
     b.deny_pair(b.pending_pair_requests()[0]["id"])
     t.join(10)
     assert errs and "отклонил" in errs[0]
+    # после отказа повторный запрос с того же адреса не принимается, пока идёт пауза
+    errs.clear()
+    shown.clear()
+    t = threading.Thread(target=go)
+    t.start()
+    t.join(10)
+    assert errs and "подождите" in errs[0] and not b.pending_pair_requests()
 
 
 def test_found_ttl_probe(nodes):
@@ -353,3 +362,48 @@ def test_repair_keeps_flags(nodes):
     pair(a, b)
     p = a.peers_paired[b.id]
     assert p["alias"] == "Касса" and p["hidden"] and p["trusted"] is False
+
+
+def test_found_list_is_capped(nodes):
+    a = nodes("A")
+    for i in range(nl.MAX_FOUND + 20):
+        a._note_found("id%d" % i, "X", "10.0.0.%d" % (i % 250), nl.PORT_TCP)
+    a.add_peer("10.1.1.1", peer_id="manual-extra")
+    assert len(a.found) == nl.MAX_FOUND
+    a.found["id0"]["seen"] -= nl.FOUND_TTL + 1             # устаревшие места освобождаются
+    a._note_found("fresh", "Y", "10.9.9.9", nl.PORT_TCP)
+    assert "fresh" in a.found and "id0" not in a.found and len(a.found) == nl.MAX_FOUND
+
+
+def test_preauth_slot_reserved_before_thread(nodes):
+    a = nodes("A")
+    ip = "10.5.5.5"
+    assert all(a._reserve_preauth(ip) for _ in range(nl.MAX_PREAUTH_IP))
+    assert not a._reserve_preauth(ip)
+    other = 0
+    while a._reserve_preauth("10.6.6.%d" % other):
+        other += 1
+    assert sum(a._preauth.values()) == nl.MAX_PREAUTH
+
+
+def test_queued_sheet_blocked_after_untrust_or_forget(nodes):
+    printed = []
+    a, b = nodes("A"), nodes("B", print_sheet=lambda meta, data: printed.append(meta["sheet_id"]))
+    pair(a, b)
+    key = ("j", "s1")
+    b.sheets[key] = {"state": "queued", "from": a.id}
+    b.peers_paired[a.id]["trusted"] = False
+    b._run_sheet_inner(key, a.id, {"printer": "P", "sheet_id": "s1"}, b"")
+    assert b.sheets[key]["state"] == "failed" and not printed
+    key2 = ("j", "s2")
+    b.sheets[key2] = {"state": "queued", "from": a.id}
+    b.peers_paired.pop(a.id)
+    b._run_sheet_inner(key2, a.id, {"printer": "P", "sheet_id": "s2"}, b"")
+    assert b.sheets[key2]["state"] == "failed" and not printed
+
+
+def test_is_public_addr():
+    assert nl.is_public_addr("8.8.8.8") and nl.is_public_addr("2001:4860:4860::8888")
+    for ip in ("192.168.1.5", "10.0.0.2", "172.16.4.4", "100.101.102.103", "127.0.0.1", "169.254.1.1", "fd7a:115c:a1e0::1"):
+        assert not nl.is_public_addr(ip)
+    assert not nl.is_public_addr("kassa.tailnet.ts.net") and not nl.is_public_addr("")

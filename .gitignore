@@ -11,3 +11,6 @@ install.log
 
 # local dump written by epson_gui.py tree
 epson_dlg_tree.txt
+
+# research artifacts (screenshots, snapshot archives)
+tools/research/snaps/

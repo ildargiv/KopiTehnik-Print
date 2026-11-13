@@ -12,6 +12,7 @@
 import base64
 import struct
 import json
+import logging
 import math
 import os
 import subprocess
@@ -69,6 +70,7 @@ except ImportError:
 
 tr, trf = pc.tr, pc.trf
 LOG_PATH = pc.SETTINGS_PATH.parent / "qt_error.log"
+log = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------- дизайн: цвета тем и иконки
 
@@ -4945,7 +4947,7 @@ class DocMixin:
             import print_stats
             print_stats.record(j["printer"], 0, "%gx%g" % dt.PAPERS[j["paper"]], "document", "app", sent, [j["name"]], kind="doc")
         except Exception:
-            pass
+            log.warning("не удалось записать статистику печати документа", exc_info=True)
         return True, sent
 
 
@@ -5765,7 +5767,7 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         try:
             pc.save_settings(self.settings)
         except Exception:
-            pass
+            log.warning("не удалось сохранить настройки принтеров", exc_info=True)
         self.reload_printers()
         return True
 
@@ -5790,7 +5792,7 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
                     if pc.devmode_valid(b):
                         self.blob = b
                 except Exception:
-                    pass
+                    log.warning("не удалось восстановить настройки драйвера принтера (DEVMODE)", exc_info=True)
             if self.blob is None:
                 try:
                     self.blob = pc.default_devmode(name)
@@ -5935,7 +5937,7 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
                             self.settings.setdefault("print_devmodes", {})[self.pr["printer"]] = prof["blob"]
                             self._fill_driver()
                     except Exception:
-                        pass
+                        log.warning("не удалось применить профиль печати", exc_info=True)
                 self.cm_changed()
             else:                                                    # у связки нет своего профиля: чужая поправка к ней не относится
                 self.s["pcorr"] = pcr.default()
@@ -6655,7 +6657,7 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
             try:
                 pc.save_settings(self.settings)
             except Exception:
-                pass
+                log.warning("не удалось сохранить настройки многопринтерной печати", exc_info=True)
         self.multi_refresh()
 
     def _multi_profile(self, printer):
@@ -7847,7 +7849,7 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         try:
             self._autosave_now()
         except Exception:
-            pass
+            log.warning("автосохранение проекта не удалось", exc_info=True)
 
     def save_project(self):
         if not self.files:
@@ -9063,11 +9065,11 @@ class MainWindow(SmartMixin, DocMixin, QMainWindow):
         try:
             self._autosave_now()
         except Exception:
-            pass
+            log.warning("автосохранение при закрытии не удалось", exc_info=True)
         try:
             self.persist()
         except Exception:
-            pass
+            log.warning("не удалось сохранить настройки при закрытии", exc_info=True)
         e.accept()
 
 
@@ -10006,7 +10008,8 @@ class SettingsDialog(QDialog):
                         lbl("Папка для присланных файлов", "muted"),
                         hbox(e_dir, btn("Выбрать…", choose), spacing=6),
                         hbox(btn("Подключить ПК…", pair, "primary", ico="plus"), None),
-                        lbl("Связь между ПК не шифруется: пользуйтесь доверенной сетью или Tailscale.", "muted", wrap=True))
+                        lbl("Связь между ПК не шифруется: пользуйтесь доверенной сетью или Tailscale.", "muted", wrap=True),
+                        lbl("Брандмауэр: порты TCP 47615 и UDP 47616 разрешайте только для частной сети; для публичной сети их не открывайте.", "muted", wrap=True))
             self.lw_net = QListWidget()
             self.lw_net.setMinimumHeight(220)
 
@@ -10019,6 +10022,8 @@ class SettingsDialog(QDialog):
                         bits.append("v" + p["version"])
                     if p["addr"]:
                         bits.append(p["addr"])
+                    if p.get("plain"):
+                        bits.append("⚠ " + tr("не шифруется"))
                     if p["hidden"]:
                         bits.append(tr("скрыт"))
                     if not p["trusted"]:
@@ -10489,6 +10494,13 @@ pc.EN.update({
     "Не удалось проверить обновления. Проверьте подключение к интернету.": "Could not check for updates. Check your internet connection.",
 })
 pc.EN_FMT.update({"Относится к профилю печати: {t}": "Belongs to the print profile: {t}", "Пресет {n}": "Preset {n}", "Название пресета {n}": "Name of preset {n}", "Вход {a} → выход {b}": "Input {a} → output {b}", "Пресет {n} пока пуст. Настройте ползунки и нажмите «Сохранить» под ним.": "Preset {n} is empty. Set the sliders and press Save under it.", "Заменить сохранённый пресет {n} текущими настройками?": "Replace saved preset {n} with the current settings?", "Применён пресет {n}": "Preset {n} applied", "Пресет {n} сохранён": "Preset {n} saved", "Страниц: {n}": "Pages: {n}", "Открыть документ «{name}»": "Open document “{name}”"})
+pc.EN.update({
+    "не шифруется": "not encrypted",
+    "Публичный адрес: данные подписаны, но не шифруются. Используйте Tailscale или домашнюю сеть.":
+        "Public address: data is signed but not encrypted. Use Tailscale or a home network.",
+    "Брандмауэр: порты TCP 47615 и UDP 47616 разрешайте только для частной сети; для публичной сети их не открывайте.":
+        "Firewall: allow TCP 47615 and UDP 47616 for private networks only; do not open them on public networks.",
+})
 pc.EN.update({"Бумага: фото, листов": "Paper: photos, sheets", "Бумага: документы, листов": "Paper: documents, sheets", "Тип": "Type"})
 pc.EN.update({
     "Документ": "Document", "PDF, Word, Excel, PowerPoint и другие офисные файлы": "PDF, Word, Excel, PowerPoint and other office files",

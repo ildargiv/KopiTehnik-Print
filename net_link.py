@@ -16,6 +16,7 @@
 """
 import hashlib
 import hmac
+import ipaddress
 import json
 import os
 import select
@@ -49,6 +50,8 @@ DH_G = 2
 PAIR_WAIT = 150.0                  # сколько ждём, пока человек на другом ПК введёт код
 PAIR_TRIES = 3                     # неверных кодов за один запрос; потом запрос отклоняется
 MAX_PAIR_REQUESTS = 5              # одновременно ожидающих запросов на подключение
+MAX_FOUND = 64                     # найденных ПК в списке: чужие объявления в сети не раздувают память
+PAIR_DENY_PAUSE = 60.0             # после отказа (или неверных кодов) запросы с того же адреса/ПК не принимаются столько секунд
 FOUND_TTL = 20.0                   # найденный ПК исчезает из списка, если не объявлялся столько секунд
 ANNOUNCE_EVERY = 4.0
 
@@ -115,6 +118,15 @@ def dh_secret(priv, peer_pub):
 def new_pin():
     """Короткий код для человека: 6 цифр (на экране показывается как «123 456»)."""
     return "%06d" % (int.from_bytes(os.urandom(4), "big") % 1000000)
+
+
+def is_public_addr(addr):
+    """True для публичного IP-адреса: кадры подписаны, но не шифруются, а Tailscale и домашняя сеть шифруют или закрыты.
+    Имя ПК вместо адреса (Tailscale MagicDNS) и частные адреса (192.168/10/172.16, 100.64/10, link-local) дают False."""
+    try:
+        return ipaddress.ip_address(str(addr).strip().strip("[]")).is_global
+    except ValueError:
+        return False
 
 
 def local_addrs():
@@ -462,6 +474,7 @@ class Node:
         self._pairing = None              # (code, expires)
         self._preauth = {}
         self._preq_times = []
+        self._pair_pause = {}             # адрес / "id:<ПК>" -> до какого времени запросы не принимаются (после отказа)
         self._flushing = set()
         self._seen_ids = set()
         self._pair_reqs = {}              # ожидающие запросы на подключение с коротким кодом
@@ -532,18 +545,21 @@ class Node:
                 continue
             except OSError:
                 return
-            if len(self.sessions) >= MAX_SESSIONS:
-                s.close()
+            if len(self.sessions) >= MAX_SESSIONS or not self._reserve_preauth(addr[0]):
+                s.close()                                       # поток под такое соединение не создаём
                 continue
             self._pool(self._serve, s, addr)
 
-    def _serve(self, s, addr):
-        with self._lock:                                        # лимит соединений, ещё не прошедших проверку (по всему узлу и с одного адреса)
-            n_ip = self._preauth.get(addr[0], 0)
+    def _reserve_preauth(self, ip):
+        """Лимит соединений, ещё не прошедших проверку (по всему узлу и с одного адреса); слот занимается до создания потока."""
+        with self._lock:
+            n_ip = self._preauth.get(ip, 0)
             if sum(self._preauth.values()) >= MAX_PREAUTH or n_ip >= MAX_PREAUTH_IP:
-                s.close()
-                return
-            self._preauth[addr[0]] = n_ip + 1
+                return False
+            self._preauth[ip] = n_ip + 1
+            return True
+
+    def _serve(self, s, addr):
         try:
             self._serve_inner(s, addr)
         finally:
@@ -732,6 +748,13 @@ class Node:
     def _note_found(self, pid, name, addr, port, via="lan"):
         if pid == self.id:
             return
+        if pid not in self.found and len(self.found) >= MAX_FOUND:
+            now = time.time()
+            for k, v in list(self.found.items()):
+                if now - v["seen"] > FOUND_TTL:
+                    self.found.pop(k, None)
+            if len(self.found) >= MAX_FOUND:
+                return
         new = pid not in self.found or time.time() - self.found[pid]["seen"] > FOUND_TTL
         self.found[pid] = {"name": str(name)[:64], "addr": addr, "port": int(port), "seen": time.time(), "via": via}
         if new:
@@ -766,6 +789,8 @@ class Node:
     def add_peer(self, addr, port=PORT_TCP, peer_id=None):
         """Ручной адрес, если рассылка не проходит (разные подсети, VPN)."""
         with self._lock:
+            if len(self.found) >= MAX_FOUND and (peer_id or f"{addr}:{port}") not in self.found:
+                return
             self.found[peer_id or f"{addr}:{port}"] = {"name": addr, "addr": addr, "port": port, "seen": time.time(), "via": "manual"}
 
     def probe(self, addr, port=PORT_TCP, timeout=1.5):
@@ -808,6 +833,10 @@ class Node:
         now = time.time()
         with self._lock:
             self._preq_times = [t for t in self._preq_times if now - t < 60]
+            self._pair_pause = {k: t for k, t in self._pair_pause.items() if t > now}
+            if addr[0] in self._pair_pause or "id:" + peer_id in self._pair_pause:
+                ch.send({"t": "error", "error": "подождите минуту после отказа"})
+                return
             if len(self._pair_reqs) >= MAX_PAIR_REQUESTS or len(self._preq_times) >= PREQ_PER_MIN or \
                     any(r["addr"] == addr[0] or r["peer_id"] == peer_id for r in self._pair_reqs.values()):
                 ch.send({"t": "error", "error": "слишком много запросов"})
@@ -857,6 +886,12 @@ class Node:
                 raise _PairEnd(r.get("error", "отклонено"))
         except _PairEnd as e:
             result = {"ok": False, "reason": str(e)}
+            if self._stop.is_set() or "время ожидания" in str(e) or "отменён" in str(e):
+                pass
+            else:                                                          # отказ или неверные коды: пауза, чтобы не засыпали запросами
+                until = time.time() + PAIR_DENY_PAUSE
+                with self._lock:
+                    self._pair_pause[addr[0]] = self._pair_pause["id:" + peer_id] = until
         except (NetError, OSError, ValueError, KeyError, TypeError):
             result = {"ok": False, "reason": "связь прервана"}
         finally:
@@ -1026,7 +1061,8 @@ class Node:
     def _run_sheet_inner(self, key, peer_id, meta, data):
         self._set_state(key, peer_id, "printing")
         try:
-            if not self.net_enabled or not self.peers_paired.get(peer_id, {}).get("trusted", True):
+            p = self.peers_paired.get(peer_id)
+            if not self.net_enabled or not p or not p.get("trusted", True):          # запрет или «забыть ПК» действуют и на уже стоящие в очереди листы
                 raise PermissionError("печать для этого ПК запрещена")
             self.print_sheet(meta, data)
             self._set_state(key, peer_id, "spooled")

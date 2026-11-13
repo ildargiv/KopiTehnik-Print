@@ -278,3 +278,25 @@ def test_remote_print_dialog_and_status_buttons(app, tmp_path):
         assert net_remote.paper_problem({"paper_mm": [89.0, 127.0]}, {"PW": 102.0, "PH": 152.0})
     finally:
         a.stop(); b.stop()
+
+
+def test_found_marks_public_address_as_unencrypted(app, tmp_path):
+    a, sa = svc("Аня", tmp_path)
+    a.start()
+    try:
+        a.node._note_found("pub", "Внешний", "8.8.8.8", 47615)
+        a.node._note_found("lan", "Домашний", "192.168.1.7", 47615)
+        by_id = {f["id"]: f for f in a.found()}
+        assert by_id["pub"]["plain"] is True and by_id["lan"]["plain"] is False
+        dlg = net_ui.PairDialog(a, THEME, lambda s: s, net_ui.ChatPanel(a, THEME, sounds=Mute()))
+        dlg.refresh_found()
+        assert set(dlg.rows) == {"pub", "lan"}
+    finally:
+        a.stop()
+
+
+def test_unencrypted_and_firewall_strings_have_english():
+    src = open(os.path.join(os.path.dirname(__file__), "..", "photo_crop_qt.py"), encoding="utf-8").read()
+    for ru, en in (("не шифруется", "not encrypted"), ("TCP 47615 и UDP 47616", "TCP 47615 and UDP 47616")):
+        assert ru in src and en in src
+    assert 'bits.append("⚠ " + tr("не шифруется"))' in src

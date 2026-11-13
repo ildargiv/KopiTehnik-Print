@@ -192,7 +192,7 @@ class NetService:
 
     # ---- ПК ----
     def peers(self, include_hidden=False):
-        """Спаренные ПК: [{id, name, online, state, hidden, trusted, addr, version}], state = ok|printing|attention|offline."""
+        """Спаренные ПК: [{id, name, online, state, hidden, trusted, addr, version, plain}], state = ok|printing|attention|offline."""
         out = []
         for pid, p in (self.cfg.get("paired") or {}).items():
             if p.get("hidden") and not include_hidden:
@@ -208,7 +208,8 @@ class NetService:
                     state = "printing"
             ver = ((self.node.peer_info.get(pid) or {}).get("version", "")) if self.node else ""
             out.append({"id": pid, "name": p.get("alias") or p.get("name") or pid, "online": online, "state": state,
-                        "hidden": bool(p.get("hidden")), "trusted": p.get("trusted", True), "addr": p.get("addr", ""), "version": ver})
+                        "hidden": bool(p.get("hidden")), "trusted": p.get("trusted", True), "addr": p.get("addr", ""), "version": ver,
+                        "plain": nl.is_public_addr(p.get("addr", ""))})
         return out
 
     def set_hidden(self, peer_id, on):
@@ -264,10 +265,10 @@ class NetService:
         return pid
 
     def found(self):
-        """Найденные в сети, но ещё не спаренные ПК: [{id, name, addr, port, via}], свежие первыми по имени."""
+        """Найденные в сети, но ещё не спаренные ПК: [{id, name, addr, port, via, plain}], plain = публичный адрес (кадры подписаны, но не шифруются); свежие первыми по имени."""
         if not self.node:
             return []
-        out = [f for f in self.node.found_list() if not f["paired"]]
+        out = [dict(f, plain=nl.is_public_addr(f["addr"])) for f in self.node.found_list() if not f["paired"]]
         out.sort(key=lambda f: f["name"].lower())
         return out
 
