@@ -4,10 +4,12 @@ Short history of releases. Full notes for each version are on the [Releases page
 
 Versions released on or after 2026-10-22 are under the KopiTehnik Print Licence; section 12 of [LICENSE](LICENSE) covers earlier ones.
 
-## Unreleased
+## [1.10.0](https://github.com/ildargiv/KopiTehnik-Print/releases/tag/v1.10.0) - 2026-11-13
 
 - Agent, administrator mode (the print counter password): on request the agent rearranges and hides tabs of the right panel, the bottom row of buttons and its own quick buttons; “Put buttons back” in Settings. The agent changes settings only, never the programme code.
 - Agent: tools to add and improve print templates (active when the Templates section is present).
+- Network: the connection slot is reserved before the thread starts, the list of found PCs is capped at 64, a 60 s pause after a refusal or wrong codes, queued sheets are not printed for a forbidden or forgotten PC; a “⚠ not encrypted” label for public addresses and a firewall hint (TCP 47615 / UDP 47616, private networks only).
+- Silent `except … pass` in printing, ICC profiles, settings and DEVMODE now write a warning to the log.
 - Agent: colour by channel now works (levels, curves, selective colour per channel), saving files and sheets to a folder, long conversations no longer overflow the model, service messages in the programme language.
 
 ## [1.9.0](https://github.com/ildargiv/KopiTehnik-Print/releases/tag/v1.9.0) - 2026-11-10
