@@ -10819,8 +10819,8 @@ def selftest(app):
             win.show_page(page)
             app.processEvents()
             for bt in win.findChildren(FitButton):
-                if getattr(bt, "_fit_on", False) and bt.isVisibleTo(win) and bt.width() > 20 and bt.text()                         and bt.sizeHint().width() > bt.width() + 2:
-                    raise RuntimeError("подпись кнопки %r не помещается: нужно %d px, есть %d (вкладка %d)" % (bt.text(), bt.sizeHint().width(), bt.width(), page))
+                if getattr(bt, "_fit_on", False) and bt.isVisibleTo(win) and bt.width() > 20 and bt.text()                         and bt.fontMetrics().horizontalAdvance(bt.text()) + 12 > bt.width() + 2:
+                    raise RuntimeError("подпись кнопки %r не помещается: нужно %d px, есть %d (вкладка %d)" % (bt.text(), bt.fontMetrics().horizontalAdvance(bt.text()) + 12, bt.width(), page))
         win.show_page(0)
     step("подписи кнопок не обрезаются", labels_not_clipped)
     step("следующее фото", lambda: win.go(1))
