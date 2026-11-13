@@ -656,7 +656,9 @@ class FitButton(QPushButton):
         if not (self._fit_cur and self._fit_cur[1]):                  # свой стиль не наложен: шрифт мог смениться (тема, язык) — меряем заново
             self._fit_base = 0
         if not self._fit_base:
-            self._fit_base = QFontInfo(self.font()).pixelSize()
+            self._fit_base = self.font().pixelSize()                  # QFontInfo на Windows может вернуть меньший размер, чем реально рисуется
+            if self._fit_base <= 0:
+                self._fit_base = QFontInfo(self.font()).pixelSize()
             if self._fit_base <= 0:                                   # шрифт задан в пунктах
                 self._fit_base = max(self.fit_min + 1, round(self.font().pointSizeF() * 96 / 72))
             self._fit_over = self.sizeHint().width() - self.fontMetrics().horizontalAdvance(txt)
