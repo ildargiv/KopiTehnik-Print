@@ -1,5 +1,14 @@
 **English** | [Русский](RELEASE_NOTES.ru.md) | [Español](RELEASE_NOTES.es.md) | [简体中文](RELEASE_NOTES.zh-CN.md) | [繁體中文](RELEASE_NOTES.zh-Hant.md) | [Deutsch](RELEASE_NOTES.de.md) | [Français](RELEASE_NOTES.fr.md) | [Português](RELEASE_NOTES.pt.md) | [日本語](RELEASE_NOTES.ja.md) | [한국어](RELEASE_NOTES.ko.md) | [Türkçe](RELEASE_NOTES.tr.md) | [Bahasa Indonesia](RELEASE_NOTES.id.md) | [العربية](RELEASE_NOTES.ar.md) | [हिन्दी](RELEASE_NOTES.hi.md) | [Italiano](RELEASE_NOTES.it.md) | [Polski](RELEASE_NOTES.pl.md) | [Українська](RELEASE_NOTES.uk.md) | [Tiếng Việt](RELEASE_NOTES.vi.md) | [ไทย](RELEASE_NOTES.th.md) | [Татарча](RELEASE_NOTES.tt.md)
 
+# Release notes — v1.10.0
+
+- **Agent administrator mode**: after the administrator login (the print counter password) the agent can rearrange and hide the right-panel tabs, the bottom row of buttons and its own quick buttons; “Put buttons back” in Settings restores them. The agent changes settings only, never the programme code. Template tools appear when the Templates section is present.
+- **Agent fixes after a full check**: colour by channel (levels, curves, selective colour) now works; new tools to save files and sheets to a folder; long conversations no longer overflow the model; service messages are shown in the programme language.
+- **Network hardening**: the connection slot is reserved before the thread starts, the list of found PCs is capped at 64, a 60 s pause follows a refusal or wrong codes, queued sheets are not printed for a forbidden or forgotten PC. Public addresses get a “⚠ not encrypted” label and a firewall hint (TCP 47615 and UDP 47616 for private networks only).
+- Errors in printing, ICC profiles, settings and DEVMODE that used to be swallowed silently are now written to the log.
+
+Release files: `KopiTehnikPrint-Setup-1.10.0.exe`, `KopiTehnikPrint-Portable-1.10.0.exe`, `SHA256SUMS.txt`.
+
 # Release notes — v1.9.0
 
 - **Built-in AI agent “Print Assistant” (beta, off by default)**: an agent tab in the right panel and a two-line input under the tabs (works from any tab), quick buttons Improve, Crop, Prepare, Print. A typed folder plus a button is one command; several buttons run in order. Nothing is sent until you enable the agent and set a model address.

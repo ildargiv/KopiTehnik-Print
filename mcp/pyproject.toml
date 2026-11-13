@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "kopitehnik-print-mcp"
-version = "1.9.0"
+version = "1.10.0"
 description = "MCP stdio bridge to KopiTehnik Print: let an AI agent prepare and print photos on a real printer (Windows)"
 readme = "README.md"
 requires-python = ">=3.9"
