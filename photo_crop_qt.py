@@ -637,6 +637,16 @@ class FitButton(QPushButton):
         if getattr(self, "_fit_on", False):
             self._fit_now()
 
+    def changeEvent(self, e):
+        super().changeEvent(e)
+        if e.type() in (QEvent.StyleChange, QEvent.FontChange) and getattr(self, "_fit_on", False):
+            QTimer.singleShot(0, self._fit_now)                       # тема или шрифт сменились без изменения размера: resizeEvent не придёт
+
+    def setText(self, t):
+        super().setText(t)
+        if getattr(self, "_fit_on", False):
+            QTimer.singleShot(0, self._fit_now)
+
     def _fit_now(self):
         """Сначала сужаются поля кнопки (16 → 5 px), и только потом уменьшается шрифт."""
         txt, w = self.text(), self.width()
