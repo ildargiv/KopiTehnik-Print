@@ -663,15 +663,7 @@ class FitButton(QPushButton):
             want = (px, True)
         if want != self._fit_cur:
             self._fit_cur = want
-            self._fit_apply(want[0] if want[1] else 0)
-            while want[1] and want[0] > self.fit_min and self.sizeHint().width() > w + 1:     # расчёт по полям мог не совпасть с настоящим стилем (Windows): меряем сами
-                want = (want[0] - 1, True)
-                self._fit_cur = want
-                self._fit_apply(want[0])
-
-    def _fit_apply(self, px):
-        self.setStyleSheet("/*fit*/ QPushButton { font-size: %dpx; padding-left: 5px; padding-right: 5px; }" % px if px else "")
-        self.ensurePolished()
+            self.setStyleSheet("/*fit*/ QPushButton { font-size: %dpx; padding-left: 5px; padding-right: 5px; }" % want[0] if want[1] else "")
 
 
 class MotionButton(FitButton):
