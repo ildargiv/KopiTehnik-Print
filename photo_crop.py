@@ -3128,7 +3128,7 @@ class AgentSession:
             st = CropState()
             for k, v in (d.get("states", {}).get(str(f)) or {}).items():
                 if k in CropState.__slots__:
-                    setattr(st, k, dict(v) if k == "adj" else v)
+                    setattr(st, k, dict(v) if k == "adj" and isinstance(v, dict) else v)     # adj не словарь: _sanitize_state сбросит
             _sanitize_state(st)
             self.states[f] = st
         self.idx = min(max(int(d.get("idx", 0)), 0), len(self.files) - 1) if self.files else -1
