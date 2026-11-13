@@ -626,7 +626,7 @@ class ModeSwitch(QWidget):
 class FitButton(QPushButton):
     """Кнопка, у которой подпись при нехватке ширины становится мельче (не ниже fit_min px), а не обрезается:
     узкая панель (316 px) и длинные слова в немецком, русском, арабском. Включается fit_text()."""
-    fit_min = 10
+    fit_min = 8
 
     def fit_text(self, on=True):
         self._fit_on, self._fit_base, self._fit_over, self._fit_cur = on, 0, 0, None
