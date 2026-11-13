@@ -8,7 +8,7 @@
     "source": "github",
     "id": "1424858955"
   },
-  "version": "1.9.0",
+  "version": "1.10.0",
   "websiteUrl": "https://ildargiv.github.io/KopiTehnik-Print/",
   "icons": [
     {
@@ -21,7 +21,7 @@
     {
       "registryType": "pypi",
       "identifier": "kopitehnik-print-mcp",
-      "version": "1.9.0",
+      "version": "1.10.0",
       "runtimeHint": "uvx",
       "transport": {
         "type": "stdio"
